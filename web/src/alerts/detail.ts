@@ -1,0 +1,256 @@
+import { ALERTS_URL, AlertsApiError } from './api';
+import { normalizeSeverity, severityLabelFor } from './severity';
+import type { Severity } from './severity';
+import type { AlertState } from './types';
+
+/**
+ * Client for the alert detail API, `GET /api/v1/alerts/{id}`. Same-origin and
+ * cookie-based like the alerts list client, with the response validated and
+ * mapped here so components never touch raw API payloads. The one-call detail
+ * endpoint is preferred over `GET /api/v1/alerts/{id}/events`: it returns the
+ * alert snapshot plus the lifecycle history in a single round trip.
+ */
+
+/** Fully validated alert detail, mapped for the drawer panels. */
+export interface AlertDetail {
+  id: string;
+  fingerprint: string;
+  source: string;
+  status: AlertState;
+  severity: Severity;
+  /** Display text for the severity tag; preserves unknown source values. */
+  severityLabel: string;
+  /** Alert name from labels.alertname, with an explicit fallback. */
+  name: string;
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+  startsAt: string;
+  endsAt: string | null;
+  generatorURL: string;
+  externalURL: string;
+  firstSeen: string;
+  lastSeen: string;
+  repeatCount: number;
+  occurrence: number;
+  /** Source payload as delivered by Alertmanager; rendered as plain JSON. */
+  rawData: unknown;
+}
+
+/** One immutable lifecycle history entry. */
+export interface AlertHistoryEvent {
+  id: number;
+  occurrence: number;
+  /** Raw event type from the API (created/updated/resolved/reopened/imported). */
+  type: string;
+  /** Human-readable label; preserves unknown types instead of dropping them. */
+  typeLabel: string;
+  sourceStatus: string;
+  actor: string;
+  message: string;
+  occurredAt: string;
+}
+
+/** The validated detail endpoint payload. */
+export interface AlertDetailResult {
+  alert: AlertDetail;
+  history: AlertHistoryEvent[];
+}
+
+/** Human labels for the lifecycle event types the API emits today. */
+const HISTORY_TYPE_LABELS: Record<string, string> = {
+  created: 'Created',
+  updated: 'Updated',
+  resolved: 'Resolved',
+  reopened: 'Reopened',
+  imported: 'Imported',
+};
+
+/**
+ * Display label for a history event type. Known types get the curated label;
+ * unknown types keep their source text so schema drift never hides events.
+ */
+export function historyTypeLabel(type: string): string {
+  const known = HISTORY_TYPE_LABELS[type.trim().toLowerCase()];
+  if (known !== undefined) {
+    return known;
+  }
+  const trimmed = type.trim();
+  return trimmed === '' ? 'Event' : trimmed;
+}
+
+export function buildAlertDetailUrl(id: string): string {
+  return `${ALERTS_URL}/${encodeURIComponent(id)}`;
+}
+
+type FetchLike = (url: string) => Promise<Response>;
+
+/**
+ * Fetches and validates one alert detail. Follows the same error contract as
+ * the list client: network failures, HTTP errors, and malformed payloads all
+ * surface as `AlertsApiError`.
+ */
+export async function fetchAlertDetail(
+  id: string,
+  fetchImpl: FetchLike = (url) => fetch(url),
+): Promise<AlertDetailResult> {
+  let response: Response;
+  try {
+    response = await fetchImpl(buildAlertDetailUrl(id));
+  } catch (cause) {
+    throw new AlertsApiError('Unable to reach the Promview API', { cause });
+  }
+
+  if (!response.ok) {
+    throw new AlertsApiError(`Alert detail request failed (HTTP ${response.status})`, {
+      status: response.status,
+    });
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (cause) {
+    throw new AlertsApiError('Alert detail response was not valid JSON', { cause });
+  }
+
+  return parseAlertDetailResponse(body);
+}
+
+/** True when the detail request failed because the alert does not exist. */
+export function isAlertNotFound(error: unknown): boolean {
+  return error instanceof AlertsApiError && error.status === 404;
+}
+
+/**
+ * Returns the URL only when it is safe to open in a new tab (http/https).
+ * Anything else — empty values, relative paths, javascript: URLs — yields
+ * null so the UI renders plain text instead of a link.
+ */
+export function safeExternalUrl(value: string): string | null {
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return null;
+  }
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseAlertDetailResponse(body: unknown): AlertDetailResult {
+  const record = asRecord(body, 'Alert detail response');
+  const historyValue = record.history;
+  return {
+    alert: parseAlertDetail(record.alert),
+    history: historyValue === null || historyValue === undefined ? [] : parseHistory(historyValue),
+  };
+}
+
+function parseAlertDetail(value: unknown): AlertDetail {
+  const raw = asRecord(value, 'alert');
+  const id = requiredString(raw.id, 'alert.id');
+  const status = raw.status;
+  if (status !== 'firing' && status !== 'resolved') {
+    throw new AlertsApiError(`Alert ${id} has an unsupported status: ${String(status)}`);
+  }
+  const severityRaw = requiredString(raw.severity, 'alert.severity');
+  const severity = normalizeSeverity(severityRaw);
+  const labels = stringRecord(raw.labels, 'alert.labels');
+  const annotations = stringRecord(raw.annotations, 'alert.annotations');
+  return {
+    id,
+    fingerprint: optionalString(raw.fingerprint),
+    source: requiredString(raw.source, 'alert.source'),
+    status,
+    severity,
+    severityLabel: severityLabelFor(severityRaw, severity),
+    name: alertName(labels),
+    labels,
+    annotations,
+    startsAt: requiredString(raw.startsAt, 'alert.startsAt'),
+    endsAt:
+      raw.endsAt === null || raw.endsAt === undefined
+        ? null
+        : requiredString(raw.endsAt, 'alert.endsAt'),
+    generatorURL: optionalString(raw.generatorURL),
+    externalURL: optionalString(raw.externalURL),
+    firstSeen: requiredString(raw.firstSeen, 'alert.firstSeen'),
+    lastSeen: requiredString(raw.lastSeen, 'alert.lastSeen'),
+    repeatCount: requiredNumber(raw.repeatCount, 'alert.repeatCount'),
+    occurrence: requiredNumber(raw.occurrence, 'alert.occurrence'),
+    rawData: raw.rawData === null || raw.rawData === undefined ? {} : raw.rawData,
+  };
+}
+
+function parseHistory(value: unknown): AlertHistoryEvent[] {
+  if (!Array.isArray(value)) {
+    throw new AlertsApiError('Alert detail response was malformed: history must be a list');
+  }
+  return value.map((item, index) => parseHistoryEvent(item, index));
+}
+
+function parseHistoryEvent(value: unknown, index: number): AlertHistoryEvent {
+  const raw = asRecord(value, `history[${index}]`);
+  const type = requiredString(raw.type, `history[${index}].type`);
+  return {
+    id: requiredNumber(raw.id, `history[${index}].id`),
+    occurrence: requiredNumber(raw.occurrence, `history[${index}].occurrence`),
+    type,
+    typeLabel: historyTypeLabel(type),
+    sourceStatus: optionalString(raw.sourceStatus),
+    actor: optionalString(raw.actor),
+    message: optionalString(raw.message),
+    occurredAt: requiredString(raw.occurredAt, `history[${index}].occurredAt`),
+  };
+}
+
+function alertName(labels: Record<string, string>): string {
+  const name = labels.alertname?.trim();
+  return name !== undefined && name !== '' ? name : '(unnamed alert)';
+}
+
+function asRecord(value: unknown, context: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new AlertsApiError(`${context} was malformed`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value === '') {
+    throw new AlertsApiError(`Alert detail response was malformed: ${field} must be a string`);
+  }
+  return value;
+}
+
+/** Optional text: unset or empty values collapse to the empty string. */
+function optionalString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function requiredNumber(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new AlertsApiError(`Alert detail response was malformed: ${field} must be a number`);
+  }
+  return value;
+}
+
+/** The Go server encodes unset maps as null; treat both as an empty record. */
+function stringRecord(value: unknown, field: string): Record<string, string> {
+  if (value === null || value === undefined) {
+    return {};
+  }
+  const record = asRecord(value, field);
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry !== 'string') {
+      throw new AlertsApiError(
+        `Alert detail response was malformed: ${field}.${key} must be a string`,
+      );
+    }
+    result[key] = entry;
+  }
+  return result;
+}
