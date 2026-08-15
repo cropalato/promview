@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+: "${PROMVIEW_TEST_DATABASE_URL:?PROMVIEW_TEST_DATABASE_URL must point to a disposable PostgreSQL database}"
+
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000001_initial.up.sql
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000002_stream_events.up.sql
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000003_alert_history.up.sql
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000003_alert_history.down.sql
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000002_stream_events.down.sql
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000001_initial.down.sql
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000001_initial.up.sql
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000002_stream_events.up.sql
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000003_alert_history.up.sql
