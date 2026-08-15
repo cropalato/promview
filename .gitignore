@@ -1,0 +1,6 @@
+/promview
+/build/
+/.env
+/web/node_modules/
+/web/dist/
+/web/coverage/

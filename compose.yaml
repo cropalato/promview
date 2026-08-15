@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: promview
+      POSTGRES_USER: promview
+      POSTGRES_PASSWORD: promview
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promview -d promview"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  migrate:
+    build: .
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &app-environment
+      PROMVIEW_DATABASE_URL: postgres://promview:promview@postgres:5432/promview?sslmode=disable
+      PROMVIEW_INGEST_TOKEN: development-token
+      PROMVIEW_AUTH_MODE: open
+
+  app:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment: *app-environment
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres-data:

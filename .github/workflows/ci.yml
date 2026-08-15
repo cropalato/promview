@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make verify-go
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: make verify-web
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: promview_test
+          POSTGRES_USER: promview
+          POSTGRES_PASSWORD: promview
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U promview -d promview_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      PROMVIEW_TEST_DATABASE_URL: postgres://promview:promview@localhost:5432/promview_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: make migration-check
+      - run: make test-postgres
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make compose-check
+      - run: make docker-build
