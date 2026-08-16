@@ -6,6 +6,19 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Features
+
+- **web:** add opt-in browser notifications for newly created critical alerts while Promview is open.
+
+### Build System
+
+- **helm:** add a hardened Kubernetes chart with migration hooks, external Secret integration, OIDC, Ingress, and health tests.
+- **release:** publish multi-architecture images and the Helm chart to GHCR from version tags.
+
+### Documentation
+
+- Add Kubernetes installation, upgrade, rollback, OIDC, and production-operation guidance.
+
 ## [0.1.0-alpha.1] - 2026-08-15
 
 ### Features

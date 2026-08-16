@@ -272,7 +272,8 @@ func TestStreamAlertsResumesFromCursor(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &fakeStore{
 		events: []alerts.StreamEvent{{
-			ID: 8, Type: "alert.updated", AlertID: 42,
+			ID: 8, Type: "alert.updated", AlertID: 42, Severity: "critical",
+			AlertName: "APIUnavailable", Summary: "API is unavailable", SourceSlug: "primary", Team: "platform",
 			OccurredAt: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC),
 		}},
 		cancel: cancel,
@@ -288,6 +289,7 @@ func TestStreamAlertsResumesFromCursor(t *testing.T) {
 	body := response.Body.String()
 	for _, want := range []string{
 		"id: 8", "event: alert.updated", `"alertId":"42"`, `"type":"alert.updated"`,
+		`"severity":"critical"`, `"alertName":"APIUnavailable"`, `"source":"primary"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("stream body = %q, want %q", body, want)

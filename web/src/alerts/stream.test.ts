@@ -9,6 +9,26 @@ function streamEventPayload(overrides: Record<string, unknown> = {}): Record<str
     type: 'alert.updated',
     alertId: '42',
     occurredAt: '2026-08-14T12:00:00Z',
+    severity: 'critical',
+    alertName: 'HighErrorRate',
+    summary: 'Error rate above 5% for 10m',
+    source: 'am-eu',
+    team: 'core',
+    ...overrides,
+  };
+}
+
+function streamEvent(overrides: Partial<AlertStreamEvent> = {}): AlertStreamEvent {
+  return {
+    id: 8,
+    type: 'alert.updated',
+    alertId: '42',
+    occurredAt: '2026-08-14T12:00:00Z',
+    severity: 'critical',
+    alertName: 'HighErrorRate',
+    summary: 'Error rate above 5% for 10m',
+    source: 'am-eu',
+    team: 'core',
     ...overrides,
   };
 }
@@ -46,12 +66,9 @@ describe('buildAlertStreamUrl', () => {
 
 describe('parseAlertStreamEvent', () => {
   it('parses a well-formed event payload', () => {
-    expect(parseAlertStreamEvent(JSON.stringify(streamEventPayload()), 'alert.updated')).toEqual({
-      id: 8,
-      type: 'alert.updated',
-      alertId: '42',
-      occurredAt: '2026-08-14T12:00:00Z',
-    });
+    expect(parseAlertStreamEvent(JSON.stringify(streamEventPayload()), 'alert.updated')).toEqual(
+      streamEvent(),
+    );
   });
 
   it('rejects malformed payloads and type drift', () => {
@@ -77,6 +94,37 @@ describe('parseAlertStreamEvent', () => {
         'alert.updated',
       ),
     ).toBeNull();
+  });
+
+  it('requires the alert context fields', () => {
+    // Missing entirely.
+    for (const field of ['severity', 'alertName', 'summary', 'source', 'team']) {
+      expect(
+        parseAlertStreamEvent(
+          JSON.stringify(streamEventPayload({ [field]: undefined })),
+          'alert.updated',
+        ),
+      ).toBeNull();
+    }
+    // Wrong type.
+    expect(
+      parseAlertStreamEvent(JSON.stringify(streamEventPayload({ severity: 3 })), 'alert.updated'),
+    ).toBeNull();
+    // severity, alertName, and source must be non-empty.
+    for (const field of ['severity', 'alertName', 'source']) {
+      expect(
+        parseAlertStreamEvent(JSON.stringify(streamEventPayload({ [field]: '' })), 'alert.updated'),
+      ).toBeNull();
+    }
+  });
+
+  it('accepts empty summary and team when the alert omits them', () => {
+    expect(
+      parseAlertStreamEvent(
+        JSON.stringify(streamEventPayload({ summary: '', team: '' })),
+        'alert.updated',
+      ),
+    ).toEqual(streamEvent({ summary: '', team: '' }));
   });
 });
 
@@ -110,9 +158,7 @@ describe('createAlertStreamClient', () => {
 
     FakeEventSource.latest().emit('alert.updated', streamEventPayload(), '8');
 
-    expect(events).toEqual([
-      { id: 8, type: 'alert.updated', alertId: '42', occurredAt: '2026-08-14T12:00:00Z' },
-    ]);
+    expect(events).toEqual([streamEvent()]);
     client.close();
   });
 
@@ -131,9 +177,7 @@ describe('createAlertStreamClient', () => {
     source.emit('alert.created', streamEventPayload({ type: 'alert.created' }), '8');
     source.emit('alert.updated', streamEventPayload({ type: 'alert.created' }));
 
-    expect(events).toEqual([
-      { id: 8, type: 'alert.created', alertId: '42', occurredAt: '2026-08-14T12:00:00Z' },
-    ]);
+    expect(events).toEqual([streamEvent({ type: 'alert.created' })]);
     client.close();
   });
 

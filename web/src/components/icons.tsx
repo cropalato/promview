@@ -103,6 +103,52 @@ export function UserIcon({ className }: IconProps): JSX.Element {
   );
 }
 
+/** Bell for the browser-notification opt-in toggle. */
+export function BellIcon({ className }: IconProps): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" {...a11y(className)}>
+      <path
+        d="M6 10a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 19a2 2 0 0 0 4 0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Slashed bell for the off/blocked notification states. */
+export function BellOffIcon({ className }: IconProps): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" {...a11y(className)}>
+      <path
+        d="M8.2 5.6A6 6 0 0 1 18 10c0 2.6.7 4.1 1.2 4.8M6 10.3c-.1 3.6-1.5 5-2 5.7h11"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 19a2 2 0 0 0 4 0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+      <path d="M4 4l16 16" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Dismiss glyph for the detail drawer/sheet. */
 export function CloseIcon({ className }: IconProps): JSX.Element {
   return (

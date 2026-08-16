@@ -20,7 +20,7 @@
 
 ## Implementation Status
 
-The first two implementation slices provide:
+The current implementation provides:
 
 - authenticated Alertmanager webhook decoding and normalization
 - deterministic fallback fingerprints
@@ -39,8 +39,11 @@ The first two implementation slices provide:
 - health, readiness, and runtime configuration endpoints
 - source-specific hashed ingestion credentials and source provisioning CLI
 - anonymous open-mode principals and hashed opaque cookie or bearer sessions
+- OIDC browser sign-in with configured group-to-role mappings
 - a responsive React console connected to firing alerts
-- migration, persistence, API, frontend, image, and Compose verification in GitHub Actions
+- opt-in browser notifications for newly created critical alerts while the console is open
+- a Helm chart with serialized pre-install and pre-upgrade migrations for external PostgreSQL
+- migration, persistence, API, frontend, image, Compose, and Helm verification in GitHub Actions
 
 LDAP login, operator actions, notes, scoped authorization, and stream retention remain planned work.
 
@@ -64,7 +67,7 @@ The first release will not:
 - accept non-Prometheus alert formats
 - create or manage Alertmanager silences
 - implement a generic plugin system
-- ship Kubernetes resources
+- bundle or manage a production PostgreSQL database inside the application package
 
 ## Architecture
 

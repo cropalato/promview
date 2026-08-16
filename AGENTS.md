@@ -10,6 +10,7 @@
 - Run backend formatting, vet, tests, and build with `make verify-go`; do not use `go test ./...` because it can discover Go files under `web/node_modules`. Focus a test with `go test ./internal/<package> -run TestName`.
 - Run frontend checks with `make verify-web`; focus a test with `npm --prefix web run test -- <test-file>`.
 - Validate Compose with `make compose-check` and build the image with `make docker-build`.
+- Validate and package the Helm chart with `make verify-helm`; keep its matching CI job synchronized.
 - Run `PROMVIEW_TEST_DATABASE_URL=<disposable-url> make migration-check` only against a disposable database; it applies up, down, then up. Then run `PROMVIEW_TEST_DATABASE_URL=<same-url> make test-postgres` for persistence integration coverage.
 
 ## Product Constraints
@@ -37,6 +38,7 @@
 - OIDC uses discovery, Authorization Code with PKCE, one-time database-backed login transactions, and configured group-to-role mappings. Never trust provider role claims directly or persist provider tokens.
 - The React app uses same-origin `/api` calls. Keep browser-only transport assumptions out of shared clients so Tauri can use bearer credentials later.
 - `promview migrate` applies ordered `migrations/*.up.sql` files and records `schema_migrations`; Compose runs it before the app. Keep down migrations and `scripts/check-migrations.sh` synchronized with every schema change.
+- The Helm chart requires an external database Secret and runs the exact application image as a serialized pre-install/pre-upgrade migration hook. Never run down migrations automatically during rollback.
 
 ## Model Routing (Required)
 

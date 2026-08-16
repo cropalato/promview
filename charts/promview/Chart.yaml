@@ -1,0 +1,16 @@
+apiVersion: v2
+name: promview
+description: Operational console for Prometheus Alertmanager alerts
+type: application
+version: 0.1.0-alpha.2
+appVersion: "0.1.0-alpha.2"
+home: https://github.com/cropalato/promview
+sources:
+  - https://github.com/cropalato/promview
+keywords:
+  - alertmanager
+  - prometheus
+  - monitoring
+maintainers:
+  - name: Cropalato
+    url: https://github.com/cropalato

@@ -1,0 +1,129 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/cropalato/promview
+  pullPolicy: IfNotPresent
+  tag: ""
+  digest: ""
+  pullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: false
+  annotations: {}
+  name: ""
+
+database:
+  existingSecret: promview-database
+  urlKey: url
+
+auth:
+  mode: open
+
+oidc:
+  issuerURL: ""
+  clientID: ""
+  existingSecret: ""
+  clientSecretKey: client-secret
+  redirectURL: ""
+  scopes:
+    - openid
+    - profile
+    - email
+    - groups
+  usernameClaim: preferred_username
+  emailClaim: email
+  displayNameClaim: name
+  groupsClaim: groups
+  viewerGroups: []
+  operatorGroups: []
+  adminGroups: []
+  cookieSecure: true
+
+bootstrapSource:
+  enabled: false
+  slug: ""
+  name: ""
+  existingSecret: ""
+  tokenKey: token
+
+migration:
+  enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  annotations: {}
+  resources: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: promview.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+
+resources: {}
+
+probes:
+  startup:
+    enabled: true
+    periodSeconds: 2
+    timeoutSeconds: 2
+    failureThreshold: 60
+  liveness:
+    enabled: true
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+terminationGracePeriodSeconds: 20
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+helmTest:
+  enabled: true
+
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []

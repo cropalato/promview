@@ -368,6 +368,46 @@ code {
   cursor: default;
 }
 
+/* Compact browser-notification opt-in toggle in the top bar */
+.notif-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  flex: none;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.notif-toggle:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
+.notif-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.notif-enabled {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+  background: var(--accent-soft);
+}
+
+.notif-icon {
+  width: 14px;
+  height: 14px;
+}
+
 /* Main console column */
 .console {
   flex: 1;

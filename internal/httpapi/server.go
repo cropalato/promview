@@ -191,6 +191,11 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 				"type":       event.Type,
 				"alertId":    strconv.FormatInt(event.AlertID, 10),
 				"occurredAt": event.OccurredAt,
+				"severity":   event.Severity,
+				"alertName":  event.AlertName,
+				"summary":    event.Summary,
+				"source":     event.SourceSlug,
+				"team":       event.Team,
 			}
 			data, err := json.Marshal(payload)
 			if err != nil {

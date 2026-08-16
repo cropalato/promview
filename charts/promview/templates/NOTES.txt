@@ -1,0 +1,15 @@
+Promview has been installed.
+
+{{- if .Values.ingress.enabled }}
+Open {{ if .Values.ingress.tls }}https{{ else }}http{{ end }}://{{ (index .Values.ingress.hosts 0).host }}.
+{{- else }}
+Forward the service locally:
+
+  kubectl port-forward service/{{ include "promview.fullname" . }} 8080:{{ .Values.service.port }}
+
+Then open http://localhost:8080.
+{{- end }}
+
+Verify the release:
+
+  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}

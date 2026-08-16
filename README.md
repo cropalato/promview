@@ -1,6 +1,6 @@
 # Promview
 
-Promview is a focused operational console for alerts delivered by Prometheus Alertmanager. The current implementation includes authenticated webhook ingestion, PostgreSQL current-state storage, a cursor-paginated query API, resumable live updates, health endpoints, and a React console that renders firing alerts.
+Promview is a focused operational console for alerts delivered by Prometheus Alertmanager. The current implementation includes authenticated webhook ingestion, PostgreSQL current-state storage, a cursor-paginated query API, resumable live updates, browser notifications for critical alerts, health endpoints, and a React console that renders firing alerts.
 
 The Go module is `github.com/cropalato/promview`. See [`docs/project-plan.md`](docs/project-plan.md) for the planned lifecycle, authentication, authorization, API, and desktop client work.
 
@@ -9,6 +9,7 @@ The Go module is `github.com/cropalato/promview`. See [`docs/project-plan.md`](d
 - Go 1.25 or newer
 - Node.js 22 or newer
 - Docker with Compose
+- Helm 3.14 or newer when packaging or installing the Kubernetes chart
 - PostgreSQL client tools only when running migration verification directly
 
 ## Local Verification
@@ -28,6 +29,7 @@ go test ./internal/alertmanager -run TestDecodeAndNormalize
 npm --prefix web run test -- src/config/runtimeConfig.test.ts
 make compose-check
 make docker-build
+make verify-helm
 ```
 
 Migration verification requires a disposable PostgreSQL database because it applies up, down, and up migrations:
@@ -41,6 +43,18 @@ make test-postgres
 Every command above has a matching GitHub Actions job in `.github/workflows/ci.yml`.
 
 Do not use `go test ./...` after installing frontend dependencies: Go can discover `.go` files inside `web/node_modules`. Use the package boundaries in `make verify-go` instead.
+
+## Run On Kubernetes
+
+Promview ships a Helm chart for an external PostgreSQL database:
+
+```sh
+helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
+  --namespace promview \
+  --version 0.1.0-alpha.2
+```
+
+Create the required database Secret before installation. See [`docs/kubernetes.md`](docs/kubernetes.md) and [`charts/promview/README.md`](charts/promview/README.md) for the complete procedure, OIDC values, migration lifecycle, and production checklist.
 
 ## Run With Docker Compose
 
@@ -135,6 +149,8 @@ curl --no-buffer 'http://localhost:8080/api/v1/stream?cursor=0'
 ```
 
 Each alerts snapshot includes `streamCursor`. Start the stream from that value to avoid missing changes between the snapshot and live updates. Reconnects may instead send `Last-Event-ID`.
+
+The top bar can enable browser notifications for newly created critical alerts. Permission is requested only after the user selects the notification control. Page-open notifications require HTTPS or localhost and an open Promview tab; closed-browser delivery would require a future Web Push service worker.
 
 To reset the development database and rerun initialization:
 
