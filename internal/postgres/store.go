@@ -206,7 +206,7 @@ func (store *Store) Ingest(ctx context.Context, alerts []alertmanager.IncomingAl
 				if err != nil {
 					return fmt.Errorf("insert alert %s/%s: %w", alert.SourceSlug, alert.Fingerprint, err)
 				}
-				if err := insertStreamEvent(ctx, tx, "alert.created", id, alert.ReceivedAt); err != nil {
+				if err := insertStreamEvent(ctx, tx, "alert.created", id, alert); err != nil {
 					return err
 				}
 				if err := insertHistoryEvent(ctx, tx, id, 1, "alert.created", alert.Status, alert.ReceivedAt); err != nil {
@@ -255,7 +255,7 @@ func (store *Store) Ingest(ctx context.Context, alerts []alertmanager.IncomingAl
 					if historyType == "alert.resolved" {
 						streamType = "alert.resolved"
 					}
-					if err := insertStreamEvent(ctx, tx, streamType, id, alert.ReceivedAt); err != nil {
+					if err := insertStreamEvent(ctx, tx, streamType, id, alert); err != nil {
 						return err
 					}
 					if err := insertHistoryEvent(ctx, tx, id, occurrence, historyType, alert.Status, alert.ReceivedAt); err != nil {
@@ -430,7 +430,7 @@ func (store *Store) GetAlertDetail(ctx context.Context, id int64) (alerts.Detail
 
 func (store *Store) StreamEvents(ctx context.Context, afterID int64, limit int) ([]alerts.StreamEvent, error) {
 	rows, err := store.pool.Query(ctx, `
-		SELECT id, event_type, alert_id, occurred_at
+		SELECT id, event_type, alert_id, occurred_at, severity, alert_name, summary, source_slug, team
 		FROM stream_events
 		WHERE id > $1
 		ORDER BY id
@@ -444,7 +444,10 @@ func (store *Store) StreamEvents(ctx context.Context, afterID int64, limit int) 
 	events := make([]alerts.StreamEvent, 0, limit)
 	for rows.Next() {
 		var event alerts.StreamEvent
-		if err := rows.Scan(&event.ID, &event.Type, &event.AlertID, &event.OccurredAt); err != nil {
+		if err := rows.Scan(
+			&event.ID, &event.Type, &event.AlertID, &event.OccurredAt,
+			&event.Severity, &event.AlertName, &event.Summary, &event.SourceSlug, &event.Team,
+		); err != nil {
 			return nil, fmt.Errorf("scan stream event: %w", err)
 		}
 		events = append(events, event)
@@ -455,11 +458,28 @@ func (store *Store) StreamEvents(ctx context.Context, afterID int64, limit int) 
 	return events, nil
 }
 
-func insertStreamEvent(ctx context.Context, tx pgx.Tx, eventType string, alertID int64, occurredAt time.Time) error {
+func insertStreamEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	eventType string,
+	alertID int64,
+	alert alertmanager.IncomingAlert,
+) error {
+	severity := alert.Labels["severity"]
+	if severity == "" {
+		severity = "warning"
+	}
+	alertName := alert.Labels["alertname"]
+	if alertName == "" {
+		alertName = alert.Fingerprint
+	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO stream_events (event_type, alert_id, occurred_at)
-		VALUES ($1, $2, $3)
-	`, eventType, alertID, occurredAt); err != nil {
+		INSERT INTO stream_events (
+			event_type, alert_id, occurred_at, severity, alert_name, summary, source_slug, team
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, eventType, alertID, alert.ReceivedAt, severity, alertName,
+		alert.Annotations["summary"], alert.SourceSlug, alert.Labels["team"]); err != nil {
 		return fmt.Errorf("insert stream event for alert %d: %w", alertID, err)
 	}
 	return nil

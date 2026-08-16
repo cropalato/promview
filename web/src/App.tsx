@@ -13,6 +13,7 @@ import { TopBar } from './components/TopBar';
 import type { ConnectionState } from './components/TopBar';
 import { PulseMark } from './components/icons';
 import { useAlertDetail } from './hooks/useAlertDetail';
+import { useAlertNotifications } from './hooks/useAlertNotifications';
 import { useAlertRoute } from './hooks/useAlertRoute';
 import { useAlerts } from './hooks/useAlerts';
 import { useAlertStream } from './hooks/useAlertStream';
@@ -81,14 +82,23 @@ export default function App({ navigate }: AppProps = {}) {
     retry: retryDetail,
     refreshIfSelected: refreshDetailIfSelected,
   } = useAlertDetail(effectiveSelectedAlertId, { onUnauthorized: expireSession });
+  // Browser notifications for new critical alerts while the tab is hidden;
+  // a click focuses the window and deep-links to the alert.
+  const {
+    optInState: notificationOptInState,
+    toggleOptIn: toggleNotificationOptIn,
+    handleEvent: handleNotificationEvent,
+  } = useAlertNotifications({ navigateToAlert: openAlert });
   // A stream event refreshes the list; when it targets the open alert, the
-  // detail drawer quietly refreshes alongside it.
+  // detail drawer quietly refreshes alongside it. The same event also feeds
+  // the notification check (opted in + hidden tab + new critical alert).
   const handleAlertEvent = useCallback(
     (event: AlertStreamEvent) => {
       scheduleLiveRefresh();
       refreshDetailIfSelected(event.alertId);
+      handleNotificationEvent(event);
     },
-    [scheduleLiveRefresh, refreshDetailIfSelected],
+    [scheduleLiveRefresh, refreshDetailIfSelected, handleNotificationEvent],
   );
   const streamStatus = useAlertStream({
     cursor:
@@ -142,6 +152,10 @@ export default function App({ navigate }: AppProps = {}) {
         session={sessionState.status === 'ready' ? sessionState.session : undefined}
         onSignOut={signOut}
         signOutPending={signOutState === 'pending'}
+        notificationOptIn={{
+          state: notificationOptInState,
+          onToggle: toggleNotificationOptIn,
+        }}
       />
       <main id="main" className="console">
         {configState.status === 'loading' ? (

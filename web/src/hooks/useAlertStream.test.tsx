@@ -10,6 +10,26 @@ function streamEventPayload(overrides: Record<string, unknown> = {}): Record<str
     type: 'alert.updated',
     alertId: '42',
     occurredAt: '2026-08-14T12:00:00Z',
+    severity: 'critical',
+    alertName: 'HighErrorRate',
+    summary: 'Error rate above 5% for 10m',
+    source: 'am-eu',
+    team: 'core',
+    ...overrides,
+  };
+}
+
+function streamEvent(overrides: Partial<AlertStreamEvent> = {}): AlertStreamEvent {
+  return {
+    id: 8,
+    type: 'alert.updated',
+    alertId: '42',
+    occurredAt: '2026-08-14T12:00:00Z',
+    severity: 'critical',
+    alertName: 'HighErrorRate',
+    summary: 'Error rate above 5% for 10m',
+    source: 'am-eu',
+    team: 'core',
     ...overrides,
   };
 }
@@ -71,9 +91,7 @@ describe('useAlertStream', () => {
       FakeEventSource.latest().emit('alert.updated', streamEventPayload(), '8');
     });
 
-    expect(events).toEqual([
-      { id: 8, type: 'alert.updated', alertId: '42', occurredAt: '2026-08-14T12:00:00Z' },
-    ]);
+    expect(events).toEqual([streamEvent()]);
   });
 
   it('reports reconnecting after a drop and resumes from the newest snapshot cursor', () => {

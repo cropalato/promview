@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { NOTIFICATION_PREFERENCE_KEY, NOTIFICATION_SEEN_KEY } from './notifications/store';
 import { AutoOpenEventSource, FakeEventSource } from './test/fakeEventSource';
+import { FakeNotification } from './test/fakeNotification';
 
 const OPEN_CONFIG = { authMode: 'open', productName: 'Promview' };
 
@@ -86,6 +88,22 @@ function mockOidcApi(me: Response, page: unknown = alertsPage()): void {
   });
 }
 
+/** Well-formed stream event payload matching the server schema. */
+function streamEventPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 8,
+    type: 'alert.updated',
+    alertId: '1',
+    occurredAt: '2026-08-14T12:00:00Z',
+    severity: 'critical',
+    alertName: 'HighErrorRate',
+    summary: 'Error rate above 5% for 10m',
+    source: 'am-eu',
+    team: 'core',
+    ...overrides,
+  };
+}
+
 function apiHistoryEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 11,
@@ -141,6 +159,9 @@ beforeEach(() => {
   // fake mirrors a healthy browser connect.
   vi.stubGlobal('EventSource', AutoOpenEventSource);
   FakeEventSource.reset();
+  FakeNotification.reset();
+  // Notification preference/ledger persist in localStorage; start clean.
+  window.localStorage.clear();
   // Tests navigate via pushState; always start from the list route.
   window.history.replaceState(null, '', '/');
 });
@@ -392,11 +413,7 @@ describe('App', () => {
     // The session expires server-side; the stream event triggers a quiet
     // refresh that comes back 401.
     act(() => {
-      source.emit(
-        'alert.updated',
-        { id: 8, type: 'alert.updated', alertId: '1', occurredAt: '2026-08-14T12:00:00Z' },
-        '8',
-      );
+      source.emit('alert.updated', streamEventPayload(), '8');
     });
 
     const gate = await screen.findByRole(
@@ -418,7 +435,7 @@ describe('App', () => {
     act(() => {
       source.emit(
         'alert.updated',
-        { id: 9, type: 'alert.updated', alertId: '1', occurredAt: '2026-08-14T12:00:01Z' },
+        streamEventPayload({ id: 9, occurredAt: '2026-08-14T12:00:01Z' }),
         '9',
       );
     });
@@ -713,17 +730,22 @@ describe('App', () => {
     act(() => {
       FakeEventSource.latest().emit(
         'alert.created',
-        { id: 8, type: 'alert.created', alertId: '2', occurredAt: '2026-08-14T12:00:00Z' },
+        streamEventPayload({ type: 'alert.created', alertId: '2' }),
         '8',
       );
       FakeEventSource.latest().emit(
         'alert.updated',
-        { id: 9, type: 'alert.updated', alertId: '2', occurredAt: '2026-08-14T12:00:01Z' },
+        streamEventPayload({ id: 9, alertId: '2', occurredAt: '2026-08-14T12:00:01Z' }),
         '9',
       );
       FakeEventSource.latest().emit(
         'alert.resolved',
-        { id: 9, type: 'alert.resolved', alertId: '3', occurredAt: '2026-08-14T12:00:02Z' },
+        streamEventPayload({
+          id: 9,
+          type: 'alert.resolved',
+          alertId: '3',
+          occurredAt: '2026-08-14T12:00:02Z',
+        }),
         '9',
       );
     });
@@ -880,11 +902,7 @@ describe('App', () => {
 
     // An event for the open alert refreshes the detail (and the list).
     act(() => {
-      FakeEventSource.latest().emit(
-        'alert.updated',
-        { id: 8, type: 'alert.updated', alertId: '1', occurredAt: '2026-08-14T12:00:00Z' },
-        '8',
-      );
+      FakeEventSource.latest().emit('alert.updated', streamEventPayload(), '8');
     });
     await waitFor(() => expect(detailFetches).toBe(2), { timeout: 3000 });
     // Quiet refresh: the detail stayed mounted; no loading panel appeared.
@@ -895,7 +913,7 @@ describe('App', () => {
     act(() => {
       FakeEventSource.latest().emit(
         'alert.updated',
-        { id: 9, type: 'alert.updated', alertId: 'zzz', occurredAt: '2026-08-14T12:00:01Z' },
+        streamEventPayload({ id: 9, alertId: 'zzz', occurredAt: '2026-08-14T12:00:01Z' }),
         '9',
       );
     });
@@ -903,5 +921,212 @@ describe('App', () => {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     });
     expect(detailFetches).toBe(2);
+  });
+});
+
+describe('App browser notifications', () => {
+  it('shows an inert opt-in control when the browser has no Notification API', async () => {
+    mockApi();
+    render(<App />);
+
+    await screen.findByText('Connected');
+    const toggle = screen.getByRole('button', { name: /does not support notifications/i });
+    expect(toggle).toBeDisabled();
+  });
+
+  it('opts in on click, persists the preference, and never prompts beforehand', async () => {
+    vi.stubGlobal('Notification', FakeNotification);
+    mockApi();
+    render(<App />);
+
+    await screen.findByText('Connected');
+    const toggle = await screen.findByRole('button', {
+      name: /enable critical alert notifications/i,
+    });
+    // Permission was already granted, so enabling needs no prompt.
+    expect(FakeNotification.requestCount).toBe(0);
+
+    fireEvent.click(toggle);
+
+    expect(
+      await screen.findByRole('button', { name: /mute critical alert notifications/i }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    expect(FakeNotification.requestCount).toBe(0);
+    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: /mute critical alert notifications/i }));
+    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBe('false');
+  });
+
+  it('prompts for permission only from the opt-in click', async () => {
+    FakeNotification.permission = 'default';
+    FakeNotification.nextRequestResult = 'granted';
+    vi.stubGlobal('Notification', FakeNotification);
+    mockApi();
+    render(<App />);
+
+    await screen.findByText('Connected');
+    // Mounting the console must never trigger the browser prompt.
+    expect(FakeNotification.requestCount).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: /enable critical alert notifications/i }));
+
+    expect(
+      await screen.findByRole('button', { name: /mute critical alert notifications/i }),
+    ).toBeInTheDocument();
+    expect(FakeNotification.requestCount).toBe(1);
+    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBe('true');
+  });
+
+  it('reflects a denied browser permission without prompting', async () => {
+    FakeNotification.permission = 'denied';
+    vi.stubGlobal('Notification', FakeNotification);
+    mockApi();
+    render(<App />);
+
+    await screen.findByText('Connected');
+    const toggle = await screen.findByRole('button', { name: /blocked in the browser settings/i });
+    expect(toggle).toBeDisabled();
+    fireEvent.click(toggle);
+    expect(FakeNotification.requestCount).toBe(0);
+    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBeNull();
+  });
+
+  it('notifies a new critical alert while hidden; the click focuses and deep-links', async () => {
+    window.localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, 'true');
+    vi.stubGlobal('Notification', FakeNotification);
+    const focus = vi.fn();
+    vi.stubGlobal('focus', focus);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    mockApiWithDetail(alertsPage({ alerts: [apiAlert()], total: 1, streamCursor: 7 }));
+    render(<App />);
+
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    await screen.findByText('Connected');
+
+    act(() => {
+      FakeEventSource.latest().emit(
+        'alert.created',
+        streamEventPayload({ type: 'alert.created', alertId: '2' }),
+        '8',
+      );
+    });
+
+    expect(FakeNotification.instances).toHaveLength(1);
+    const notification = FakeNotification.latest();
+    expect(notification.title).toBe('Critical: HighErrorRate');
+    expect(notification.body).toBe('Error rate above 5% for 10m\nam-eu · core');
+
+    act(() => {
+      notification.click();
+    });
+
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(window.location.pathname).toBe('/alerts/2');
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(notification.closed).toBe(true);
+  });
+
+  it('suppresses while the tab is visible and dedupes the replay once hidden', async () => {
+    window.localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, 'true');
+    vi.stubGlobal('Notification', FakeNotification);
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    mockApi(alertsPage({ streamCursor: 7 }));
+    render(<App />);
+
+    await screen.findByText('Connected');
+
+    // Visible tab: the new critical alert is shown in the list instead, but
+    // its event id is still recorded so a replay can never notify late.
+    act(() => {
+      FakeEventSource.latest().emit(
+        'alert.created',
+        streamEventPayload({ type: 'alert.created', alertId: '2' }),
+        '8',
+      );
+    });
+    expect(FakeNotification.instances).toHaveLength(0);
+    expect(window.localStorage.getItem(NOTIFICATION_SEEN_KEY)).toContain('8');
+
+    // The tab is hidden later; a replayed id 8 stays silent, a new id fires.
+    hidden.mockReturnValue(true);
+    act(() => {
+      FakeEventSource.latest().emit(
+        'alert.created',
+        streamEventPayload({ type: 'alert.created', alertId: '2' }),
+        '8',
+      );
+      FakeEventSource.latest().emit(
+        'alert.created',
+        streamEventPayload({ id: 9, type: 'alert.created', alertId: '2' }),
+        '9',
+      );
+    });
+    expect(FakeNotification.instances).toHaveLength(1);
+  });
+
+  it('stays silent for non-critical or non-created events even when hidden', async () => {
+    window.localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, 'true');
+    vi.stubGlobal('Notification', FakeNotification);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    mockApi(alertsPage({ streamCursor: 7 }));
+    render(<App />);
+
+    await screen.findByText('Connected');
+
+    act(() => {
+      FakeEventSource.latest().emit(
+        'alert.created',
+        streamEventPayload({ type: 'alert.created', alertId: '2', severity: 'warning' }),
+        '8',
+      );
+      FakeEventSource.latest().emit(
+        'alert.updated',
+        streamEventPayload({ id: 9, alertId: '2' }),
+        '9',
+      );
+    });
+
+    expect(FakeNotification.instances).toHaveLength(0);
+  });
+
+  it('stays silent while opted out, and old events never notify after opting in', async () => {
+    vi.stubGlobal('Notification', FakeNotification);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    mockApi(alertsPage({ streamCursor: 7 }));
+    render(<App />);
+
+    await screen.findByText('Connected');
+
+    // Opted out: the critical event passes by silently but is recorded.
+    act(() => {
+      FakeEventSource.latest().emit(
+        'alert.created',
+        streamEventPayload({ type: 'alert.created', alertId: '2' }),
+        '8',
+      );
+    });
+    expect(FakeNotification.instances).toHaveLength(0);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: /enable critical alert notifications/i }),
+    );
+    await screen.findByRole('button', { name: /mute critical alert notifications/i });
+
+    // A replay of the pre-opt-in event must not notify; only new events do.
+    act(() => {
+      FakeEventSource.latest().emit(
+        'alert.created',
+        streamEventPayload({ type: 'alert.created', alertId: '2' }),
+        '8',
+      );
+      FakeEventSource.latest().emit(
+        'alert.created',
+        streamEventPayload({ id: 9, type: 'alert.created', alertId: '3' }),
+        '9',
+      );
+    });
+    expect(FakeNotification.instances).toHaveLength(1);
+    expect(FakeNotification.latest().tag).toBe('promview-alert-3');
   });
 });

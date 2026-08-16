@@ -1,0 +1,31 @@
+{{- if .Values.helmTest.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "promview.fullname" . }}-test-connection
+  labels:
+    {{- include "promview.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  {{- with .Values.image.pullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: health
+      image: {{ include "promview.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - /bin/sh
+        - -c
+      args:
+        - wget -qO- http://{{ include "promview.fullname" . }}:{{ .Values.service.port }}/health/ready
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+{{- end }}

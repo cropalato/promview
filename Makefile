@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test test-postgres build verify-go verify-web verify compose-check migration-check docker-build
+.PHONY: fmt fmt-check vet test test-postgres build verify-go verify-web verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
@@ -37,4 +37,18 @@ migration-check:
 docker-build:
 	docker build -t promview:dev .
 
-verify: verify-go verify-web compose-check
+helm-lint:
+	helm lint --strict charts/promview
+	helm lint --strict charts/promview --values charts/promview/ci/oidc-values.yaml
+
+helm-template:
+	helm template promview charts/promview --namespace promview --kube-version 1.30.0 >/dev/null
+	helm template promview charts/promview --namespace promview --kube-version 1.30.0 --values charts/promview/ci/oidc-values.yaml >/dev/null
+
+helm-package:
+	mkdir -p build
+	helm package charts/promview --destination build
+
+verify-helm: helm-lint helm-template helm-package
+
+verify: verify-go verify-web compose-check verify-helm

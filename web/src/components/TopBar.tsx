@@ -1,7 +1,9 @@
 import { highestRole } from '../auth/session';
 import type { SessionInfo } from '../auth/session';
 import type { AuthMode } from '../config/runtimeConfig';
+import type { NotificationOptInState } from '../notifications/notifier';
 import { PulseMark, UserIcon } from './icons';
+import { NotificationOptIn } from './NotificationOptIn';
 import { UtcClock } from './UtcClock';
 
 export type ConnectionState = 'loading' | 'ready' | 'error' | 'reconnecting';
@@ -27,15 +29,20 @@ interface TopBarProps {
   session?: SessionInfo;
   onSignOut?: () => void;
   signOutPending?: boolean;
+  /** Browser-notification opt-in control; omitted hides it entirely. */
+  notificationOptIn?: {
+    state: NotificationOptInState;
+    onToggle: () => void;
+  };
 }
 
 /**
  * Compact identity/connection bar: product mark, live connection status,
- * deployment auth mode, and the effective identity. In open mode the server
- * grants an anonymous viewer identity, shown here explicitly; in OIDC mode a
- * verified session shows its display name and highest role plus a sign-out
- * action. The connection indicator reflects the live alert stream, not just
- * shell config loading.
+ * the browser-notification opt-in, deployment auth mode, and the effective
+ * identity. In open mode the server grants an anonymous viewer identity,
+ * shown here explicitly; in OIDC mode a verified session shows its display
+ * name and highest role plus a sign-out action. The connection indicator
+ * reflects the live alert stream, not just shell config loading.
  */
 export function TopBar({
   productName,
@@ -44,6 +51,7 @@ export function TopBar({
   session,
   onSignOut,
   signOutPending = false,
+  notificationOptIn,
 }: TopBarProps) {
   const identityName =
     authMode === 'open'
@@ -66,6 +74,12 @@ export function TopBar({
           <span className="conn-dot" aria-hidden="true" />
           <span className="conn-label">{CONNECTION_LABEL[connection]}</span>
         </span>
+        {notificationOptIn !== undefined ? (
+          <NotificationOptIn
+            state={notificationOptIn.state}
+            onToggle={notificationOptIn.onToggle}
+          />
+        ) : null}
         {authMode !== undefined ? (
           <span className="badge badge-mode">{MODE_LABEL[authMode]}</span>
         ) : null}

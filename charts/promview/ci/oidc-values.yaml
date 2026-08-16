@@ -1,0 +1,21 @@
+auth:
+  mode: oidc
+
+oidc:
+  issuerURL: https://identity.example.com/oauth2/default
+  clientID: promview
+  existingSecret: promview-oidc
+  redirectURL: https://promview.example.com/api/v1/auth/oidc/callback
+  viewerGroups:
+    - promview-viewers
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  tls:
+    - secretName: promview-tls
+      hosts:
+        - promview.example.com

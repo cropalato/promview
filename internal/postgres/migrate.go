@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,7 +25,17 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) 
 	if err != nil {
 		return err
 	}
-	if _, err := pool.Exec(ctx, `
+	lock, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration lock connection: %w", err)
+	}
+	if _, err := lock.Exec(ctx, "SELECT pg_advisory_lock($1)", int64(0x50726f6d76696577)); err != nil {
+		lock.Release()
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer releaseMigrationLock(lock)
+
+	if _, err := lock.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version bigint PRIMARY KEY,
 			name text NOT NULL,
@@ -33,13 +44,13 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) 
 	`); err != nil {
 		return fmt.Errorf("create migration ledger: %w", err)
 	}
-	if err := baselineLegacySchema(ctx, pool); err != nil {
+	if err := baselineLegacySchema(ctx, lock); err != nil {
 		return err
 	}
 
 	for _, migration := range migrations {
 		var applied bool
-		if err := pool.QueryRow(ctx,
+		if err := lock.QueryRow(ctx,
 			"SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)", migration.version,
 		).Scan(&applied); err != nil {
 			return fmt.Errorf("check migration %d: %w", migration.version, err)
@@ -51,7 +62,7 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) 
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", migration.name, err)
 		}
-		if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if err := pgx.BeginFunc(ctx, lock, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, string(sql)); err != nil {
 				return err
 			}
@@ -65,6 +76,18 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, directory string) 
 		}
 	}
 	return nil
+}
+
+func releaseMigrationLock(connection *pgxpool.Conn) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var unlocked bool
+	err := connection.QueryRow(ctx, "SELECT pg_advisory_unlock($1)", int64(0x50726f6d76696577)).Scan(&unlocked)
+	if err != nil || !unlocked {
+		_ = connection.Hijack().Close(ctx)
+		return
+	}
+	connection.Release()
 }
 
 func loadMigrations(directory string) ([]migration, error) {
@@ -99,9 +122,9 @@ func loadMigrations(directory string) ([]migration, error) {
 
 // Releases before the migration runner initialized fresh volumes through
 // docker-entrypoint-initdb.d. Record those known schemas before applying new work.
-func baselineLegacySchema(ctx context.Context, pool *pgxpool.Pool) error {
+func baselineLegacySchema(ctx context.Context, connection *pgxpool.Conn) error {
 	var applied int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&applied); err != nil {
+	if err := connection.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&applied); err != nil {
 		return fmt.Errorf("count applied migrations: %w", err)
 	}
 	if applied != 0 {
@@ -119,15 +142,35 @@ func baselineLegacySchema(ctx context.Context, pool *pgxpool.Pool) error {
 		{version: 5, name: "000005_oidc_transactions.up.sql", table: "oidc_login_transactions"},
 	} {
 		var exists bool
-		if err := pool.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", known.table).Scan(&exists); err != nil {
+		if err := connection.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", known.table).Scan(&exists); err != nil {
 			return fmt.Errorf("check legacy table %s: %w", known.table, err)
 		}
 		if exists {
-			if _, err := pool.Exec(ctx,
+			if _, err := connection.Exec(ctx,
 				"INSERT INTO schema_migrations (version, name) VALUES ($1, $2)", known.version, known.name,
 			); err != nil {
 				return fmt.Errorf("baseline migration %d: %w", known.version, err)
 			}
+		}
+	}
+	var notificationMetadataExists bool
+	if err := connection.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+				AND table_name = 'stream_events'
+				AND column_name = 'severity'
+		)
+	`).Scan(&notificationMetadataExists); err != nil {
+		return fmt.Errorf("check stream notification metadata: %w", err)
+	}
+	if notificationMetadataExists {
+		if _, err := connection.Exec(ctx,
+			"INSERT INTO schema_migrations (version, name) VALUES ($1, $2)",
+			6, "000006_stream_notification_metadata.up.sql",
+		); err != nil {
+			return fmt.Errorf("baseline migration 6: %w", err)
 		}
 	}
 	return nil

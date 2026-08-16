@@ -20,12 +20,24 @@ export const ALERT_STREAM_EVENT_TYPES = [
 
 export type AlertStreamEventType = (typeof ALERT_STREAM_EVENT_TYPES)[number];
 
-/** One validated alert lifecycle event from the stream. */
+/**
+ * One validated alert lifecycle event from the stream. Alongside the
+ * envelope, every event carries the alert context the server denormalized
+ * into the stream record so clients can react (e.g. browser notifications)
+ * without a detail fetch. `summary` and `team` may be empty strings when
+ * the source alert lacks them; `severity`, `alertName`, and `source` are
+ * always populated (the server falls back for missing labels).
+ */
 export interface AlertStreamEvent {
   id: number;
   type: AlertStreamEventType;
   alertId: string;
   occurredAt: string;
+  severity: string;
+  alertName: string;
+  summary: string;
+  source: string;
+  team: string;
 }
 
 /**
@@ -103,11 +115,32 @@ export function parseAlertStreamEvent(
   ) {
     return null;
   }
+  // Alert context fields are required: severity, alertName, and source must
+  // be non-empty (the server backfills them), while summary and team are
+  // valid as empty strings when the alert omits them.
+  const { severity, alertName, summary, source, team } = record;
+  if (
+    typeof severity !== 'string' ||
+    severity === '' ||
+    typeof alertName !== 'string' ||
+    alertName === '' ||
+    typeof summary !== 'string' ||
+    typeof source !== 'string' ||
+    source === '' ||
+    typeof team !== 'string'
+  ) {
+    return null;
+  }
   return {
     id: record.id,
     type: type as AlertStreamEventType,
     alertId: record.alertId,
     occurredAt: record.occurredAt,
+    severity,
+    alertName,
+    summary,
+    source,
+    team,
   };
 }
 

@@ -15,12 +15,14 @@ COPY --from=web-build /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/promview ./cmd/promview
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates && addgroup -S promview && adduser -S -G promview promview
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S -g 65532 promview \
+    && adduser -S -D -H -u 65532 -G promview promview
 WORKDIR /app
 COPY --from=go-build /out/promview /usr/local/bin/promview
 COPY --from=web-build /src/web/dist /app/web
 COPY migrations /app/migrations
-USER promview
+USER 65532:65532
 ENV PROMVIEW_LISTEN_ADDRESS=:8080
 ENV PROMVIEW_WEB_DIRECTORY=/app/web
 ENV PROMVIEW_MIGRATIONS_DIRECTORY=/app/migrations

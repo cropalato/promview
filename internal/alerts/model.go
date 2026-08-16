@@ -53,6 +53,11 @@ type StreamEvent struct {
 	Type       string    `json:"type"`
 	AlertID    int64     `json:"-"`
 	OccurredAt time.Time `json:"occurredAt"`
+	Severity   string    `json:"severity"`
+	AlertName  string    `json:"alertName"`
+	Summary    string    `json:"summary"`
+	SourceSlug string    `json:"source"`
+	Team       string    `json:"team"`
 }
 
 type HistoryEvent struct {
