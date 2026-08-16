@@ -50,10 +50,10 @@ docker compose up --build
 
 Open <http://localhost:8080>. The development stack uses open anonymous read-only mode.
 
-Send an Alertmanager-compatible webhook using the development token:
+Send an Alertmanager-compatible webhook to the bootstrapped `demo` source:
 
 ```sh
-curl -X POST http://localhost:8080/api/v1/ingest/alertmanager/local \
+curl -X POST http://localhost:8080/api/v1/ingest/alertmanager/demo \
   -H 'Authorization: Bearer development-token' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -67,13 +67,64 @@ curl -X POST http://localhost:8080/api/v1/ingest/alertmanager/local \
   }'
 ```
 
-The shared token is only a bootstrap mechanism for the first implementation slice. Source-specific hashed credentials are planned before production use.
+Each source has its own opaque bearer token. Promview stores only its SHA-256 hash. The Compose environment bootstraps `demo` when it is absent or has no credential; restarting the app does not overwrite a token rotated later.
+
+Provision or rotate another source with the CLI:
+
+```sh
+docker compose run --rm app source set \
+  --slug production \
+  --name 'Production Alertmanager' \
+  --token 'replace-with-at-least-16-characters'
+```
+
+The webhook URL source slug and bearer token must identify the same enabled source.
+
+For the complete Prometheus rule, Alertmanager routing, authentication, TLS, validation, and token-rotation procedure, see [`docs/prometheus-alertmanager.md`](docs/prometheus-alertmanager.md).
 
 List firing alerts:
 
 ```sh
 curl 'http://localhost:8080/api/v1/alerts?status=firing&limit=100'
 ```
+
+Inspect the current principal:
+
+```sh
+curl 'http://localhost:8080/api/v1/me'
+```
+
+Open mode returns an anonymous viewer and keeps ingestion authenticated. LDAP mode requires an existing opaque session; its provider login flow is not implemented yet. OIDC mode provides browser sign-in and logout while keeping provider tokens on the server.
+
+## OIDC Authentication
+
+For an Okta-specific walkthrough, see [`docs/okta-oidc.md`](docs/okta-oidc.md).
+
+Register this exact callback URL with the identity provider:
+
+```text
+https://promview.example.com/api/v1/auth/oidc/callback
+```
+
+Configure Promview through the Compose environment:
+
+```sh
+export PROMVIEW_AUTH_MODE=oidc
+export PROMVIEW_OIDC_ISSUER_URL='https://identity.example.com'
+export PROMVIEW_OIDC_CLIENT_ID='promview'
+export PROMVIEW_OIDC_CLIENT_SECRET='replace-with-client-secret'
+export PROMVIEW_OIDC_REDIRECT_URL='https://promview.example.com/api/v1/auth/oidc/callback'
+export PROMVIEW_OIDC_VIEWER_GROUPS='promview-viewers'
+export PROMVIEW_OIDC_OPERATOR_GROUPS='promview-operators'
+export PROMVIEW_OIDC_ADMIN_GROUPS='promview-administrators'
+docker compose up --build
+```
+
+Promview uses provider discovery and Authorization Code with PKCE. It validates the ID token signature, issuer, audience, expiry, state, and nonce, then issues its own opaque 12-hour session in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie. Provider access and ID tokens are not persisted.
+
+The default scopes are `openid,profile,email,groups`; the default claims are `preferred_username`, `email`, `name`, and `groups`. Override them with `PROMVIEW_OIDC_SCOPES`, `PROMVIEW_OIDC_USERNAME_CLAIM`, `PROMVIEW_OIDC_EMAIL_CLAIM`, `PROMVIEW_OIDC_DISPLAY_NAME_CLAIM`, and `PROMVIEW_OIDC_GROUPS_CLAIM`. Group lists are comma-separated. Unmapped identities are denied, and administrator mappings take precedence over operator and viewer mappings.
+
+Production issuer and redirect URLs must use HTTPS. Loopback HTTP is supported for provider testing by setting `PROMVIEW_OIDC_COOKIE_SECURE=false`; insecure cookies are rejected for non-loopback redirect hosts.
 
 The list endpoint supports opaque cursor pagination and exact `source`, `status`, `severity`, and `team` filters. The browser console currently applies its free-text search only to rows already loaded from this endpoint.
 

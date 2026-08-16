@@ -246,3 +246,86 @@ describe('useAlerts live refresh', () => {
     expect(alertsFetchCalls()).toHaveLength(1);
   });
 });
+
+describe('useAlerts session expiry', () => {
+  it('reports a 401 from the first page fetch', async () => {
+    fetchMock().mockResolvedValue(jsonResponse({ error: 'expired' }, 401));
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() => useAlerts(true, { onUnauthorized }));
+
+    await waitFor(() => expect(result.current.state.status).toBe('error'));
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report other failures as expiry', async () => {
+    fetchMock().mockResolvedValue(jsonResponse({ error: 'boom' }, 500));
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() => useAlerts(true, { onUnauthorized }));
+
+    await waitFor(() => expect(result.current.state.status).toBe('error'));
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('reports a 401 from the quiet live refresh and keeps the rows', async () => {
+    let call = 0;
+    fetchMock().mockImplementation(() => {
+      call += 1;
+      return call === 1
+        ? Promise.resolve(jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1 })))
+        : Promise.resolve(jsonResponse({ error: 'expired' }, 401));
+    });
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() =>
+      useAlerts(true, { liveRefreshDebounceMs: 0, onUnauthorized }),
+    );
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    act(() => result.current.scheduleLiveRefresh());
+
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalledTimes(1));
+    expect(result.current.state.status).toBe('ready');
+    expect(readyData(result.current.state).alerts).toHaveLength(1);
+  });
+
+  it('reports a 401 from cursor pagination', async () => {
+    let call = 0;
+    fetchMock().mockImplementation(() => {
+      call += 1;
+      return call === 1
+        ? Promise.resolve(
+            jsonResponse(alertsPage({ alerts: [apiAlert()], nextCursor: 'cursor-2', total: 2 })),
+          )
+        : Promise.resolve(jsonResponse({ error: 'expired' }, 401));
+    });
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() =>
+      useAlerts(true, { liveRefreshDebounceMs: 0, onUnauthorized }),
+    );
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    act(() => result.current.loadMore());
+
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalledTimes(1));
+  });
+
+  it('resets to a clean loading state when the gate closes and re-opens', async () => {
+    fetchMock().mockImplementation(() =>
+      Promise.resolve(jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1 }))),
+    );
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useAlerts(enabled, { liveRefreshDebounceMs: 0 }),
+      { initialProps: { enabled: true } },
+    );
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+
+    // Session lost: loaded rows and cursors are dropped.
+    rerender({ enabled: false });
+    expect(result.current.state.status).toBe('loading');
+
+    // Re-unlocking starts from a fresh first page.
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    expect(alertsFetchCalls()).toHaveLength(2);
+  });
+});

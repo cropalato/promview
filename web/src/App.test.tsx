@@ -5,6 +5,16 @@ import { AutoOpenEventSource, FakeEventSource } from './test/fakeEventSource';
 
 const OPEN_CONFIG = { authMode: 'open', productName: 'Promview' };
 
+const OIDC_CONFIG = { authMode: 'oidc', productName: 'Promview' };
+
+const OIDC_PRINCIPAL = {
+  subject: 'https://idp.example|user-1',
+  email: 'ada@example.com',
+  displayName: 'Ada Lovelace',
+  roles: ['operator'],
+  anonymous: false,
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -54,6 +64,26 @@ function mockApi(page: unknown = alertsPage(), config: unknown = OPEN_CONFIG): v
       String(url).startsWith('/api/v1/alerts') ? jsonResponse(page) : jsonResponse(config),
     ),
   );
+}
+
+/**
+ * Routes the fetch mock for OIDC deployments: the given /me response, a
+ * healthy logout endpoint, the alerts page, and the OIDC config.
+ */
+function mockOidcApi(me: Response, page: unknown = alertsPage()): void {
+  fetchMock().mockImplementation((url: string) => {
+    const target = String(url);
+    if (target === '/api/v1/me') {
+      return Promise.resolve(me);
+    }
+    if (target === '/api/v1/auth/logout') {
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }
+    if (target.startsWith('/api/v1/alerts')) {
+      return Promise.resolve(jsonResponse(page));
+    }
+    return Promise.resolve(jsonResponse(OIDC_CONFIG));
+  });
 }
 
 function apiHistoryEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -169,6 +199,233 @@ describe('App', () => {
     expect(screen.getByRole('banner')).toHaveTextContent('Sign-in pending');
     expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
     expect(await screen.findByText('Connected')).toBeInTheDocument();
+  });
+
+  it('never requests the session in open mode', async () => {
+    mockApi();
+    render(<App />);
+
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(fetchMock().mock.calls.map(([url]) => String(url))).toEqual([
+      '/api/v1/config',
+      '/api/v1/alerts?limit=100&status=firing',
+    ]);
+  });
+
+  it('gates oidc deployments behind a sign-in link when there is no session', async () => {
+    mockOidcApi(jsonResponse({ error: 'authentication required' }, 401));
+    render(<App />);
+
+    const gate = await screen.findByRole('region', { name: /sign in required/i });
+    expect(gate).toHaveTextContent(/oidc sign-in/i);
+    const link = within(gate).getByRole('link', {
+      name: /sign in with your identity provider/i,
+    });
+    expect(link).toHaveAttribute('href', '/api/v1/auth/oidc/login');
+    expect(screen.getByRole('banner')).toHaveTextContent('Sign-in pending');
+
+    // No alert fetch or stream starts while unauthenticated.
+    expect(fetchMock().mock.calls.map(([url]) => String(url))).toEqual([
+      '/api/v1/config',
+      '/api/v1/me',
+    ]);
+    expect(alertCalls()).toEqual([]);
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it('boots the console for an authenticated oidc session', async () => {
+    mockOidcApi(
+      jsonResponse(OIDC_PRINCIPAL),
+      alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 }),
+    );
+    render(<App />);
+
+    const banner = screen.getByRole('banner');
+    expect(await within(banner).findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(within(banner).getByText('operator')).toBeInTheDocument();
+    expect(within(banner).getByRole('button', { name: /sign out/i })).toBeInTheDocument();
+
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+
+    // The session check ran before the first alert page, which then opened the stream.
+    expect(fetchMock().mock.calls.map(([url]) => String(url))).toEqual([
+      '/api/v1/config',
+      '/api/v1/me',
+      '/api/v1/alerts?limit=100&status=firing',
+    ]);
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7');
+  });
+
+  it('denies read access clearly when the session has no role', async () => {
+    mockOidcApi(jsonResponse({ error: 'read access denied' }, 403));
+    render(<App />);
+
+    const gate = await screen.findByRole('alert');
+    expect(gate).toHaveTextContent(/no read access/i);
+    expect(gate).toHaveTextContent(/viewer, operator, or administrator/i);
+    expect(within(gate).getByRole('button', { name: /sign out/i })).toBeInTheDocument();
+    expect(alertCalls()).toEqual([]);
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it('shows session errors and retries the session check', async () => {
+    let meAttempts = 0;
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target === '/api/v1/me') {
+        meAttempts += 1;
+        return meAttempts === 1
+          ? Promise.reject(new TypeError('fetch failed'))
+          : Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      return Promise.resolve(jsonResponse(OIDC_CONFIG));
+    });
+    render(<App />);
+
+    const gate = await screen.findByRole('alert');
+    expect(gate).toHaveTextContent(/cannot verify your session/i);
+    expect(gate).toHaveTextContent(/unable to reach the promview api/i);
+    expect(alertCalls()).toEqual([]);
+
+    fireEvent.click(screen.getByRole('button', { name: /retry session check/i }));
+
+    const banner = screen.getByRole('banner');
+    expect(await within(banner).findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
+    expect(meAttempts).toBe(2);
+  });
+
+  it('signs out through the logout endpoint and navigates home', async () => {
+    mockOidcApi(jsonResponse(OIDC_PRINCIPAL));
+    const navigate = vi.fn();
+    render(<App navigate={navigate} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /sign out/i }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
+    expect(fetchMock()).toHaveBeenCalledWith('/api/v1/auth/logout', { method: 'POST' });
+  });
+
+  it('keeps the session and shows an error when sign-out fails', async () => {
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target === '/api/v1/auth/logout') {
+        return Promise.resolve(jsonResponse({ error: 'boom' }, 500));
+      }
+      if (target === '/api/v1/me') {
+        return Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      return Promise.resolve(jsonResponse(OIDC_CONFIG));
+    });
+    const navigate = vi.fn();
+    render(<App navigate={navigate} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /sign out/i }));
+
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent(/sign-out failed/i);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByRole('banner')).toHaveTextContent('Ada Lovelace');
+  });
+
+  it('returns to the sign-in gate when the first alert page is rejected with 401', async () => {
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target === '/api/v1/me') {
+        return Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse({ error: 'authentication required' }, 401));
+      }
+      return Promise.resolve(jsonResponse(OIDC_CONFIG));
+    });
+    render(<App />);
+
+    // The session verified, then the alerts request exposed the expiry: the
+    // console gates instead of showing a generic alerts error.
+    const gate = await screen.findByRole('region', { name: /sign in required/i });
+    expect(within(gate).getByRole('link', { name: /sign in/i })).toHaveAttribute(
+      'href',
+      '/api/v1/auth/oidc/login',
+    );
+    expect(screen.getByRole('banner')).toHaveTextContent('Sign-in pending');
+    expect(screen.queryByText('Ada Lovelace')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it('returns to the sign-in gate when the session expires mid-stream', async () => {
+    let alertFetches = 0;
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target === '/api/v1/me') {
+        return Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        alertFetches += 1;
+        return Promise.resolve(
+          alertFetches === 1
+            ? jsonResponse(
+                alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 }),
+              )
+            : jsonResponse({ error: 'authentication required' }, 401),
+        );
+      }
+      return Promise.resolve(jsonResponse(OIDC_CONFIG));
+    });
+    render(<App />);
+
+    // Authenticated console is up and streaming.
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(screen.getByRole('banner')).toHaveTextContent('Ada Lovelace');
+    const source = FakeEventSource.latest();
+    expect(source.closed).toBe(false);
+
+    // The session expires server-side; the stream event triggers a quiet
+    // refresh that comes back 401.
+    act(() => {
+      source.emit(
+        'alert.updated',
+        { id: 8, type: 'alert.updated', alertId: '1', occurredAt: '2026-08-14T12:00:00Z' },
+        '8',
+      );
+    });
+
+    const gate = await screen.findByRole(
+      'region',
+      { name: /sign in required/i },
+      { timeout: 3000 },
+    );
+    expect(within(gate).getByRole('link', { name: /sign in/i })).toHaveAttribute(
+      'href',
+      '/api/v1/auth/oidc/login',
+    );
+    expect(screen.getByRole('banner')).toHaveTextContent('Sign-in pending');
+    expect(screen.queryByText('Ada Lovelace')).not.toBeInTheDocument();
+
+    // Alert/SSE activity stopped: the stream is closed and no further alert
+    // requests fire while gated.
+    expect(source.closed).toBe(true);
+    expect(alertCalls()).toHaveLength(2);
+    act(() => {
+      source.emit(
+        'alert.updated',
+        { id: 9, type: 'alert.updated', alertId: '1', occurredAt: '2026-08-14T12:00:01Z' },
+        '9',
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    });
+    expect(alertCalls()).toHaveLength(2);
   });
 
   it('switches the empty state when a filter is applied and cleared', async () => {
@@ -592,7 +849,7 @@ describe('App', () => {
     render(<App />);
 
     const dialog = await screen.findByRole('dialog', { name: 'Alert detail' });
-    expect(within(dialog).getByRole('alert')).toHaveTextContent(/alert not found/i);
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/alert not found/i);
 
     fireEvent.click(within(dialog).getByRole('button', { name: /close alert detail/i }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

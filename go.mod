@@ -2,7 +2,12 @@ module github.com/cropalato/promview
 
 go 1.25.0
 
-require github.com/jackc/pgx/v5 v5.7.6
+require (
+	github.com/coreos/go-oidc/v3 v3.15.0
+	github.com/go-jose/go-jose/v4 v4.0.5
+	github.com/jackc/pgx/v5 v5.7.6
+	golang.org/x/oauth2 v0.30.0
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

@@ -98,6 +98,23 @@ describe('useAlertStream', () => {
     expect(result.current).toBe('connected');
   });
 
+  it('closes the stream when the cursor is withdrawn and reconnects from the next snapshot', () => {
+    const { result, rerender } = renderStream(7, () => {});
+    const first = FakeEventSource.latest();
+    act(() => first.emitOpen());
+    expect(result.current).toBe('connected');
+
+    // Session expired: withdrawing the cursor stops the stream.
+    rerender({ cursor: null });
+    expect(first.closed).toBe(true);
+    expect(result.current).toBe('connecting');
+
+    // A fresh snapshot after re-authentication opens a new connection.
+    rerender({ cursor: 9 });
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=9');
+  });
+
   it('closes the source and reconnect timer on unmount', () => {
     vi.useFakeTimers();
     const { unmount } = renderStream(7, () => {});

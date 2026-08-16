@@ -37,10 +37,12 @@ The first two implementation slices provide:
 - alert detail and history APIs
 - deep-linkable responsive detail drawer with overview, timeline, and raw views
 - health, readiness, and runtime configuration endpoints
+- source-specific hashed ingestion credentials and source provisioning CLI
+- anonymous open-mode principals and hashed opaque cookie or bearer sessions
 - a responsive React console connected to firing alerts
 - migration, persistence, API, frontend, image, and Compose verification in GitHub Actions
 
-Operator actions, notes, scoped authorization, stream retention, and source-specific credentials remain planned work.
+LDAP login, operator actions, notes, scoped authorization, and stream retention remain planned work.
 
 ## Goals
 
@@ -172,11 +174,15 @@ Only one interactive mode is active per deployment.
 - configurable username, email, display name, and group claims
 - map OIDC groups to role bindings
 
+The browser OIDC flow is implemented with database-backed one-time login transactions, a short-lived state correlation cookie, configured group-to-role mappings, and deny-by-default access for unmapped identities. Provider tokens stay server-side and are not persisted.
+
 ### Sessions And Desktop Tokens
 
 Browser sessions use random opaque IDs in `HttpOnly`, `Secure`, `SameSite=Lax` cookies. Store only token hashes and require CSRF protection for browser mutations.
 
 Desktop clients use revocable opaque bearer credentials stored in the operating system keychain. REST and SSE must accept browser sessions or desktop credentials without changing authorization semantics.
+
+The shared session storage, cookie or bearer authentication, OIDC session issuance, and logout revocation flows are implemented. LDAP login and CSRF enforcement for future browser mutations remain planned.
 
 ## Authorization
 

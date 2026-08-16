@@ -1,3 +1,5 @@
+import { highestRole } from '../auth/session';
+import type { SessionInfo } from '../auth/session';
 import type { AuthMode } from '../config/runtimeConfig';
 import { PulseMark, UserIcon } from './icons';
 import { UtcClock } from './UtcClock';
@@ -21,15 +23,36 @@ interface TopBarProps {
   productName: string;
   connection: ConnectionState;
   authMode?: AuthMode;
+  /** Verified OIDC session; absent while sign-in is pending or unavailable. */
+  session?: SessionInfo;
+  onSignOut?: () => void;
+  signOutPending?: boolean;
 }
 
 /**
  * Compact identity/connection bar: product mark, live connection status,
  * deployment auth mode, and the effective identity. In open mode the server
- * grants an anonymous viewer identity, shown here explicitly. The connection
- * indicator reflects the live alert stream, not just shell config loading.
+ * grants an anonymous viewer identity, shown here explicitly; in OIDC mode a
+ * verified session shows its display name and highest role plus a sign-out
+ * action. The connection indicator reflects the live alert stream, not just
+ * shell config loading.
  */
-export function TopBar({ productName, connection, authMode }: TopBarProps) {
+export function TopBar({
+  productName,
+  connection,
+  authMode,
+  session,
+  onSignOut,
+  signOutPending = false,
+}: TopBarProps) {
+  const identityName =
+    authMode === 'open'
+      ? 'Anonymous viewer'
+      : session !== undefined
+        ? session.displayName
+        : 'Sign-in pending';
+  const roleBadge = authMode === 'open' ? 'viewer' : session && highestRole(session.roles);
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -49,10 +72,18 @@ export function TopBar({ productName, connection, authMode }: TopBarProps) {
         {authMode !== undefined ? (
           <span className="identity">
             <UserIcon className="identity-icon" />
-            <span className="identity-name">
-              {authMode === 'open' ? 'Anonymous viewer' : 'Sign-in pending'}
-            </span>
-            {authMode === 'open' ? <span className="badge badge-role">viewer</span> : null}
+            <span className="identity-name">{identityName}</span>
+            {roleBadge ? <span className="badge badge-role">{roleBadge}</span> : null}
+            {session !== undefined && onSignOut !== undefined ? (
+              <button
+                type="button"
+                className="signout-button"
+                onClick={onSignOut}
+                disabled={signOutPending}
+              >
+                {signOutPending ? 'Signing out…' : 'Sign out'}
+              </button>
+            ) : null}
           </span>
         ) : null}
       </div>

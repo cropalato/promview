@@ -32,7 +32,9 @@
 - `internal/alertmanager` owns webhook decoding and normalization; `internal/alerts` owns query-domain types; `internal/postgres` owns persistence; `internal/httpapi` owns transport.
 - Alert snapshots return a durable `streamCursor`; `/api/v1/stream` resumes after that cursor or `Last-Event-ID`. Preserve this snapshot-before-stream contract in all clients.
 - Ingestion writes stream events only for created or materially changed alerts. Repeated identical deliveries update timestamps/counts without producing client refresh events.
-- The shared ingestion token is bootstrap-only. Do not treat it as the final source credential model; source-specific hashed credentials are planned.
+- Alertmanager sources use independent opaque bearer tokens stored only as SHA-256 hashes. Bootstrap configuration may initialize an absent or legacy uncredentialed source but must never overwrite a credential rotated with `promview source set`.
+- Open mode supplies an anonymous viewer. Protected modes accept hashed opaque sessions from cookies or bearer headers; keep authentication separate from provider-specific LDAP and OIDC flows.
+- OIDC uses discovery, Authorization Code with PKCE, one-time database-backed login transactions, and configured group-to-role mappings. Never trust provider role claims directly or persist provider tokens.
 - The React app uses same-origin `/api` calls. Keep browser-only transport assumptions out of shared clients so Tauri can use bearer credentials later.
 - `promview migrate` applies ordered `migrations/*.up.sql` files and records `schema_migrations`; Compose runs it before the app. Keep down migrations and `scripts/check-migrations.sh` synchronized with every schema change.
 

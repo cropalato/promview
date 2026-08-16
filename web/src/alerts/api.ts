@@ -23,6 +23,15 @@ export class AlertsApiError extends Error {
   }
 }
 
+/**
+ * True when the API rejected the request as unauthenticated (HTTP 401) — in
+ * protected deployments the server-side session expired after boot. The shell
+ * treats this as a sign-out event, not a request error.
+ */
+export function isAlertsUnauthorized(error: unknown): boolean {
+  return error instanceof AlertsApiError && error.status === 401;
+}
+
 /** Query parameters accepted by the alerts endpoint. */
 export interface AlertsQuery {
   limit?: number;

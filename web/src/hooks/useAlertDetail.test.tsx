@@ -153,6 +153,29 @@ describe('useAlertDetail', () => {
     expect(fetchMock()).toHaveBeenCalledTimes(2);
   });
 
+  it('reports a 401 as session expiry', async () => {
+    fetchMock().mockResolvedValue(jsonResponse({ error: 'expired' }, 401));
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() => useAlertDetail('42', { onUnauthorized }));
+
+    await waitFor(() => expect(result.current.state.status).toBe('error'));
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a 401 from the quiet refresh as session expiry', async () => {
+    fetchMock().mockResolvedValueOnce(jsonResponse(apiDetailResponse()));
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() => useAlertDetail('42', { onUnauthorized }));
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+
+    fetchMock().mockResolvedValueOnce(jsonResponse({ error: 'expired' }, 401));
+    act(() => result.current.refreshIfSelected('42'));
+
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalledTimes(1));
+    // The stale detail stays put; the shell handles the gate transition.
+    expect(result.current.state.status).toBe('ready');
+  });
+
   it('quietly refreshes when a stream event targets the selected alert', async () => {
     const stale = apiDetailResponse();
     const fresh = apiDetailResponse({
