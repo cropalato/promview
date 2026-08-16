@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ALERTS_PAGE_SIZE, fetchAlerts } from '../alerts/api';
+import { ALERTS_PAGE_SIZE, fetchAlerts, isAlertsUnauthorized } from '../alerts/api';
 import type { AlertsPage } from '../alerts/api';
 import type { AlertSummary } from '../alerts/types';
 
@@ -61,13 +61,22 @@ export const LIVE_REFRESH_DEBOUNCE_MS = 750;
 export interface UseAlertsOptions {
   /** Test hook: override the live-refresh debounce window. */
   liveRefreshDebounceMs?: number;
+  /**
+   * Called when any alerts request is rejected with HTTP 401 — in protected
+   * deployments the session expired after boot, and the shell drops back to
+   * the sign-in gate instead of showing a generic request error.
+   */
+  onUnauthorized?: () => void;
 }
 
 /**
  * Pages through `GET /api/v1/alerts` once `enabled` (i.e. the runtime config
- * has loaded). The first page lists firing alerts; `loadMore` follows the
- * server cursor until it is exhausted, and `retry` restarts from the first
- * page after an initial-load failure.
+ * has loaded and, in protected deployments, the session is verified). The
+ * first page lists firing alerts; `loadMore` follows the server cursor until
+ * it is exhausted, and `retry` restarts from the first page after an
+ * initial-load failure. When `enabled` goes false (session lost), loaded
+ * rows, cursors, and pending refreshes are dropped so nothing stale shows or
+ * streams when the console unlocks again.
  *
  * `scheduleLiveRefresh` is the stream entry point: alert events funnel
  * through it into a debounced, coalesced first-page refetch that quietly
@@ -84,7 +93,7 @@ export function useAlerts(
   loadMore: () => void;
   scheduleLiveRefresh: () => void;
 } {
-  const { liveRefreshDebounceMs = LIVE_REFRESH_DEBOUNCE_MS } = options;
+  const { liveRefreshDebounceMs = LIVE_REFRESH_DEBOUNCE_MS, onUnauthorized } = options;
   const [state, setState] = useState<AlertsState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [pendingCursor, setPendingCursor] = useState<string | null>(null);
@@ -96,9 +105,29 @@ export function useAlerts(
   const livePendingRef = useRef(false);
   const disposedRef = useRef(false);
 
+  const onUnauthorizedRef = useRef(onUnauthorized);
+  useEffect(() => {
+    onUnauthorizedRef.current = onUnauthorized;
+  }, [onUnauthorized]);
+
+  const reportIfUnauthorized = useCallback((error: unknown): void => {
+    if (isAlertsUnauthorized(error)) {
+      onUnauthorizedRef.current?.();
+    }
+  }, []);
+
   // First page: firing alerts, fetched once the shell is configured.
   useEffect(() => {
     if (!enabled) {
+      // Auth gate closed (or shell not ready yet): reset to a clean loading
+      // state and cancel any pending live refresh.
+      nextCursorRef.current = '';
+      pageInFlightRef.current = false;
+      if (liveTimerRef.current !== null) {
+        clearTimeout(liveTimerRef.current);
+        liveTimerRef.current = null;
+      }
+      setState({ status: 'loading' });
       return;
     }
     let cancelled = false;
@@ -116,6 +145,7 @@ export function useAlerts(
       })
       .catch((error: unknown) => {
         if (!cancelled) {
+          reportIfUnauthorized(error);
           setState({ status: 'error', error: toError(error) });
         }
       });
@@ -123,7 +153,7 @@ export function useAlerts(
     return () => {
       cancelled = true;
     };
-  }, [enabled, attempt]);
+  }, [enabled, attempt, reportIfUnauthorized]);
 
   // Subsequent pages, driven by the cursor pending in state.
   useEffect(() => {
@@ -160,6 +190,7 @@ export function useAlerts(
       })
       .catch((error: unknown) => {
         if (!cancelled) {
+          reportIfUnauthorized(error);
           setState((current) =>
             current.status === 'ready'
               ? { ...current, loadingMore: false, moreError: toError(error) }
@@ -177,7 +208,7 @@ export function useAlerts(
     return () => {
       cancelled = true;
     };
-  }, [pendingCursor]);
+  }, [pendingCursor, reportIfUnauthorized]);
 
   // Track readiness in a ref so the stable live-refresh callbacks below can
   // gate on it without capturing state.
@@ -215,8 +246,10 @@ export function useAlerts(
           current.status === 'ready' ? { ...current, data: toData(page) } : current,
         );
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         // Quiet refresh: keep the stale rows; the next stream event retries.
+        // A 401 means the session expired — route back to the sign-in gate.
+        reportIfUnauthorized(error);
       })
       .finally(() => {
         liveInFlightRef.current = false;
@@ -225,7 +258,7 @@ export function useAlerts(
           scheduleRef.current();
         }
       });
-  }, []);
+  }, [reportIfUnauthorized]);
 
   const scheduleLiveRefresh = useCallback((): void => {
     if (!readyRef.current || liveTimerRef.current !== null) {

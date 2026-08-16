@@ -115,6 +115,8 @@ func baselineLegacySchema(ctx context.Context, pool *pgxpool.Pool) error {
 		{version: 1, name: "000001_initial.up.sql", table: "alerts"},
 		{version: 2, name: "000002_stream_events.up.sql", table: "stream_events"},
 		{version: 3, name: "000003_alert_history.up.sql", table: "alert_history"},
+		{version: 4, name: "000004_auth_sources.up.sql", table: "sessions"},
+		{version: 5, name: "000005_oidc_transactions.up.sql", table: "oidc_login_transactions"},
 	} {
 		var exists bool
 		if err := pool.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", known.table).Scan(&exists); err != nil {

@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/cropalato/promview/internal/alertmanager"
 	"github.com/cropalato/promview/internal/alerts"
+	"github.com/cropalato/promview/internal/auth"
 	"github.com/cropalato/promview/internal/config"
 )
 
@@ -23,6 +23,7 @@ const maxWebhookBodyBytes = 4 << 20
 
 type Store interface {
 	Ingest(context.Context, []alertmanager.IncomingAlert) error
+	AuthenticateSource(context.Context, string, string) (bool, error)
 	ListAlerts(context.Context, alerts.Query) (alerts.ListResult, error)
 	GetAlertDetail(context.Context, int64) (alerts.Detail, error)
 	StreamEvents(context.Context, int64, int) ([]alerts.StreamEvent, error)
@@ -30,23 +31,61 @@ type Store interface {
 }
 
 type API struct {
-	config config.Config
-	store  Store
+	config        config.Config
+	store         Store
+	authenticator auth.Authenticator
 }
 
-func New(cfg config.Config, store Store) http.Handler {
-	api := &API{config: cfg, store: store}
+func New(cfg config.Config, store Store, authenticator auth.Authenticator, authenticationHandlers ...http.Handler) http.Handler {
+	api := &API{config: cfg, store: store, authenticator: authenticator}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/config", api.getConfig)
-	mux.HandleFunc("GET /api/v1/alerts", api.listAlerts)
-	mux.HandleFunc("GET /api/v1/alerts/{id}", api.getAlert)
-	mux.HandleFunc("GET /api/v1/alerts/{id}/events", api.getAlertEvents)
-	mux.HandleFunc("GET /api/v1/stream", api.streamAlerts)
+	mux.Handle("GET /api/v1/me", api.requireAuthentication(http.HandlerFunc(api.getMe)))
+	mux.Handle("GET /api/v1/alerts", api.requireAuthentication(http.HandlerFunc(api.listAlerts)))
+	mux.Handle("GET /api/v1/alerts/{id}", api.requireAuthentication(http.HandlerFunc(api.getAlert)))
+	mux.Handle("GET /api/v1/alerts/{id}/events", api.requireAuthentication(http.HandlerFunc(api.getAlertEvents)))
+	mux.Handle("GET /api/v1/stream", api.requireAuthentication(http.HandlerFunc(api.streamAlerts)))
 	mux.HandleFunc("POST /api/v1/ingest/alertmanager/{source}", api.ingestAlertmanager)
+	if len(authenticationHandlers) > 0 && authenticationHandlers[0] != nil {
+		mux.Handle("GET /api/v1/auth/oidc/login", authenticationHandlers[0])
+		mux.Handle("GET /api/v1/auth/oidc/callback", authenticationHandlers[0])
+		mux.Handle("POST /api/v1/auth/logout", authenticationHandlers[0])
+	}
 	mux.HandleFunc("GET /health/live", api.live)
 	mux.HandleFunc("GET /health/ready", api.ready)
 	mux.Handle("GET /", spaHandler(cfg.WebDirectory))
 	return mux
+}
+
+type principalContextKey struct{}
+
+func (api *API) requireAuthentication(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, err := api.authenticator.Authenticate(r.Context(), r)
+		if err != nil {
+			if errors.Is(err, auth.ErrUnauthenticated) {
+				writeError(w, http.StatusUnauthorized, "authentication required")
+			} else {
+				writeError(w, http.StatusInternalServerError, "authentication failed")
+			}
+			return
+		}
+		if !principal.HasRole("viewer") && !principal.HasRole("operator") && !principal.HasRole("administrator") {
+			writeError(w, http.StatusForbidden, "read access denied")
+			return
+		}
+		ctx := context.WithValue(r.Context(), principalContextKey{}, principal)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (api *API) getMe(w http.ResponseWriter, r *http.Request) {
+	principal, ok := r.Context().Value(principalContextKey{}).(auth.Principal)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, principal)
 }
 
 func (api *API) getAlert(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +230,13 @@ func (api *API) getConfig(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (api *API) ingestAlertmanager(w http.ResponseWriter, r *http.Request) {
-	if !api.authorized(r) {
+	token := requestBearerToken(r)
+	authorized, err := api.store.AuthenticateSource(r.Context(), r.PathValue("source"), token)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to authenticate source")
+		return
+	}
+	if !authorized {
 		writeError(w, http.StatusUnauthorized, "invalid ingestion credentials")
 		return
 	}
@@ -362,14 +407,13 @@ func (api *API) ready(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (api *API) authorized(r *http.Request) bool {
+func requestBearerToken(r *http.Request) string {
 	const prefix = "Bearer "
 	header := r.Header.Get("Authorization")
 	if !strings.HasPrefix(header, prefix) {
-		return false
+		return ""
 	}
-	provided := strings.TrimPrefix(header, prefix)
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(api.config.IngestToken)) == 1
+	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

@@ -342,6 +342,32 @@ code {
   color: var(--text-faint);
 }
 
+/* Quiet sign-out action next to the verified identity */
+.signout-button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.signout-button:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
+.signout-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* Main console column */
 .console {
   flex: 1;
@@ -800,6 +826,7 @@ kbd {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
   transition:
     background 120ms ease,
     border-color 120ms ease;

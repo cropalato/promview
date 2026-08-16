@@ -11,7 +11,8 @@ export interface UseAlertStreamOptions {
   /**
    * Resume cursor from the latest alerts snapshot. The stream connects once
    * the first ready snapshot provides a cursor; later advances are forwarded
-   * to the client so a reconnect resumes from the newest position.
+   * to the client so a reconnect resumes from the newest position. Passing
+   * null withdraws the cursor and closes the stream (session expiry).
    */
   cursor: number | null;
   /** Called for every validated alert lifecycle event. */
@@ -22,9 +23,10 @@ export interface UseAlertStreamOptions {
 }
 
 /**
- * Keeps one alert stream client alive for the lifetime of the component.
- * The client is created when the first snapshot cursor arrives and is always
- * closed (source + reconnect timer) on unmount.
+ * Keeps one alert stream client alive while a snapshot cursor is available.
+ * The client is created when the first snapshot cursor arrives, closed
+ * (source + reconnect timer) whenever the cursor is withdrawn — the session
+ * expired and streaming must stop — and always closed on unmount.
  */
 export function useAlertStream({
   cursor,
@@ -42,6 +44,9 @@ export function useAlertStream({
 
   useEffect(() => {
     if (cursor === null) {
+      clientRef.current?.close();
+      clientRef.current = null;
+      setStatus('connecting');
       return;
     }
     if (clientRef.current === null) {

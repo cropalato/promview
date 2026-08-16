@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/cropalato/promview/internal/alertmanager"
 	"github.com/cropalato/promview/internal/alerts"
+	"github.com/cropalato/promview/internal/auth"
+	"github.com/cropalato/promview/internal/sources"
 )
 
 type Store struct {
@@ -26,6 +29,133 @@ func New(pool *pgxpool.Pool) *Store {
 
 func (store *Store) Ping(ctx context.Context) error {
 	return store.pool.Ping(ctx)
+}
+
+func (store *Store) SetSource(ctx context.Context, source sources.Source, rawToken string) error {
+	if err := sources.Validate(source, rawToken); err != nil {
+		return err
+	}
+	_, err := store.pool.Exec(ctx, `
+		INSERT INTO alert_sources (slug, name, token_hash, enabled)
+		VALUES ($1, $2, $3, true)
+		ON CONFLICT (slug) DO UPDATE SET
+			name = EXCLUDED.name,
+			token_hash = EXCLUDED.token_hash,
+			enabled = true,
+			updated_at = now()
+	`, source.Slug, source.Name, sources.HashToken(rawToken))
+	if err != nil {
+		return fmt.Errorf("set alert source %s: %w", source.Slug, err)
+	}
+	return nil
+}
+
+func (store *Store) BootstrapSource(ctx context.Context, source sources.Source, rawToken string) error {
+	if err := sources.Validate(source, rawToken); err != nil {
+		return err
+	}
+	_, err := store.pool.Exec(ctx, `
+		INSERT INTO alert_sources (slug, name, token_hash, enabled)
+		VALUES ($1, $2, $3, true)
+		ON CONFLICT (slug) DO UPDATE SET
+			name = EXCLUDED.name,
+			token_hash = EXCLUDED.token_hash,
+			enabled = true,
+			updated_at = now()
+		WHERE alert_sources.token_hash IS NULL
+	`, source.Slug, source.Name, sources.HashToken(rawToken))
+	if err != nil {
+		return fmt.Errorf("bootstrap alert source %s: %w", source.Slug, err)
+	}
+	return nil
+}
+
+func (store *Store) AuthenticateSource(ctx context.Context, slug, rawToken string) (bool, error) {
+	var expected []byte
+	err := store.pool.QueryRow(ctx, `
+		SELECT token_hash
+		FROM alert_sources
+		WHERE slug = $1 AND enabled AND token_hash IS NOT NULL
+	`, slug).Scan(&expected)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("authenticate alert source %s: %w", slug, err)
+	}
+	provided := sources.HashToken(rawToken)
+	return subtle.ConstantTimeCompare(provided, expected) == 1, nil
+}
+
+func (store *Store) StoreSession(ctx context.Context, session auth.Session) error {
+	_, err := store.pool.Exec(ctx, `
+		INSERT INTO sessions (token_hash, subject, email, display_name, roles, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, session.TokenHash, session.Subject, session.Email, session.DisplayName, session.Roles, session.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("store session: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) FindSession(ctx context.Context, tokenHash []byte, now time.Time) (auth.Session, error) {
+	var session auth.Session
+	err := store.pool.QueryRow(ctx, `
+		UPDATE sessions SET last_seen_at = $2
+		WHERE token_hash = $1 AND expires_at > $2
+		RETURNING token_hash, subject, email, display_name, roles, expires_at
+	`, tokenHash, now).Scan(
+		&session.TokenHash, &session.Subject, &session.Email, &session.DisplayName, &session.Roles, &session.ExpiresAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return auth.Session{}, auth.ErrUnauthenticated
+	}
+	if err != nil {
+		return auth.Session{}, fmt.Errorf("find session: %w", err)
+	}
+	return session, nil
+}
+
+func (store *Store) DeleteSession(ctx context.Context, tokenHash []byte) error {
+	if _, err := store.pool.Exec(ctx, "DELETE FROM sessions WHERE token_hash = $1", tokenHash); err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) StoreOIDCTransaction(ctx context.Context, transaction auth.OIDCTransaction) error {
+	err := pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "DELETE FROM oidc_login_transactions WHERE expires_at <= now()"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO oidc_login_transactions (state_hash, nonce, code_verifier, expires_at)
+			VALUES ($1, $2, $3, $4)
+		`, transaction.StateHash, transaction.Nonce, transaction.CodeVerifier, transaction.ExpiresAt)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("store OIDC login transaction: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) ConsumeOIDCTransaction(ctx context.Context, stateHash []byte, now time.Time) (auth.OIDCTransaction, error) {
+	var transaction auth.OIDCTransaction
+	err := store.pool.QueryRow(ctx, `
+		DELETE FROM oidc_login_transactions
+		WHERE state_hash = $1 AND expires_at > $2
+		RETURNING state_hash, nonce, code_verifier, expires_at
+	`, stateHash, now).Scan(
+		&transaction.StateHash, &transaction.Nonce, &transaction.CodeVerifier, &transaction.ExpiresAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return auth.OIDCTransaction{}, auth.ErrInvalidOIDCTransaction
+	}
+	if err != nil {
+		return auth.OIDCTransaction{}, fmt.Errorf("consume OIDC login transaction: %w", err)
+	}
+	return transaction, nil
 }
 
 func (store *Store) Ingest(ctx context.Context, alerts []alertmanager.IncomingAlert) error {
@@ -132,6 +262,15 @@ func (store *Store) Ingest(ctx context.Context, alerts []alertmanager.IncomingAl
 						return err
 					}
 				}
+			}
+		}
+		if len(alerts) > 0 {
+			if _, err := tx.Exec(ctx, `
+				UPDATE alert_sources
+				SET last_delivery_at = $2, updated_at = now()
+				WHERE slug = $1
+			`, alerts[0].SourceSlug, alerts[0].ReceivedAt); err != nil {
+				return fmt.Errorf("update source delivery time: %w", err)
 			}
 		}
 		return nil

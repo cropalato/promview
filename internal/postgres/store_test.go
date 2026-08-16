@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/cropalato/promview/internal/alertmanager"
 	"github.com/cropalato/promview/internal/alerts"
+	"github.com/cropalato/promview/internal/auth"
+	"github.com/cropalato/promview/internal/sources"
 )
 
 func TestStoreIngestAndList(t *testing.T) {
@@ -33,15 +36,35 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 3 {
-		t.Fatalf("migration count = %d, want 3", migrationCount)
+	if migrationCount != 5 {
+		t.Fatalf("migration count = %d, want 5", migrationCount)
 	}
-	if _, err := pool.Exec(ctx, "TRUNCATE stream_events, alert_history, alerts RESTART IDENTITY"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE oidc_login_transactions, sessions, stream_events, alert_history, alerts RESTART IDENTITY"); err != nil {
 		t.Fatal(err)
 	}
 
 	base := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	store := New(pool)
+	const sourceToken = "0123456789abcdef"
+	if err := store.SetSource(ctx, sources.Source{Slug: "primary", Name: "Primary"}, sourceToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.BootstrapSource(ctx, sources.Source{Slug: "primary", Name: "Bootstrap"}, "fedcba9876543210"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		token string
+		want  bool
+	}{
+		{token: sourceToken, want: true},
+		{token: "wrong-token-value", want: false},
+		{token: "fedcba9876543210", want: false},
+	} {
+		got, err := store.AuthenticateSource(ctx, "primary", test.token)
+		if err != nil || got != test.want {
+			t.Fatalf("AuthenticateSource(%q) = %v, %v, want %v", test.token, got, err, test.want)
+		}
+	}
 	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{
 		incoming("newest", "critical", "platform", base.Add(3*time.Minute)),
 		incoming("middle", "warning", "payments", base.Add(2*time.Minute)),
@@ -148,6 +171,38 @@ func TestStoreIngestAndList(t *testing.T) {
 	}
 	if detail.Alert.Occurrence != 2 || len(detail.History) != 4 || detail.History[0].Type != "alert.reopened" || detail.History[0].Occurrence != 2 {
 		t.Fatalf("reopened detail = %#v, want occurrence 2", detail)
+	}
+
+	var delivered bool
+	if err := pool.QueryRow(ctx, "SELECT last_delivery_at IS NOT NULL FROM alert_sources WHERE slug = 'primary'").Scan(&delivered); err != nil {
+		t.Fatal(err)
+	}
+	if !delivered {
+		t.Fatal("source last_delivery_at was not updated")
+	}
+
+	manager := auth.NewSessionManager(store, time.Hour)
+	principal := auth.Principal{Subject: "user-1", DisplayName: "User One", Roles: []string{"viewer"}}
+	token, err := manager.NewSession(ctx, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.FindSession(ctx, auth.HashSessionToken(token), time.Now().UTC())
+	if err != nil || session.Subject != principal.Subject {
+		t.Fatalf("session = %#v, error = %v", session, err)
+	}
+	transaction := auth.OIDCTransaction{
+		StateHash: auth.HashSessionToken("state"), Nonce: "nonce", CodeVerifier: "verifier", ExpiresAt: base.Add(time.Hour),
+	}
+	if err := store.StoreOIDCTransaction(ctx, transaction); err != nil {
+		t.Fatal(err)
+	}
+	consumed, err := store.ConsumeOIDCTransaction(ctx, transaction.StateHash, base)
+	if err != nil || consumed.Nonce != transaction.Nonce {
+		t.Fatalf("OIDC transaction = %#v, error = %v", consumed, err)
+	}
+	if _, err := store.ConsumeOIDCTransaction(ctx, transaction.StateHash, base); !errors.Is(err, auth.ErrInvalidOIDCTransaction) {
+		t.Fatalf("replayed OIDC transaction error = %v, want invalid transaction", err)
 	}
 }
 
