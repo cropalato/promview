@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -56,7 +57,7 @@ func run() error {
 		case "access":
 			return runAccessCommand(ctx, postgres.New(pool), os.Args[2:])
 		default:
-			return errors.New("usage: promview [migrate|source set|access set|access delete]")
+			return errors.New("usage: promview [migrate|source set|access set|access delete|access inspect]")
 		}
 	}
 
@@ -124,6 +125,7 @@ func run() error {
 type accessStore interface {
 	SetRoleBinding(context.Context, auth.RoleBinding) error
 	DeleteRoleBinding(context.Context, string) error
+	AuthorizationDiagnostics(context.Context) (auth.AuthorizationDiagnostics, error)
 }
 
 type repeatedStrings []string
@@ -136,9 +138,18 @@ func (values *repeatedStrings) Set(value string) error {
 
 func runAccessCommand(ctx context.Context, store accessStore, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: promview access [set|delete]")
+		return errors.New("usage: promview access [set|delete|inspect]")
 	}
 	switch args[0] {
+	case "inspect":
+		if len(args) != 1 {
+			return errors.New("usage: promview access inspect")
+		}
+		diagnostics, err := store.AuthorizationDiagnostics(ctx)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(diagnostics)
 	case "delete":
 		flags := flag.NewFlagSet("promview access delete", flag.ContinueOnError)
 		name := flags.String("name", "", "binding name")
@@ -185,7 +196,7 @@ func runAccessCommand(ctx context.Context, store accessStore, args []string) err
 		}
 		return store.SetRoleBinding(ctx, binding)
 	default:
-		return errors.New("usage: promview access [set|delete]")
+		return errors.New("usage: promview access [set|delete|inspect]")
 	}
 }
 

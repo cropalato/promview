@@ -19,6 +19,8 @@ interface AlertDetailDrawerProps {
   state: AlertDetailState;
   onClose: () => void;
   onRetry: () => void;
+  /** Runs an acknowledge toggle; forwarded to the overview's gated action. */
+  onAcknowledge?: (acknowledged: boolean) => Promise<void>;
 }
 
 /**
@@ -29,7 +31,13 @@ interface AlertDetailDrawerProps {
  * the close button both dismiss it. The component is remounted per alert id
  * (the App keys it by id), so tab/scroll state never leaks between alerts.
  */
-export function AlertDetailDrawer({ alertId, state, onClose, onRetry }: AlertDetailDrawerProps) {
+export function AlertDetailDrawer({
+  alertId,
+  state,
+  onClose,
+  onRetry,
+  onAcknowledge,
+}: AlertDetailDrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -153,7 +161,9 @@ export function AlertDetailDrawer({ alertId, state, onClose, onRetry }: AlertDet
               tabIndex={0}
               className="detail-panel"
             >
-              {activeTab === 'overview' ? <AlertDetailOverview detail={ready.alert} /> : null}
+              {activeTab === 'overview' ? (
+                <AlertDetailOverview detail={ready.alert} onAcknowledge={onAcknowledge} />
+              ) : null}
               {activeTab === 'timeline' ? <AlertTimeline history={ready.history} /> : null}
               {activeTab === 'raw' ? <AlertRawView rawData={ready.alert.rawData} /> : null}
             </div>

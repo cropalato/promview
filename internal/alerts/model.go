@@ -9,21 +9,24 @@ import (
 var ErrNotFound = errors.New("alert not found")
 
 type Alert struct {
-	ID           int64
-	SourceSlug   string
-	Fingerprint  string
-	SourceStatus string
-	Labels       map[string]string
-	Annotations  map[string]string
-	StartsAt     time.Time
-	EndsAt       *time.Time
-	GeneratorURL string
-	ExternalURL  string
-	FirstSeen    time.Time
-	LastSeen     time.Time
-	RepeatCount  int64
-	Occurrence   int
-	RawData      json.RawMessage
+	ID             int64
+	SourceSlug     string
+	Fingerprint    string
+	SourceStatus   string
+	Labels         map[string]string
+	Annotations    map[string]string
+	StartsAt       time.Time
+	EndsAt         *time.Time
+	GeneratorURL   string
+	ExternalURL    string
+	FirstSeen      time.Time
+	LastSeen       time.Time
+	RepeatCount    int64
+	Occurrence     int
+	Acknowledged   bool
+	AcknowledgedAt *time.Time
+	AcknowledgedBy string
+	RawData        json.RawMessage
 }
 
 type Cursor struct {

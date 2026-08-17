@@ -32,6 +32,23 @@ func TestCanReadLabelsUsesOrAcrossGrants(t *testing.T) {
 	}
 }
 
+func TestCanOperateLabelsExcludesViewersAndHonorsOperatorScope(t *testing.T) {
+	labels := map[string]string{"team": "platform"}
+	viewer := Principal{Grants: []Grant{{Role: RoleViewer}}}
+	if viewer.CanOperate() || CanOperateLabels(viewer, labels) {
+		t.Fatal("viewer can operate")
+	}
+	operator := Principal{Grants: []Grant{{
+		Role: RoleOperator, Matchers: []LabelMatcher{{Name: "team", Operator: "=", Value: "platform"}},
+	}}}
+	if !operator.CanOperate() || !CanOperateLabels(operator, labels) {
+		t.Fatal("scoped operator cannot operate in scope")
+	}
+	if CanOperateLabels(operator, map[string]string{"team": "payments"}) {
+		t.Fatal("scoped operator can operate out of scope")
+	}
+}
+
 func TestValidateRoleBinding(t *testing.T) {
 	valid := RoleBinding{
 		Name: "platform-operators", SubjectKind: SubjectOIDCGroup,

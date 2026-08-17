@@ -36,8 +36,8 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 7 {
-		t.Fatalf("migration count = %d, want 7", migrationCount)
+	if migrationCount != 8 {
+		t.Fatalf("migration count = %d, want 8", migrationCount)
 	}
 	if _, err := pool.Exec(ctx, "TRUNCATE oidc_login_transactions, sessions, role_binding_matchers, role_bindings, auth_identity_groups, auth_identities, users, stream_events, alert_history, alerts RESTART IDENTITY"); err != nil {
 		t.Fatal(err)
@@ -182,6 +182,49 @@ func TestStoreIngestAndList(t *testing.T) {
 	}
 	if detail.Alert.Occurrence != 2 || len(detail.History) != 4 || detail.History[0].Type != "alert.reopened" || detail.History[0].Occurrence != 2 {
 		t.Fatalf("reopened detail = %#v, want occurrence 2", detail)
+	}
+
+	operator := auth.Principal{Subject: "operator-1", Grants: []auth.Grant{{
+		Role: auth.RoleOperator, Matchers: []auth.LabelMatcher{{Name: "team", Operator: "=", Value: "payments"}},
+	}}}
+	acknowledged, err := store.AcknowledgeAlert(ctx, operator, 2, true)
+	if err != nil || !acknowledged.Alert.Acknowledged || acknowledged.Alert.AcknowledgedBy != "operator-1" || acknowledged.Alert.AcknowledgedAt == nil {
+		t.Fatalf("acknowledged detail = %#v, error = %v", acknowledged, err)
+	}
+	if acknowledged.History[0].Type != "alert.acknowledged" || acknowledged.History[0].Actor != "operator-1" || acknowledged.History[0].Message != "Alert acknowledged" {
+		t.Fatalf("acknowledgement history = %#v", acknowledged.History[0])
+	}
+	unacknowledged, err := store.AcknowledgeAlert(ctx, operator, 2, false)
+	if err != nil || unacknowledged.Alert.Acknowledged || unacknowledged.Alert.AcknowledgedAt != nil || unacknowledged.Alert.AcknowledgedBy != "" {
+		t.Fatalf("unacknowledged detail = %#v, error = %v", unacknowledged, err)
+	}
+	if unacknowledged.History[0].Type != "alert.unacknowledged" || unacknowledged.History[0].Actor != "operator-1" || unacknowledged.History[0].Message != "Alert unacknowledged" {
+		t.Fatalf("unacknowledgement history = %#v", unacknowledged.History[0])
+	}
+	if _, err := store.AcknowledgeAlert(ctx, operator, 2, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AcknowledgeAlert(ctx, auth.Principal{Subject: "wrong-scope", Grants: []auth.Grant{{Role: auth.RoleOperator, Matchers: []auth.LabelMatcher{{Name: "team", Operator: "=", Value: "platform"}}}}}, 2, false); !errors.Is(err, alerts.ErrNotFound) {
+		t.Fatalf("out-of-scope acknowledgement error = %v, want not found", err)
+	}
+	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{repeated}); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = store.GetAlertDetail(ctx, principal, 2)
+	if err != nil || !detail.Alert.Acknowledged {
+		t.Fatalf("ordinary repeat acknowledgement = %#v, error = %v", detail.Alert, err)
+	}
+	repeated.Status = "resolved"
+	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{repeated}); err != nil {
+		t.Fatal(err)
+	}
+	repeated.Status = "firing"
+	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{repeated}); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = store.GetAlertDetail(ctx, principal, 2)
+	if err != nil || detail.Alert.Acknowledged || detail.Alert.AcknowledgedAt != nil || detail.Alert.AcknowledgedBy != "" {
+		t.Fatalf("reopened acknowledgement = %#v, error = %v", detail.Alert, err)
 	}
 
 	var delivered bool

@@ -1,11 +1,17 @@
 import { safeExternalUrl } from '../alerts/detail';
 import type { AlertDetail } from '../alerts/detail';
 import { formatTimestamp } from '../alerts/format';
+import { AcknowledgeButton } from './AcknowledgeButton';
 import { CopyButton } from './CopyButton';
 import { ExternalLinkIcon, SeverityIcon } from './icons';
 
 interface AlertDetailOverviewProps {
   detail: AlertDetail;
+  /**
+   * Runs the acknowledge toggle. The Actions section renders only when both
+   * this handler and the server-provided per-alert permission are present.
+   */
+  onAcknowledge?: (acknowledged: boolean) => Promise<void>;
 }
 
 function byKey([a]: [string, string], [b]: [string, string]): number {
@@ -14,11 +20,13 @@ function byKey([a]: [string, string], [b]: [string, string]): number {
 
 /**
  * Overview tab of the alert detail drawer: the operational facts (severity,
- * state, source, occurrence, repeat count, timestamps), safe links out to
- * the generator/Alertmanager, and the full label/annotation sets with copy
- * controls. Read-only; open mode never offers mutating actions.
+ * state, acknowledgement, source, occurrence, repeat count, timestamps),
+ * safe links out to the generator/Alertmanager, and the full
+ * label/annotation sets with copy controls. Mutating operator actions are
+ * gated on the server-provided per-alert permissions; open mode (anonymous
+ * viewer) never receives them, so it never sees the controls.
  */
-export function AlertDetailOverview({ detail }: AlertDetailOverviewProps) {
+export function AlertDetailOverview({ detail, onAcknowledge }: AlertDetailOverviewProps) {
   const labels = Object.entries(detail.labels).sort(byKey);
   const annotations = Object.entries(detail.annotations).sort(byKey);
 
@@ -41,6 +49,19 @@ export function AlertDetailOverview({ detail }: AlertDetailOverviewProps) {
           </dd>
         </div>
         <div className="detail-fact">
+          <dt>Acknowledged</dt>
+          <dd>
+            {detail.acknowledged ? (
+              <>
+                <span className="state-chip state-acknowledged">acknowledged</span>{' '}
+                <span className="detail-mono">{acknowledgementNote(detail)}</span>
+              </>
+            ) : (
+              <span className="detail-mono">No</span>
+            )}
+          </dd>
+        </div>
+        <div className="detail-fact">
           <dt>Source</dt>
           <dd className="detail-mono">{detail.source}</dd>
         </div>
@@ -57,6 +78,13 @@ export function AlertDetailOverview({ detail }: AlertDetailOverviewProps) {
           <dd className="detail-mono detail-break">{detail.fingerprint || '—'}</dd>
         </div>
       </dl>
+
+      {detail.actions.canAcknowledge && onAcknowledge !== undefined ? (
+        <section className="detail-section" aria-label="Actions">
+          <h3 className="detail-section-title">Actions</h3>
+          <AcknowledgeButton acknowledged={detail.acknowledged} onAcknowledge={onAcknowledge} />
+        </section>
+      ) : null}
 
       <section className="detail-section" aria-label="Timestamps">
         <h3 className="detail-section-title">Timestamps</h3>
@@ -125,6 +153,21 @@ export function AlertDetailOverview({ detail }: AlertDetailOverviewProps) {
       </section>
     </div>
   );
+}
+
+/**
+ * Human note next to the acknowledged chip: actor and/or timestamp, whichever
+ * the API provided. Empty when neither is known.
+ */
+function acknowledgementNote(detail: AlertDetail): string {
+  const parts: string[] = [];
+  if (detail.acknowledgedBy !== '') {
+    parts.push(`by ${detail.acknowledgedBy}`);
+  }
+  if (detail.acknowledgedAt !== null) {
+    parts.push(`at ${formatTimestamp(detail.acknowledgedAt)}`);
+  }
+  return parts.join(' ');
 }
 
 /**

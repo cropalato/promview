@@ -14,8 +14,9 @@ type fakeSourceSetter struct {
 }
 
 type fakeAccessStore struct {
-	binding auth.RoleBinding
-	deleted string
+	binding     auth.RoleBinding
+	deleted     string
+	diagnostics auth.AuthorizationDiagnostics
 }
 
 func (store *fakeAccessStore) SetRoleBinding(_ context.Context, binding auth.RoleBinding) error {
@@ -26,6 +27,10 @@ func (store *fakeAccessStore) SetRoleBinding(_ context.Context, binding auth.Rol
 func (store *fakeAccessStore) DeleteRoleBinding(_ context.Context, name string) error {
 	store.deleted = name
 	return nil
+}
+
+func (store *fakeAccessStore) AuthorizationDiagnostics(context.Context) (auth.AuthorizationDiagnostics, error) {
+	return store.diagnostics, nil
 }
 
 func (setter *fakeSourceSetter) SetSource(_ context.Context, source sources.Source, token string) error {

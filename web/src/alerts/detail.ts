@@ -11,6 +11,16 @@ import type { AlertState } from './types';
  * alert snapshot plus the lifecycle history in a single round trip.
  */
 
+/**
+ * Per-alert operator actions, decided server-side from the caller's roles
+ * and label scopes (`actions` in the API payload). The UI only offers a
+ * mutating control when the matching flag is true; anything absent means
+ * "not allowed".
+ */
+export interface AlertActions {
+  canAcknowledge: boolean;
+}
+
 /** Fully validated alert detail, mapped for the drawer panels. */
 export interface AlertDetail {
   id: string;
@@ -32,6 +42,14 @@ export interface AlertDetail {
   lastSeen: string;
   repeatCount: number;
   occurrence: number;
+  /** Whether an operator has acknowledged the alert. */
+  acknowledged: boolean;
+  /** Actor who acknowledged; empty when unset or not acknowledged. */
+  acknowledgedBy: string;
+  /** Acknowledgement timestamp; null when not acknowledged. */
+  acknowledgedAt: string | null;
+  /** Server-provided actions the caller may run against this alert. */
+  actions: AlertActions;
   /** Source payload as delivered by Alertmanager; rendered as plain JSON. */
   rawData: unknown;
 }
@@ -82,7 +100,11 @@ export function buildAlertDetailUrl(id: string): string {
   return `${ALERTS_URL}/${encodeURIComponent(id)}`;
 }
 
-type FetchLike = (url: string) => Promise<Response>;
+export function buildAcknowledgeUrl(id: string): string {
+  return `${buildAlertDetailUrl(id)}/acknowledge`;
+}
+
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
  * Fetches and validates one alert detail. Follows the same error contract as
@@ -119,6 +141,48 @@ export async function fetchAlertDetail(
 /** True when the detail request failed because the alert does not exist. */
 export function isAlertNotFound(error: unknown): boolean {
   return error instanceof AlertsApiError && error.status === 404;
+}
+
+/**
+ * Toggles the acknowledgement of one alert through
+ * `POST /api/v1/alerts/{id}/acknowledge` with a JSON `{acknowledged}` body.
+ * The response is the full detail envelope (updated alert, including the
+ * refreshed acknowledgement state and actions, plus the lifecycle history),
+ * so callers can replace their cached detail wholesale. Same-origin and
+ * cookie-based like the other clients; the same error contract applies — a
+ * 403 means the server withheld the operator permission the UI gated on,
+ * and surfaces like any other failure.
+ */
+export async function setAlertAcknowledgement(
+  id: string,
+  acknowledged: boolean,
+  fetchImpl: FetchLike = (url, init) => fetch(url, init),
+): Promise<AlertDetailResult> {
+  let response: Response;
+  try {
+    response = await fetchImpl(buildAcknowledgeUrl(id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acknowledged }),
+    });
+  } catch (cause) {
+    throw new AlertsApiError('Unable to reach the Promview API', { cause });
+  }
+
+  if (!response.ok) {
+    throw new AlertsApiError(`Acknowledge request failed (HTTP ${response.status})`, {
+      status: response.status,
+    });
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (cause) {
+    throw new AlertsApiError('Acknowledge response was not valid JSON', { cause });
+  }
+
+  return parseAlertDetailResponse(body);
 }
 
 /**
@@ -180,8 +244,24 @@ function parseAlertDetail(value: unknown): AlertDetail {
     lastSeen: requiredString(raw.lastSeen, 'alert.lastSeen'),
     repeatCount: requiredNumber(raw.repeatCount, 'alert.repeatCount'),
     occurrence: requiredNumber(raw.occurrence, 'alert.occurrence'),
+    acknowledged: raw.acknowledged === true,
+    acknowledgedBy: optionalString(raw.acknowledgedBy),
+    acknowledgedAt:
+      raw.acknowledgedAt === null || raw.acknowledgedAt === undefined
+        ? null
+        : requiredString(raw.acknowledgedAt, 'alert.acknowledgedAt'),
+    actions: parseActions(raw.actions),
     rawData: raw.rawData === null || raw.rawData === undefined ? {} : raw.rawData,
   };
+}
+
+/** An absent or malformed actions envelope means "no actions allowed". */
+function parseActions(value: unknown): AlertActions {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { canAcknowledge: false };
+  }
+  const record = value as Record<string, unknown>;
+  return { canAcknowledge: record.canAcknowledge === true };
 }
 
 function parseHistory(value: unknown): AlertHistoryEvent[] {

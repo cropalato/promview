@@ -6,10 +6,14 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-08-17
+
 ### Features
 
 - **web:** add opt-in browser notifications for newly created critical alerts while Promview is open.
 - **auth:** persist OIDC identities and enforce database-backed role and label-selector bindings across alert queries and streams.
+- **alerts:** let authorized operators acknowledge and unacknowledge alerts with occurrence-aware state, history, and live updates.
+- **auth:** add `promview access inspect` for privileged OIDC identity, group, and binding diagnostics without exposing provider tokens or sessions.
 
 ### Changed
 
@@ -19,7 +23,7 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 ### Build System
 
 - **helm:** add a hardened Kubernetes chart with migration hooks, external Secret integration, OIDC, Ingress, and health tests.
-- **release:** publish multi-architecture images and the Helm chart to GHCR from version tags.
+- **release:** publish multi-architecture images to GHCR and Docker Hub, and publish the Helm chart to GHCR from version tags.
 
 ### Documentation
 

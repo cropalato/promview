@@ -27,7 +27,7 @@ Install from the OCI registry after a release is published:
 ```sh
 helm install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.3
+  --version 0.1.0-alpha.4
 ```
 
 Install a local checkout:
@@ -89,7 +89,7 @@ Apply it with:
 ```sh
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.3 \
+  --version 0.1.0-alpha.4 \
   --values oidc-values.yaml
 ```
 
@@ -159,7 +159,7 @@ make verify-helm
 | Value | Default | Description |
 | --- | --- | --- |
 | `replicaCount` | `1` | Number of application replicas |
-| `image.repository` | `ghcr.io/cropalato/promview` | Application image repository |
+| `image.repository` | `cropalato/promview` | Application image repository |
 | `image.tag` | chart app version | Application image tag |
 | `image.digest` | empty | Optional immutable image digest; mutually exclusive with tag |
 | `database.existingSecret` | `promview-database` | Secret containing the PostgreSQL URL |

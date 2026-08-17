@@ -230,4 +230,69 @@ describe('useAlertDetail', () => {
     expect(result.current.state.status).toBe('ready');
     expect(readyDetail(result.current.state).alert.name).toBe('HighErrorRate');
   });
+
+  it('acknowledges the selected alert and replaces the detail with the response', async () => {
+    fetchMock().mockResolvedValueOnce(jsonResponse(apiDetailResponse()));
+    const { result } = renderHook(() => useAlertDetail('42'));
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    expect(readyDetail(result.current.state).alert.acknowledged).toBe(false);
+
+    fetchMock().mockResolvedValueOnce(
+      jsonResponse(
+        apiDetailResponse({
+          alert: apiAlertDetail({
+            acknowledged: true,
+            acknowledgedBy: 'operator@example.com',
+            acknowledgedAt: '2026-08-14T11:05:00Z',
+            actions: { canAcknowledge: true },
+          }),
+          history: [apiHistoryEvent({ id: 12, type: 'acknowledged' }), apiHistoryEvent()],
+        }),
+      ),
+    );
+    await act(async () => {
+      await result.current.acknowledge(true);
+    });
+
+    expect(fetchMock()).toHaveBeenCalledTimes(2);
+    expect(fetchMock()).toHaveBeenLastCalledWith('/api/v1/alerts/42/acknowledge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acknowledged: true }),
+    });
+    const detail = readyDetail(result.current.state);
+    expect(detail.alert.acknowledged).toBe(true);
+    expect(detail.alert.acknowledgedBy).toBe('operator@example.com');
+    // The endpoint returns the refreshed history; it replaces the old list.
+    expect(detail.history.map((event) => event.type)).toEqual(['acknowledged', 'updated']);
+  });
+
+  it('keeps the detail and rethrows when the acknowledge request fails', async () => {
+    fetchMock().mockResolvedValueOnce(jsonResponse(apiDetailResponse()));
+    const { result } = renderHook(() => useAlertDetail('42'));
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+
+    fetchMock().mockResolvedValueOnce(jsonResponse({ error: 'forbidden' }, 403));
+    await act(async () => {
+      await expect(result.current.acknowledge(true)).rejects.toThrowError(/HTTP 403/);
+    });
+
+    const detail = readyDetail(result.current.state);
+    expect(detail.alert.acknowledged).toBe(false);
+  });
+
+  it('reports a 401 from the acknowledge request as session expiry', async () => {
+    fetchMock().mockResolvedValueOnce(jsonResponse(apiDetailResponse()));
+    const onUnauthorized = vi.fn();
+    const { result } = renderHook(() => useAlertDetail('42', { onUnauthorized }));
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+
+    fetchMock().mockResolvedValueOnce(jsonResponse({ error: 'expired' }, 401));
+    await act(async () => {
+      await expect(result.current.acknowledge(true)).rejects.toThrowError(/HTTP 401/);
+    });
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(result.current.state.status).toBe('ready');
+  });
 });

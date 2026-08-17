@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isAlertsUnauthorized } from '../alerts/api';
-import { fetchAlertDetail, isAlertNotFound } from '../alerts/detail';
+import { fetchAlertDetail, isAlertNotFound, setAlertAcknowledgement } from '../alerts/detail';
 import type { AlertDetailResult } from '../alerts/detail';
 
 export type AlertDetailState =
@@ -33,6 +33,12 @@ export interface UseAlertDetailOptions {
  * place (never dropping back to the loading panel), mirroring the list's
  * quiet refresh. Events for other alerts — or failures — are ignored; the
  * stale detail stays put and the next event retries.
+ *
+ * `acknowledge` is the operator-action entry point: it posts the toggle and,
+ * on success, replaces the ready detail with the response (the endpoint
+ * returns the updated alert plus the refreshed history). Failures keep the
+ * current detail and rethrow so the caller can show inline feedback; a 401
+ * also reports session expiry like any other request.
  */
 export function useAlertDetail(
   alertId: string | null,
@@ -41,6 +47,7 @@ export function useAlertDetail(
   state: AlertDetailState;
   retry: () => void;
   refreshIfSelected: (id: string) => void;
+  acknowledge: (acknowledged: boolean) => Promise<void>;
 } {
   const { onUnauthorized } = options;
   const [state, setState] = useState<AlertDetailState>({ status: 'idle' });
@@ -159,5 +166,31 @@ export function useAlertDetail(
 
   const retry = useCallback(() => setAttempt((current) => current + 1), []);
 
-  return { state, retry, refreshIfSelected };
+  const acknowledge = useCallback(
+    async (acknowledged: boolean): Promise<void> => {
+      const id = alertIdRef.current;
+      if (id === null || !readyRef.current) {
+        throw new Error('Alert detail is not loaded');
+      }
+      try {
+        const updated = await setAlertAcknowledgement(id, acknowledged);
+        if (disposedRef.current) {
+          return;
+        }
+        // Replace only when the drawer is still showing this alert.
+        setState((current) =>
+          current.status === 'ready' && alertIdRef.current === id
+            ? { status: 'ready', detail: updated }
+            : current,
+        );
+      } catch (error) {
+        // A 401 means the session expired — route back to the sign-in gate.
+        reportIfUnauthorized(error);
+        throw error;
+      }
+    },
+    [reportIfUnauthorized],
+  );
+
+  return { state, retry, refreshIfSelected, acknowledge };
 }

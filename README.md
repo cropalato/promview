@@ -51,7 +51,7 @@ Promview ships a Helm chart for an external PostgreSQL database:
 ```sh
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.3
+  --version 0.1.0-alpha.4
 ```
 
 Create the required database Secret before installation. See [`docs/kubernetes.md`](docs/kubernetes.md) and [`charts/promview/README.md`](charts/promview/README.md) for the complete procedure, OIDC values, migration lifecycle, and production checklist.

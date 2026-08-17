@@ -19,17 +19,18 @@ import (
 )
 
 type fakeStore struct {
-	alerts      []alertmanager.IncomingAlert
-	query       alerts.Query
-	result      alerts.ListResult
-	events      []alerts.StreamEvent
-	detail      alerts.Detail
-	detailErr   error
-	afterID     int64
-	cancel      context.CancelFunc
-	pingErr     error
-	sourceToken string
-	principal   auth.Principal
+	alerts       []alertmanager.IncomingAlert
+	query        alerts.Query
+	result       alerts.ListResult
+	events       []alerts.StreamEvent
+	detail       alerts.Detail
+	detailErr    error
+	acknowledged *bool
+	afterID      int64
+	cancel       context.CancelFunc
+	pingErr      error
+	sourceToken  string
+	principal    auth.Principal
 }
 
 type fakeAuthenticator struct {
@@ -81,6 +82,12 @@ func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal
 
 func (store *fakeStore) GetAlertDetail(_ context.Context, principal auth.Principal, _ int64) (alerts.Detail, error) {
 	store.principal = principal
+	return store.detail, store.detailErr
+}
+
+func (store *fakeStore) AcknowledgeAlert(_ context.Context, principal auth.Principal, _ int64, acknowledged bool) (alerts.Detail, error) {
+	store.principal = principal
+	store.acknowledged = &acknowledged
 	return store.detail, store.detailErr
 }
 
@@ -260,6 +267,66 @@ func TestGetAlertRejectsInvalidID(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts/nope", nil))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestAcknowledgeAlert(t *testing.T) {
+	store := &fakeStore{detail: alerts.Detail{Alert: alerts.Alert{
+		ID: 42, Labels: map[string]string{"team": "platform"}, Acknowledged: true,
+	}}}
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{
+		Subject: "operator-1", Roles: []string{"operator"},
+	}})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/alerts/42/acknowledge", strings.NewReader(`{"acknowledged":true}`))
+	request.Header.Set("Authorization", "Bearer session-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || store.acknowledged == nil || !*store.acknowledged {
+		t.Fatalf("status = %d, acknowledged = %v; body = %s", response.Code, store.acknowledged, response.Body.String())
+	}
+	var body struct {
+		Alert struct {
+			Acknowledged bool `json:"acknowledged"`
+			Actions      struct {
+				CanAcknowledge bool `json:"canAcknowledge"`
+			} `json:"actions"`
+		} `json:"alert"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Alert.Acknowledged || !body.Alert.Actions.CanAcknowledge {
+		t.Fatalf("response alert = %#v", body.Alert)
+	}
+}
+
+func TestAcknowledgeAlertRejectsViewerAndCookieCSRF(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		principal  auth.Principal
+		cookie     bool
+		origin     string
+		wantStatus int
+	}{
+		{name: "viewer", principal: auth.Principal{Subject: "viewer", Roles: []string{"viewer"}}, wantStatus: http.StatusForbidden},
+		{name: "cookie without origin", principal: auth.Principal{Subject: "operator", Roles: []string{"operator"}}, cookie: true, wantStatus: http.StatusForbidden},
+		{name: "cookie cross origin", principal: auth.Principal{Subject: "operator", Roles: []string{"operator"}}, cookie: true, origin: "https://attacker.example", wantStatus: http.StatusForbidden},
+		{name: "cookie same origin", principal: auth.Principal{Subject: "operator", Roles: []string{"operator"}}, cookie: true, origin: "https://example.test", wantStatus: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{detail: alerts.Detail{Alert: alerts.Alert{ID: 42, Labels: map[string]string{}}}}
+			handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: test.principal})
+			request := httptest.NewRequest(http.MethodPost, "https://example.test/api/v1/alerts/42/acknowledge", strings.NewReader(`{"acknowledged":false}`))
+			if test.cookie {
+				request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+			}
+			request.Header.Set("Origin", test.origin)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, test.wantStatus, response.Body.String())
+			}
+		})
 	}
 }
 

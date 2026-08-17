@@ -748,6 +748,12 @@ kbd {
   color: var(--text-faint);
 }
 
+.state-acknowledged {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border-strong));
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
 /* Empty state */
 .empty-state {
   padding: 56px 20px;
@@ -1122,6 +1128,19 @@ kbd {
 .detail-empty-note {
   color: var(--text-faint);
   font-size: 12.5px;
+}
+
+.detail-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.detail-action-error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--down);
 }
 
 .kv-list {
