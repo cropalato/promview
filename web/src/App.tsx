@@ -81,6 +81,7 @@ export default function App({ navigate }: AppProps = {}) {
     state: detailState,
     retry: retryDetail,
     refreshIfSelected: refreshDetailIfSelected,
+    acknowledge: acknowledgeDetail,
   } = useAlertDetail(effectiveSelectedAlertId, { onUnauthorized: expireSession });
   // Browser notifications for new critical alerts while the tab is hidden;
   // a click focuses the window and deep-links to the alert.
@@ -296,6 +297,7 @@ export default function App({ navigate }: AppProps = {}) {
           state={detailState}
           onClose={closeAlert}
           onRetry={retryDetail}
+          onAcknowledge={acknowledgeDetail}
         />
       ) : null}
       <StatusFooter

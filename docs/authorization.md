@@ -98,6 +98,16 @@ promview access delete --name platform-production-operators
 
 Bindings and the most recently observed OIDC group memberships are evaluated for every authenticated request. Removing a binding invalidates access for existing sessions immediately. Identity-provider group changes take effect when Promview next observes them during a successful login. Long-lived streams re-check current bindings before delivering new events.
 
+## Inspect OIDC Authorization
+
+Administrators can inspect the persisted identities, their most recently observed groups, and configured bindings. The command emits JSON and never includes provider tokens or Promview session values:
+
+```sh
+promview access inspect
+```
+
+Use it only in a trusted administrative environment because identity and group information is sensitive.
+
 ## Scoped Streams
 
 Stream events carry label snapshots from the time of the alert change. When an alert moves into a user's scope, Promview sends the normal event. When an alert moves out of scope, Promview sends a redacted `alert.removed` event containing only the event and alert IDs and timestamp, allowing the client to remove stale data without exposing the new labels or summary.

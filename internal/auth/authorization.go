@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type Role string
@@ -38,13 +39,31 @@ type Grant struct {
 }
 
 type RoleBinding struct {
-	Name        string
-	SubjectKind string
-	UserID      int64
-	OIDCIssuer  string
-	OIDCGroup   string
-	Role        Role
-	Matchers    []LabelMatcher
+	Name        string         `json:"name"`
+	SubjectKind string         `json:"subjectKind"`
+	UserID      int64          `json:"userID,omitempty"`
+	OIDCIssuer  string         `json:"oidcIssuer,omitempty"`
+	OIDCGroup   string         `json:"oidcGroup,omitempty"`
+	Role        Role           `json:"role"`
+	Matchers    []LabelMatcher `json:"matchers,omitempty"`
+}
+
+// AuthorizationDiagnostics contains persisted OIDC identity and binding data for administrators.
+// It deliberately excludes provider tokens and Promview sessions.
+type AuthorizationDiagnostics struct {
+	Identities []OIDCIdentityDiagnostic `json:"identities"`
+	Bindings   []RoleBinding            `json:"bindings"`
+}
+
+type OIDCIdentityDiagnostic struct {
+	UserID      int64     `json:"userID"`
+	Issuer      string    `json:"issuer"`
+	Subject     string    `json:"subject"`
+	Username    string    `json:"username"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"displayName"`
+	LastSeenAt  time.Time `json:"lastSeenAt"`
+	Groups      []string  `json:"groups"`
 }
 
 func (principal Principal) CanRead() bool {
@@ -54,6 +73,60 @@ func (principal Principal) CanRead() bool {
 	for _, grant := range principal.Grants {
 		switch grant.Role {
 		case RoleViewer, RoleOperator, RoleAdministrator:
+			return true
+		}
+	}
+	return false
+}
+
+func (principal Principal) CanOperate() bool {
+	if principal.Anonymous {
+		return false
+	}
+	for _, grant := range principal.Grants {
+		if grant.Role == RoleOperator || grant.Role == RoleAdministrator {
+			return true
+		}
+	}
+	return false
+}
+
+func CanOperateLabels(principal Principal, labels map[string]string) bool {
+	if principal.Anonymous {
+		return false
+	}
+	for _, grant := range principal.Grants {
+		if grant.Role == RoleAdministrator {
+			return true
+		}
+		if grant.Role != RoleOperator {
+			continue
+		}
+		matched := true
+		for _, matcher := range grant.Matchers {
+			value, exists := labels[matcher.Name]
+			if !exists {
+				matched = false
+				break
+			}
+			switch matcher.Operator {
+			case "=":
+				matched = value == matcher.Value
+			case "!=":
+				matched = value != matcher.Value
+			case "=~":
+				matched, _ = regexp.MatchString(matcher.Value, value)
+			case "!~":
+				regexMatched, _ := regexp.MatchString(matcher.Value, value)
+				matched = !regexMatched
+			default:
+				matched = false
+			}
+			if !matched {
+				break
+			}
+		}
+		if matched {
 			return true
 		}
 	}

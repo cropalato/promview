@@ -22,6 +22,10 @@ function detail(overrides: Partial<AlertDetail> = {}): AlertDetail {
     lastSeen: '2026-08-14T11:00:00Z',
     repeatCount: 3,
     occurrence: 2,
+    acknowledged: false,
+    acknowledgedBy: '',
+    acknowledgedAt: null,
+    actions: { canAcknowledge: false },
     rawData: {},
     ...overrides,
   };
@@ -123,5 +127,74 @@ describe('AlertDetailOverview', () => {
 
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(screen.getAllByText('—')).toHaveLength(2);
+  });
+
+  it('reports an unacknowledged alert without an actor note', () => {
+    render(<AlertDetailOverview detail={detail()} />);
+
+    expect(screen.getByText('Acknowledged').parentElement).toHaveTextContent('No');
+  });
+
+  it('shows the acknowledgement actor and timestamp when acknowledged', () => {
+    render(
+      <AlertDetailOverview
+        detail={detail({
+          acknowledged: true,
+          acknowledgedBy: 'operator@example.com',
+          acknowledgedAt: '2026-08-14T11:05:00Z',
+        })}
+      />,
+    );
+
+    const fact = screen.getByText('Acknowledged').parentElement;
+    expect(fact).toHaveTextContent('acknowledged');
+    expect(fact).toHaveTextContent('by operator@example.com');
+    expect(fact).toHaveTextContent('at 2026-08-14 11:05:00 UTC');
+  });
+
+  it('omits the note when the API acknowledged without actor details', () => {
+    render(<AlertDetailOverview detail={detail({ acknowledged: true })} />);
+
+    const fact = screen.getByText('Acknowledged').parentElement;
+    expect(fact).toHaveTextContent('acknowledged');
+    expect(fact).not.toHaveTextContent('by ');
+    expect(fact).not.toHaveTextContent('at ');
+  });
+
+  it('renders the acknowledge action only with both permission and handler', () => {
+    const onAcknowledge = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(
+      <AlertDetailOverview
+        detail={detail({ actions: { canAcknowledge: true } })}
+        onAcknowledge={onAcknowledge}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Acknowledge alert' })).toBeInTheDocument();
+
+    // Permission without a handler: no control.
+    rerender(<AlertDetailOverview detail={detail({ actions: { canAcknowledge: true } })} />);
+    expect(screen.queryByRole('button', { name: /acknowledge/i })).not.toBeInTheDocument();
+
+    // Handler without the permission: no control.
+    rerender(<AlertDetailOverview detail={detail()} onAcknowledge={onAcknowledge} />);
+    expect(screen.queryByRole('button', { name: /acknowledge/i })).not.toBeInTheDocument();
+  });
+
+  it('toggles the acknowledgement through the handler', async () => {
+    const onAcknowledge = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AlertDetailOverview
+        detail={detail({
+          acknowledged: true,
+          acknowledgedBy: 'operator@example.com',
+          actions: { canAcknowledge: true },
+        })}
+        onAcknowledge={onAcknowledge}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove acknowledgement' }));
+
+    await waitFor(() => expect(onAcknowledge).toHaveBeenCalledWith(false));
   });
 });

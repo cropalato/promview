@@ -300,6 +300,62 @@ func (store *Store) DeleteRoleBinding(ctx context.Context, name string) error {
 	return nil
 }
 
+func (store *Store) AuthorizationDiagnostics(ctx context.Context) (auth.AuthorizationDiagnostics, error) {
+	diagnostics := auth.AuthorizationDiagnostics{}
+	rows, err := store.pool.Query(ctx, `
+		SELECT identity.id, identity.user_id, identity.issuer, identity.subject, identity.username, identity.email,
+			identity.display_name, identity.last_seen_at, membership.group_name
+		FROM auth_identities AS identity
+		LEFT JOIN auth_identity_groups AS membership ON membership.identity_id = identity.id
+		ORDER BY identity.user_id, identity.id, membership.group_name
+	`)
+	if err != nil {
+		return diagnostics, fmt.Errorf("query OIDC identities: %w", err)
+	}
+	defer rows.Close()
+	var currentIdentityID int64
+	for rows.Next() {
+		var identityID int64
+		var identity auth.OIDCIdentityDiagnostic
+		var group *string
+		if err := rows.Scan(&identityID, &identity.UserID, &identity.Issuer, &identity.Subject, &identity.Username, &identity.Email, &identity.DisplayName, &identity.LastSeenAt, &group); err != nil {
+			return diagnostics, fmt.Errorf("scan OIDC identity: %w", err)
+		}
+		if identityID != currentIdentityID {
+			diagnostics.Identities = append(diagnostics.Identities, identity)
+			currentIdentityID = identityID
+		}
+		if group != nil {
+			last := len(diagnostics.Identities) - 1
+			diagnostics.Identities[last].Groups = append(diagnostics.Identities[last].Groups, *group)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return diagnostics, fmt.Errorf("iterate OIDC identities: %w", err)
+	}
+
+	rows, err = store.pool.Query(ctx, `
+		SELECT name, subject_kind, COALESCE(user_id, 0), COALESCE(oidc_issuer, ''), COALESCE(oidc_group, ''), role
+		FROM role_bindings
+		ORDER BY name
+	`)
+	if err != nil {
+		return diagnostics, fmt.Errorf("query role bindings: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var binding auth.RoleBinding
+		if err := rows.Scan(&binding.Name, &binding.SubjectKind, &binding.UserID, &binding.OIDCIssuer, &binding.OIDCGroup, &binding.Role); err != nil {
+			return diagnostics, fmt.Errorf("scan role binding: %w", err)
+		}
+		diagnostics.Bindings = append(diagnostics.Bindings, binding)
+	}
+	if err := rows.Err(); err != nil {
+		return diagnostics, fmt.Errorf("iterate role bindings: %w", err)
+	}
+	return diagnostics, nil
+}
+
 type principalQuerier interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -452,7 +508,10 @@ func (store *Store) Ingest(ctx context.Context, alerts []alertmanager.IncomingAl
 						last_seen = $10,
 						repeat_count = repeat_count + 1,
 						occurrence = $11,
-						raw_data = $12
+						raw_data = $12,
+						acknowledged = CASE WHEN source_status = 'resolved' AND $3 = 'firing' THEN false ELSE acknowledged END,
+						acknowledged_at = CASE WHEN source_status = 'resolved' AND $3 = 'firing' THEN NULL ELSE acknowledged_at END,
+						acknowledged_by = CASE WHEN source_status = 'resolved' AND $3 = 'firing' THEN '' ELSE acknowledged_by END
 					WHERE source_slug = $1 AND fingerprint = $2
 				`, alert.SourceSlug, alert.Fingerprint, alert.Status, labels, annotations,
 					alert.StartsAt, nullableTime(alert.EndsAt), alert.GeneratorURL, alert.ExternalURL, alert.ReceivedAt,
@@ -542,7 +601,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 	listSQL := `
 		SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen, alert.repeat_count,
-		       alert.occurrence, alert.raw_data
+		       alert.occurrence, alert.acknowledged, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
 		FROM alerts AS alert` + listWhere + fmt.Sprintf(`
 		ORDER BY alert.last_seen DESC, alert.id DESC
 		LIMIT $%d`, len(listArgs))
@@ -562,7 +621,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 			&item.ID, &item.SourceSlug, &item.Fingerprint, &item.SourceStatus,
 			&labelsJSON, &annotationsJSON, &item.StartsAt, &item.EndsAt,
 			&item.GeneratorURL, &item.ExternalURL, &item.FirstSeen, &item.LastSeen, &item.RepeatCount,
-			&item.Occurrence, &item.RawData,
+			&item.Occurrence, &item.Acknowledged, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
 		); err != nil {
 			return alerts.ListResult{}, fmt.Errorf("scan alert: %w", err)
 		}
@@ -602,14 +661,14 @@ func (store *Store) GetAlertDetail(ctx context.Context, principal auth.Principal
 	err := store.pool.QueryRow(ctx, `
 		SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen,
-		       alert.repeat_count, alert.occurrence, alert.raw_data
+		       alert.repeat_count, alert.occurrence, alert.acknowledged, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
 		FROM alerts AS alert
 		WHERE alert.id = $1 AND (`+access+`)
 	`, args...).Scan(
 		&item.ID, &item.SourceSlug, &item.Fingerprint, &item.SourceStatus,
 		&labelsJSON, &annotationsJSON, &item.StartsAt, &item.EndsAt,
 		&item.GeneratorURL, &item.ExternalURL, &item.FirstSeen, &item.LastSeen,
-		&item.RepeatCount, &item.Occurrence, &item.RawData,
+		&item.RepeatCount, &item.Occurrence, &item.Acknowledged, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return alerts.Detail{}, alerts.ErrNotFound
@@ -652,6 +711,78 @@ func (store *Store) GetAlertDetail(ctx context.Context, principal auth.Principal
 		return alerts.Detail{}, fmt.Errorf("iterate history for alert %d: %w", id, err)
 	}
 	return alerts.Detail{Alert: item, History: history}, nil
+}
+
+func (store *Store) AcknowledgeAlert(ctx context.Context, principal auth.Principal, id int64, acknowledged bool) (alerts.Detail, error) {
+	if !principal.CanOperate() {
+		return alerts.Detail{}, alerts.ErrNotFound
+	}
+	actor := principal.Subject
+	if actor == "" {
+		actor = principal.DisplayName
+	}
+	if actor == "" {
+		actor = "unknown"
+	}
+	err := pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
+		access, args := operateAccessCondition(principal, "alert.labels", []any{id})
+		var alert alerts.Alert
+		var labelsJSON, annotationsJSON []byte
+		err := tx.QueryRow(ctx, `
+			SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
+			       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen,
+			       alert.repeat_count, alert.occurrence, alert.acknowledged
+			FROM alerts AS alert
+			WHERE alert.id = $1 AND (`+access+`)
+			FOR UPDATE
+		`, args...).Scan(
+			&alert.ID, &alert.SourceSlug, &alert.Fingerprint, &alert.SourceStatus, &labelsJSON, &annotationsJSON,
+			&alert.StartsAt, &alert.EndsAt, &alert.GeneratorURL, &alert.ExternalURL, &alert.FirstSeen, &alert.LastSeen,
+			&alert.RepeatCount, &alert.Occurrence, &alert.Acknowledged,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return alerts.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get alert %d for acknowledgement: %w", id, err)
+		}
+		if alert.Acknowledged == acknowledged {
+			return nil
+		}
+		if err := json.Unmarshal(labelsJSON, &alert.Labels); err != nil {
+			return fmt.Errorf("decode labels for alert %d: %w", id, err)
+		}
+		if err := json.Unmarshal(annotationsJSON, &alert.Annotations); err != nil {
+			return fmt.Errorf("decode annotations for alert %d: %w", id, err)
+		}
+		now := time.Now().UTC()
+		if acknowledged {
+			_, err = tx.Exec(ctx, "UPDATE alerts SET acknowledged = true, acknowledged_at = $2, acknowledged_by = $3 WHERE id = $1", id, now, actor)
+		} else {
+			_, err = tx.Exec(ctx, "UPDATE alerts SET acknowledged = false, acknowledged_at = NULL, acknowledged_by = '' WHERE id = $1", id)
+		}
+		if err != nil {
+			return fmt.Errorf("update acknowledgement for alert %d: %w", id, err)
+		}
+		eventType, message := "alert.acknowledged", "Alert acknowledged"
+		if !acknowledged {
+			eventType, message = "alert.unacknowledged", "Alert unacknowledged"
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO alert_history (alert_id, occurrence, event_type, source_status, actor, message, occurred_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, id, alert.Occurrence, eventType, alert.SourceStatus, actor, message, now); err != nil {
+			return fmt.Errorf("insert acknowledgement history for alert %d: %w", id, err)
+		}
+		return insertStreamEvent(ctx, tx, "alert.updated", id, alertmanager.IncomingAlert{
+			SourceSlug: alert.SourceSlug, Fingerprint: alert.Fingerprint, Status: alert.SourceStatus,
+			Labels: alert.Labels, Annotations: alert.Annotations, ReceivedAt: now,
+		}, nil)
+	})
+	if err != nil {
+		return alerts.Detail{}, err
+	}
+	return store.GetAlertDetail(ctx, principal, id)
 }
 
 func (store *Store) StreamEvents(ctx context.Context, principal auth.Principal, afterID int64, limit int) (alerts.StreamBatch, error) {
@@ -832,6 +963,38 @@ func readAccessCondition(principal auth.Principal, labelsExpression string, args
 		case auth.RoleViewer, auth.RoleOperator:
 		case auth.RoleAdministrator:
 			return "TRUE", args
+		default:
+			continue
+		}
+		if len(grant.Matchers) == 0 {
+			return "TRUE", args
+		}
+		matchers := make([]string, 0, len(grant.Matchers))
+		for _, matcher := range grant.Matchers {
+			args = append(args, matcher.Name, matcher.Value)
+			namePosition := len(args) - 1
+			valuePosition := len(args)
+			operator := map[string]string{"=": "=", "!=": "<>", "=~": "~", "!~": "!~"}[matcher.Operator]
+			matchers = append(matchers, fmt.Sprintf(
+				"(%s ? $%d AND %s->>$%d %s $%d)",
+				labelsExpression, namePosition, labelsExpression, namePosition, operator, valuePosition,
+			))
+		}
+		grants = append(grants, "("+strings.Join(matchers, " AND ")+")")
+	}
+	if len(grants) == 0 {
+		return "FALSE", args
+	}
+	return strings.Join(grants, " OR "), args
+}
+
+func operateAccessCondition(principal auth.Principal, labelsExpression string, args []any) (string, []any) {
+	grants := make([]string, 0, len(principal.Grants))
+	for _, grant := range principal.Grants {
+		switch grant.Role {
+		case auth.RoleAdministrator:
+			return "TRUE", args
+		case auth.RoleOperator:
 		default:
 			continue
 		}

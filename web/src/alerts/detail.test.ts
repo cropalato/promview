@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AlertsApiError } from './api';
 import {
+  buildAcknowledgeUrl,
   buildAlertDetailUrl,
   fetchAlertDetail,
   historyTypeLabel,
   isAlertNotFound,
   parseAlertDetailResponse,
   safeExternalUrl,
+  setAlertAcknowledgement,
 } from './detail';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -70,6 +72,13 @@ describe('buildAlertDetailUrl', () => {
   });
 });
 
+describe('buildAcknowledgeUrl', () => {
+  it('targets the acknowledge endpoint under the encoded alert id', () => {
+    expect(buildAcknowledgeUrl('42')).toBe('/api/v1/alerts/42/acknowledge');
+    expect(buildAcknowledgeUrl('a b/c')).toBe('/api/v1/alerts/a%20b%2Fc/acknowledge');
+  });
+});
+
 describe('historyTypeLabel', () => {
   it('maps known lifecycle types to human labels', () => {
     expect(historyTypeLabel('created')).toBe('Created');
@@ -129,6 +138,10 @@ describe('fetchAlertDetail', () => {
         lastSeen: '2026-08-14T11:00:00Z',
         repeatCount: 3,
         occurrence: 2,
+        acknowledged: false,
+        acknowledgedBy: '',
+        acknowledgedAt: null,
+        actions: { canAcknowledge: false },
         rawData: { status: 'firing', labels: { alertname: 'HighErrorRate' } },
       },
       history: [
@@ -176,6 +189,83 @@ describe('isAlertNotFound', () => {
   });
 });
 
+describe('setAlertAcknowledgement', () => {
+  it('posts the JSON toggle to the acknowledge endpoint and maps the updated detail', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(
+        apiDetailResponse({
+          alert: apiAlertDetail({
+            acknowledged: true,
+            acknowledgedBy: 'operator@example.com',
+            acknowledgedAt: '2026-08-14T11:05:00Z',
+            actions: { canAcknowledge: true },
+          }),
+          history: [apiHistoryEvent({ id: 12, type: 'acknowledged' }), apiHistoryEvent()],
+        }),
+      ),
+    );
+
+    const updated = await setAlertAcknowledgement('42', true, fetchImpl);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/alerts/42/acknowledge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acknowledged: true }),
+    });
+    expect(updated.alert.acknowledged).toBe(true);
+    expect(updated.alert.acknowledgedBy).toBe('operator@example.com');
+    expect(updated.alert.acknowledgedAt).toBe('2026-08-14T11:05:00Z');
+    expect(updated.alert.actions).toEqual({ canAcknowledge: true });
+    expect(updated.history.map((event) => event.type)).toEqual(['acknowledged', 'updated']);
+  });
+
+  it('sends acknowledged:false when removing the acknowledgement', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(apiDetailResponse()));
+
+    await setAlertAcknowledgement('42', false, fetchImpl);
+
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/alerts/42/acknowledge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acknowledged: false }),
+    });
+  });
+
+  it('fails with the HTTP status when the response is not ok', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ error: 'forbidden' }, 403));
+
+    try {
+      await setAlertAcknowledgement('42', true, fetchImpl);
+      expect.unreachable('setAlertAcknowledgement should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AlertsApiError);
+      expect((error as AlertsApiError).message).toMatch(/HTTP 403/);
+      expect((error as AlertsApiError).status).toBe(403);
+    }
+  });
+
+  it('wraps network failures and non-JSON responses', async () => {
+    const offline = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    await expect(setAlertAcknowledgement('42', true, offline)).rejects.toThrowError(
+      /unable to reach/i,
+    );
+
+    const html = vi.fn().mockResolvedValue(new Response('<html>nope</html>', { status: 200 }));
+    await expect(setAlertAcknowledgement('42', true, html)).rejects.toThrowError(/not valid json/i);
+  });
+
+  it('rejects malformed response envelopes', async () => {
+    const bare = vi.fn().mockResolvedValue(jsonResponse({}));
+    await expect(setAlertAcknowledgement('42', true, bare)).rejects.toThrowError(/malformed/i);
+
+    const wrongType = vi.fn().mockResolvedValue(jsonResponse({ alert: apiAlertDetail({ id: 7 }) }));
+    await expect(setAlertAcknowledgement('42', true, wrongType)).rejects.toThrowError(
+      /alert\.id must be a string/i,
+    );
+  });
+});
+
 describe('parseAlertDetailResponse', () => {
   it('falls back cleanly for null maps and a missing history list', () => {
     const result = parseAlertDetailResponse(
@@ -201,6 +291,50 @@ describe('parseAlertDetailResponse', () => {
 
     expect(result.alert.fingerprint).toBe('');
     expect(result.alert.generatorURL).toBe('');
+  });
+
+  it('defaults acknowledgement state and actions when the API omits them', () => {
+    const result = parseAlertDetailResponse(apiDetailResponse());
+
+    expect(result.alert.acknowledged).toBe(false);
+    expect(result.alert.acknowledgedBy).toBe('');
+    expect(result.alert.acknowledgedAt).toBeNull();
+    expect(result.alert.actions).toEqual({ canAcknowledge: false });
+  });
+
+  it('maps acknowledgement state and per-alert actions', () => {
+    const result = parseAlertDetailResponse(
+      apiDetailResponse({
+        alert: apiAlertDetail({
+          acknowledged: true,
+          acknowledgedBy: 'operator@example.com',
+          acknowledgedAt: '2026-08-14T11:05:00Z',
+          actions: { canAcknowledge: true },
+        }),
+      }),
+    );
+
+    expect(result.alert.acknowledged).toBe(true);
+    expect(result.alert.acknowledgedBy).toBe('operator@example.com');
+    expect(result.alert.acknowledgedAt).toBe('2026-08-14T11:05:00Z');
+    expect(result.alert.actions).toEqual({ canAcknowledge: true });
+  });
+
+  it('treats malformed actions envelopes as "no actions allowed"', () => {
+    for (const actions of [null, 'yes', ['canAcknowledge'], { canAcknowledge: 'true' }]) {
+      const result = parseAlertDetailResponse(
+        apiDetailResponse({ alert: apiAlertDetail({ actions }) }),
+      );
+      expect(result.alert.actions).toEqual({ canAcknowledge: false });
+    }
+  });
+
+  it('rejects a non-string acknowledgement timestamp', () => {
+    expect(() =>
+      parseAlertDetailResponse(
+        apiDetailResponse({ alert: apiAlertDetail({ acknowledgedAt: 42 }) }),
+      ),
+    ).toThrowError(/acknowledgedAt must be a string/i);
   });
 
   it('maps unknown severities to info while preserving the source text', () => {

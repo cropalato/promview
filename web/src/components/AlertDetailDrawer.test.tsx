@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AlertDetailResult } from '../alerts/detail';
 import type { AlertDetailState } from '../hooks/useAlertDetail';
@@ -24,6 +24,10 @@ function detailResult(overrides: Record<string, unknown> = {}): AlertDetailResul
       lastSeen: '2026-08-14T11:00:00Z',
       repeatCount: 3,
       occurrence: 2,
+      acknowledged: false,
+      acknowledgedBy: '',
+      acknowledgedAt: null,
+      actions: { canAcknowledge: false },
       rawData: { status: 'firing' },
       ...overrides,
     },
@@ -180,6 +184,40 @@ describe('AlertDetailDrawer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /retry detail request/i }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards the acknowledge handler to the overview action', async () => {
+    const onAcknowledge = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AlertDetailDrawer
+        alertId="42"
+        state={{
+          status: 'ready',
+          detail: detailResult({ actions: { canAcknowledge: true } }),
+        }}
+        onClose={vi.fn()}
+        onRetry={vi.fn()}
+        onAcknowledge={onAcknowledge}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge alert' }));
+
+    await waitFor(() => expect(onAcknowledge).toHaveBeenCalledWith(true));
+  });
+
+  it('hides the acknowledge action when the server withholds the permission', () => {
+    render(
+      <AlertDetailDrawer
+        alertId="42"
+        state={{ status: 'ready', detail: detailResult() }}
+        onClose={vi.fn()}
+        onRetry={vi.fn()}
+        onAcknowledge={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /acknowledge/i })).not.toBeInTheDocument();
   });
 
   it('shows the not-found state with a retry', () => {

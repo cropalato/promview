@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +28,7 @@ type Store interface {
 	AuthenticateSource(context.Context, string, string) (bool, error)
 	ListAlerts(context.Context, auth.Principal, alerts.Query) (alerts.ListResult, error)
 	GetAlertDetail(context.Context, auth.Principal, int64) (alerts.Detail, error)
+	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
 	StreamEvents(context.Context, auth.Principal, int64, int) (alerts.StreamBatch, error)
 	Ping(context.Context) error
 }
@@ -44,6 +47,7 @@ func New(cfg config.Config, store Store, authenticator auth.Authenticator, authe
 	mux.Handle("GET /api/v1/alerts", api.requireAuthentication(http.HandlerFunc(api.listAlerts)))
 	mux.Handle("GET /api/v1/alerts/{id}", api.requireAuthentication(http.HandlerFunc(api.getAlert)))
 	mux.Handle("GET /api/v1/alerts/{id}/events", api.requireAuthentication(http.HandlerFunc(api.getAlertEvents)))
+	mux.Handle("POST /api/v1/alerts/{id}/acknowledge", api.requireAuthentication(http.HandlerFunc(api.acknowledgeAlert)))
 	mux.Handle("GET /api/v1/stream", api.requireAuthentication(http.HandlerFunc(api.streamAlerts)))
 	mux.HandleFunc("POST /api/v1/ingest/alertmanager/{source}", api.ingestAlertmanager)
 	if len(authenticationHandlers) > 0 && authenticationHandlers[0] != nil {
@@ -93,8 +97,56 @@ func (api *API) getAlert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"alert":   newAlertDetailResponse(detail.Alert),
+		"alert":   newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels)),
+		"history": detail.History,
+	})
+}
+
+func (api *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		return
+	}
+	if !principal.CanOperate() {
+		writeError(w, http.StatusForbidden, "operator access required")
+		return
+	}
+	if !validMutationOrigin(r) {
+		writeError(w, http.StatusForbidden, "invalid request origin")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "alert id is invalid")
+		return
+	}
+	var body struct {
+		Acknowledged *bool `json:"acknowledged"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Acknowledged == nil || decoder.Decode(&struct{}{}) != io.EOF {
+		writeError(w, http.StatusBadRequest, "acknowledged must be a boolean")
+		return
+	}
+	detail, err := api.store.AcknowledgeAlert(r.Context(), principal, id, *body.Acknowledged)
+	if errors.Is(err, alerts.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "alert not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update acknowledgement")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"alert":   newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels)),
 		"history": detail.History,
 	})
 }
@@ -326,8 +378,16 @@ type alertResponse struct {
 
 type alertDetailResponse struct {
 	alertResponse
-	Occurrence int             `json:"occurrence"`
-	RawData    json.RawMessage `json:"rawData"`
+	Occurrence     int             `json:"occurrence"`
+	Acknowledged   bool            `json:"acknowledged"`
+	AcknowledgedAt *time.Time      `json:"acknowledgedAt"`
+	AcknowledgedBy string          `json:"acknowledgedBy"`
+	Actions        alertActions    `json:"actions"`
+	RawData        json.RawMessage `json:"rawData"`
+}
+
+type alertActions struct {
+	CanAcknowledge bool `json:"canAcknowledge"`
 }
 
 func newAlertResponse(alert alerts.Alert) alertResponse {
@@ -353,11 +413,15 @@ func newAlertResponse(alert alerts.Alert) alertResponse {
 	}
 }
 
-func newAlertDetailResponse(alert alerts.Alert) alertDetailResponse {
+func newAlertDetailResponse(alert alerts.Alert, canAcknowledge bool) alertDetailResponse {
 	return alertDetailResponse{
-		alertResponse: newAlertResponse(alert),
-		Occurrence:    alert.Occurrence,
-		RawData:       alert.RawData,
+		alertResponse:  newAlertResponse(alert),
+		Occurrence:     alert.Occurrence,
+		Acknowledged:   alert.Acknowledged,
+		AcknowledgedAt: alert.AcknowledgedAt,
+		AcknowledgedBy: alert.AcknowledgedBy,
+		Actions:        alertActions{CanAcknowledge: canAcknowledge},
+		RawData:        alert.RawData,
 	}
 }
 
@@ -449,6 +513,19 @@ func requestBearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
+}
+
+func validMutationOrigin(r *http.Request) bool {
+	// Bearer credentials are not sent automatically by browsers, so this keeps
+	// non-browser and future bearer clients independent of browser CSRF rules.
+	if requestBearerToken(r) != "" {
+		return true
+	}
+	if _, err := r.Cookie(auth.SessionCookieName); err != nil {
+		return true
+	}
+	origin, err := url.Parse(r.Header.Get("Origin"))
+	return err == nil && origin.Scheme != "" && origin.Host == r.Host
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
