@@ -16,29 +16,54 @@ export const ALERT_STREAM_EVENT_TYPES = [
   'alert.created',
   'alert.updated',
   'alert.resolved',
+  'alert.removed',
 ] as const;
 
 export type AlertStreamEventType = (typeof ALERT_STREAM_EVENT_TYPES)[number];
 
-/**
- * One validated alert lifecycle event from the stream. Alongside the
- * envelope, every event carries the alert context the server denormalized
- * into the stream record so clients can react (e.g. browser notifications)
- * without a detail fetch. `summary` and `team` may be empty strings when
- * the source alert lacks them; `severity`, `alertName`, and `source` are
- * always populated (the server falls back for missing labels).
- */
-export interface AlertStreamEvent {
+/** Event types whose payloads carry the denormalized alert context. */
+export type AlertStreamNotificationEventType = Exclude<AlertStreamEventType, 'alert.removed'>;
+
+/** Envelope every stream event carries, redacted or not. */
+interface AlertStreamEventEnvelope {
   id: number;
-  type: AlertStreamEventType;
   alertId: string;
   occurredAt: string;
+}
+
+/**
+ * One validated alert lifecycle event that keeps its alert context.
+ * Alongside the envelope, the event carries the context the server
+ * denormalized into the stream record so clients can react (e.g. browser
+ * notifications) without a detail fetch. `summary` and `team` may be empty
+ * strings when the source alert lacks them; `severity`, `alertName`, and
+ * `source` are always populated (the server falls back for missing labels).
+ */
+export interface AlertStreamNotificationEvent extends AlertStreamEventEnvelope {
+  type: AlertStreamNotificationEventType;
   severity: string;
   alertName: string;
   summary: string;
   source: string;
   team: string;
 }
+
+/**
+ * A redacted removal event: the alert's context is withheld (the alert is
+ * gone and its labels/annotations must not linger in the stream), so only
+ * the envelope is available. Clients can refresh list/detail state from
+ * `alertId` but must never try to notify from it.
+ */
+export interface AlertStreamRemovedEvent extends AlertStreamEventEnvelope {
+  type: 'alert.removed';
+}
+
+/**
+ * One validated alert lifecycle event from the stream, discriminated on
+ * `type`: created/updated/resolved events expose the full alert context,
+ * while `alert.removed` is redacted down to the envelope.
+ */
+export type AlertStreamEvent = AlertStreamNotificationEvent | AlertStreamRemovedEvent;
 
 /**
  * Live connection state: `connecting` until the first open, `connected`
@@ -81,7 +106,10 @@ export function buildAlertStreamUrl(cursor: number): string {
 /**
  * Validates one SSE payload. Returns null for anything malformed so stray
  * comments/keepalives or schema drift never crash the stream; unknown or
- * mismatched event types are dropped the same way.
+ * mismatched event types are dropped the same way. Redacted `alert.removed`
+ * payloads validate against the envelope alone — context fields are neither
+ * required nor passed through — while every other type must carry the full
+ * denormalized alert context.
  */
 export function parseAlertStreamEvent(
   data: string,
@@ -105,6 +133,9 @@ export function parseAlertStreamEvent(
   ) {
     return null;
   }
+  // Cast once past the membership check so the removed/notification split
+  // below narrows on the literal union.
+  const eventType = type as AlertStreamEventType;
   if (
     typeof record.id !== 'number' ||
     !Number.isFinite(record.id) ||
@@ -114,6 +145,16 @@ export function parseAlertStreamEvent(
     record.occurredAt === ''
   ) {
     return null;
+  }
+  const envelope = {
+    id: record.id,
+    alertId: record.alertId,
+    occurredAt: record.occurredAt,
+  };
+  // Redacted removals carry only the envelope; any context fields a peer
+  // might sneak into the payload are dropped, never exposed to clients.
+  if (eventType === 'alert.removed') {
+    return { ...envelope, type: eventType };
   }
   // Alert context fields are required: severity, alertName, and source must
   // be non-empty (the server backfills them), while summary and team are
@@ -132,10 +173,8 @@ export function parseAlertStreamEvent(
     return null;
   }
   return {
-    id: record.id,
-    type: type as AlertStreamEventType,
-    alertId: record.alertId,
-    occurredAt: record.occurredAt,
+    ...envelope,
+    type: eventType,
     severity,
     alertName,
     summary,

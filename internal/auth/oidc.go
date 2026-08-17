@@ -62,31 +62,29 @@ type OIDCTransactionRepository interface {
 	ConsumeOIDCTransaction(context.Context, []byte, time.Time) (OIDCTransaction, error)
 }
 
-type OIDCRoleMapping struct {
-	ViewerGroups   []string
-	OperatorGroups []string
-	AdminGroups    []string
+type OIDCIdentityRepository interface {
+	ResolveOIDCIdentity(context.Context, OIDCIdentity) (Principal, error)
 }
 
 type OIDCHandler struct {
 	repository   OIDCTransactionRepository
+	identities   OIDCIdentityRepository
 	sessions     *SessionManager
 	provider     OIDCProvider
-	roles        OIDCRoleMapping
 	cookieSecure bool
 	sessionTTL   time.Duration
 }
 
 func NewOIDCHandler(
 	repository OIDCTransactionRepository,
+	identities OIDCIdentityRepository,
 	sessions *SessionManager,
 	provider OIDCProvider,
-	roles OIDCRoleMapping,
 	cookieSecure bool,
 	sessionTTL time.Duration,
 ) *OIDCHandler {
 	return &OIDCHandler{
-		repository: repository, sessions: sessions, provider: provider, roles: roles,
+		repository: repository, identities: identities, sessions: sessions, provider: provider,
 		cookieSecure: cookieSecure, sessionTTL: sessionTTL,
 	}
 }
@@ -181,9 +179,13 @@ func (handler *OIDCHandler) callback(response http.ResponseWriter, request *http
 		http.Error(response, "identity provider validation failed", http.StatusBadGateway)
 		return
 	}
-	principal, ok := handler.principal(identity)
-	if !ok {
+	principal, err := handler.identities.ResolveOIDCIdentity(request.Context(), identity)
+	if errors.Is(err, ErrAccessDenied) {
 		http.Error(response, "read access denied", http.StatusForbidden)
+		return
+	}
+	if err != nil {
+		http.Error(response, "could not resolve identity", http.StatusInternalServerError)
 		return
 	}
 	token, err := handler.sessions.NewSession(request.Context(), principal)
@@ -209,52 +211,11 @@ func (handler *OIDCHandler) logout(response http.ResponseWriter, request *http.R
 	response.WriteHeader(http.StatusNoContent)
 }
 
-func (handler *OIDCHandler) principal(identity OIDCIdentity) (Principal, bool) {
-	role := ""
-	if sharesValue(identity.Groups, handler.roles.ViewerGroups) {
-		role = "viewer"
-	}
-	if sharesValue(identity.Groups, handler.roles.OperatorGroups) {
-		role = "operator"
-	}
-	if sharesValue(identity.Groups, handler.roles.AdminGroups) {
-		role = "administrator"
-	}
-	if role == "" || identity.Issuer == "" || identity.Subject == "" {
-		return Principal{}, false
-	}
-	displayName := identity.DisplayName
-	if displayName == "" {
-		displayName = identity.Username
-	}
-	if displayName == "" {
-		displayName = identity.Email
-	}
-	if displayName == "" {
-		displayName = identity.Subject
-	}
-	return Principal{
-		Subject: identity.Issuer + "|" + identity.Subject, Email: identity.Email,
-		DisplayName: displayName, Roles: []string{role},
-	}, true
-}
-
 func (handler *OIDCHandler) clearCookie(response http.ResponseWriter, name, path string) {
 	http.SetCookie(response, &http.Cookie{
 		Name: name, Value: "", Path: path, HttpOnly: true, Secure: handler.cookieSecure,
 		SameSite: http.SameSiteLaxMode, MaxAge: -1, Expires: time.Unix(1, 0),
 	})
-}
-
-func sharesValue(left, right []string) bool {
-	for _, candidate := range left {
-		for _, configured := range right {
-			if candidate == configured {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func randomToken() (string, error) {

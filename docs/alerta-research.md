@@ -60,7 +60,7 @@ Promview should instead use `Alertmanager source ID + Alertmanager fingerprint` 
 
 Alerta supports open access, built-in accounts, LDAP, OIDC, SAML, OAuth variants, API keys, and HMAC. Its authorization model is flat RBAC with scopes such as `read:alerts`, `write:alerts`, and `admin:users`. Customer views provide an additional partitioning mechanism.
 
-Promview only needs open, LDAP, and generic OIDC modes initially. Its authorization must combine a role with Prometheus label selectors so users cannot list, count, stream, or mutate out-of-scope alerts.
+Promview only needs open and generic OIDC modes. Its authorization must combine a role with Prometheus label selectors so users cannot list, count, stream, or mutate out-of-scope alerts.
 
 ## API And UI Separation
 

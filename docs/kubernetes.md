@@ -43,4 +43,6 @@ The PostgreSQL Secret must exist before installation because the migration Job i
 
 For all chart values, OIDC configuration, source bootstrap, migration behavior, and validation commands, see [`charts/promview/README.md`](../charts/promview/README.md).
 
+OIDC deployments must create at least one group binding after installation and before the first login. The chart guide includes the required `promview access set` command.
+
 For Alertmanager webhook configuration, see [`prometheus-alertmanager.md`](prometheus-alertmanager.md).

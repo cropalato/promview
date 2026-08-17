@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeEventSource } from '../test/fakeEventSource';
 import { buildAlertStreamUrl, createAlertStreamClient, parseAlertStreamEvent } from './stream';
-import type { AlertStreamEvent, AlertStreamStatus } from './stream';
+import type {
+  AlertStreamEvent,
+  AlertStreamNotificationEvent,
+  AlertStreamRemovedEvent,
+  AlertStreamStatus,
+} from './stream';
 
 function streamEventPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -18,7 +23,9 @@ function streamEventPayload(overrides: Record<string, unknown> = {}): Record<str
   };
 }
 
-function streamEvent(overrides: Partial<AlertStreamEvent> = {}): AlertStreamEvent {
+function streamEvent(
+  overrides: Partial<AlertStreamNotificationEvent> = {},
+): AlertStreamNotificationEvent {
   return {
     id: 8,
     type: 'alert.updated',
@@ -29,6 +36,29 @@ function streamEvent(overrides: Partial<AlertStreamEvent> = {}): AlertStreamEven
     summary: 'Error rate above 5% for 10m',
     source: 'am-eu',
     team: 'core',
+    ...overrides,
+  };
+}
+
+/** Redacted payload matching the server schema for removals: envelope only. */
+function removedEventPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 8,
+    type: 'alert.removed',
+    alertId: '42',
+    occurredAt: '2026-08-14T12:00:00Z',
+    ...overrides,
+  };
+}
+
+function removedStreamEvent(
+  overrides: Partial<AlertStreamRemovedEvent> = {},
+): AlertStreamRemovedEvent {
+  return {
+    id: 8,
+    type: 'alert.removed',
+    alertId: '42',
+    occurredAt: '2026-08-14T12:00:00Z',
     ...overrides,
   };
 }
@@ -126,6 +156,54 @@ describe('parseAlertStreamEvent', () => {
       ),
     ).toEqual(streamEvent({ summary: '', team: '' }));
   });
+
+  it('parses a redacted alert.removed payload from the envelope alone', () => {
+    expect(parseAlertStreamEvent(JSON.stringify(removedEventPayload()), 'alert.removed')).toEqual(
+      removedStreamEvent(),
+    );
+  });
+
+  it('never exposes alert context from an alert.removed payload', () => {
+    // Even if a peer sneaks context fields into the frame, the parsed event
+    // stays redacted down to the envelope.
+    expect(
+      parseAlertStreamEvent(
+        JSON.stringify(
+          removedEventPayload({
+            severity: 'critical',
+            alertName: 'HighErrorRate',
+            summary: 'Error rate above 5% for 10m',
+            source: 'am-eu',
+            team: 'core',
+          }),
+        ),
+        'alert.removed',
+      ),
+    ).toEqual(removedStreamEvent());
+  });
+
+  it('still validates the envelope and channel of alert.removed events', () => {
+    // Envelope fields remain required.
+    for (const field of ['id', 'alertId', 'occurredAt']) {
+      expect(
+        parseAlertStreamEvent(
+          JSON.stringify(removedEventPayload({ [field]: undefined })),
+          'alert.removed',
+        ),
+      ).toBeNull();
+    }
+    expect(
+      parseAlertStreamEvent(JSON.stringify(removedEventPayload({ alertId: '' })), 'alert.removed'),
+    ).toBeNull();
+    expect(
+      parseAlertStreamEvent(JSON.stringify(removedEventPayload({ id: '8' })), 'alert.removed'),
+    ).toBeNull();
+    // Channel and payload type must agree.
+    expect(
+      parseAlertStreamEvent(JSON.stringify(removedEventPayload()), 'alert.updated'),
+    ).toBeNull();
+    expect(parseAlertStreamEvent(JSON.stringify(streamEventPayload()), 'alert.removed')).toBeNull();
+  });
 });
 
 describe('createAlertStreamClient', () => {
@@ -162,6 +240,21 @@ describe('createAlertStreamClient', () => {
     client.close();
   });
 
+  it('forwards redacted alert.removed events', () => {
+    const { events, onEvent, onStatus } = collect();
+    const client = createAlertStreamClient({
+      cursor: 7,
+      onEvent,
+      onStatus,
+      factory: (url) => new FakeEventSource(url),
+    });
+
+    FakeEventSource.latest().emit('alert.removed', removedEventPayload(), '8');
+
+    expect(events).toEqual([removedStreamEvent()]);
+    client.close();
+  });
+
   it('drops malformed frames without interrupting the stream', () => {
     const { events, onEvent, onStatus } = collect();
     const client = createAlertStreamClient({
@@ -176,8 +269,11 @@ describe('createAlertStreamClient', () => {
     source.emit('alert.created', streamEventPayload({ id: 'x', type: 'alert.created' }));
     source.emit('alert.created', streamEventPayload({ type: 'alert.created' }), '8');
     source.emit('alert.updated', streamEventPayload({ type: 'alert.created' }));
+    // Redacted frames are validated against the envelope too.
+    source.emit('alert.removed', removedEventPayload({ occurredAt: '' }));
+    source.emit('alert.removed', removedEventPayload({ id: 9 }), '9');
 
-    expect(events).toEqual([streamEvent({ type: 'alert.created' })]);
+    expect(events).toEqual([streamEvent({ type: 'alert.created' }), removedStreamEvent({ id: 9 })]);
     client.close();
   });
 

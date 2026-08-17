@@ -11,6 +11,7 @@ import (
 
 type fakeSessionRepository struct {
 	session     Session
+	principal   Principal
 	stored      bool
 	deletedHash []byte
 }
@@ -25,7 +26,9 @@ func (repository *fakeSessionRepository) FindSession(_ context.Context, hash []b
 	if !repository.stored || string(hash) != string(repository.session.TokenHash) || !repository.session.ExpiresAt.After(now) {
 		return Session{}, ErrUnauthenticated
 	}
-	return repository.session, nil
+	session := repository.session
+	session.Principal = repository.principal
+	return session, nil
 }
 
 func (repository *fakeSessionRepository) DeleteSession(_ context.Context, hash []byte) error {
@@ -43,7 +46,8 @@ func TestOpenAuthenticator(t *testing.T) {
 func TestSessionManagerAuthenticatesBearerAndCookie(t *testing.T) {
 	repository := &fakeSessionRepository{}
 	manager := NewSessionManager(repository, time.Hour)
-	want := Principal{Subject: "user-1", Email: "user@example.com", DisplayName: "User One", Roles: []string{"operator"}}
+	want := Principal{UserID: 1, Subject: "user-1", Email: "user@example.com", DisplayName: "User One", Roles: []string{"operator"}, Grants: []Grant{{Role: RoleOperator}}}
+	repository.principal = want
 	token, err := manager.NewSession(context.Background(), want)
 	if err != nil {
 		t.Fatal(err)

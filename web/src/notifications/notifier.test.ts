@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AlertStreamEvent } from '../alerts/stream';
+import type { AlertStreamNotificationEvent, AlertStreamRemovedEvent } from '../alerts/stream';
 import { FakeNotification } from '../test/fakeNotification';
 import { createAlertNotifier } from './notifier';
 import type { AlertNotifierOptions } from './notifier';
@@ -19,7 +19,9 @@ function memoryStorage(): StorageLike {
   };
 }
 
-function createdCritical(overrides: Partial<AlertStreamEvent> = {}): AlertStreamEvent {
+function createdCritical(
+  overrides: Partial<AlertStreamNotificationEvent> = {},
+): AlertStreamNotificationEvent {
   return {
     id: 8,
     type: 'alert.created',
@@ -30,6 +32,16 @@ function createdCritical(overrides: Partial<AlertStreamEvent> = {}): AlertStream
     summary: 'Error rate above 5% for 10m',
     source: 'am-eu',
     team: 'core',
+    ...overrides,
+  };
+}
+
+function removedEvent(overrides: Partial<AlertStreamRemovedEvent> = {}): AlertStreamRemovedEvent {
+  return {
+    id: 8,
+    type: 'alert.removed',
+    alertId: '42',
+    occurredAt: '2026-08-14T12:00:00Z',
     ...overrides,
   };
 }
@@ -95,8 +107,21 @@ describe('createAlertNotifier', () => {
 
     notifier.handleEvent(createdCritical({ type: 'alert.updated' }));
     notifier.handleEvent(createdCritical({ type: 'alert.resolved' }));
+    notifier.handleEvent(removedEvent());
     notifier.handleEvent(createdCritical({ severity: 'warning' }));
     notifier.handleEvent(createdCritical({ severity: 'info' }));
+
+    expect(FakeNotification.instances).toHaveLength(0);
+  });
+
+  it('never notifies for redacted alert.removed events', () => {
+    const { options } = harness();
+    const notifier = createAlertNotifier(options);
+
+    // Opted in and hidden: every other criterion is met, but a redacted
+    // removal carries no context to show and must stay silent.
+    notifier.handleEvent(removedEvent());
+    notifier.handleEvent(removedEvent({ id: 9 }));
 
     expect(FakeNotification.instances).toHaveLength(0);
   });

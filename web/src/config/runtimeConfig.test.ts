@@ -85,4 +85,10 @@ describe('parseRuntimeConfig', () => {
     expect(() => parseRuntimeConfig(null)).toThrowError(/malformed/i);
     expect(() => parseRuntimeConfig('open')).toThrowError(/malformed/i);
   });
+
+  it('rejects the removed ldap auth mode', () => {
+    expect(() => parseRuntimeConfig({ authMode: 'ldap', productName: 'Promview' })).toThrowError(
+      /unsupported auth mode/i,
+    );
+  });
 });

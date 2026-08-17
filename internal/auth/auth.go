@@ -16,11 +16,13 @@ const SessionCookieName = "promview_session"
 var ErrUnauthenticated = errors.New("authentication required")
 
 type Principal struct {
+	UserID      int64    `json:"id,omitempty"`
 	Subject     string   `json:"subject"`
 	Email       string   `json:"email"`
 	DisplayName string   `json:"displayName"`
 	Roles       []string `json:"roles"`
 	Anonymous   bool     `json:"anonymous"`
+	Grants      []Grant  `json:"grants,omitempty"`
 }
 
 func (principal Principal) HasRole(role string) bool {
@@ -44,16 +46,15 @@ func (OpenAuthenticator) Authenticate(context.Context, *http.Request) (Principal
 		DisplayName: "Anonymous viewer",
 		Roles:       []string{"viewer"},
 		Anonymous:   true,
+		Grants:      []Grant{{Role: RoleViewer}},
 	}, nil
 }
 
 type Session struct {
-	TokenHash   []byte
-	Subject     string
-	Email       string
-	DisplayName string
-	Roles       []string
-	ExpiresAt   time.Time
+	TokenHash []byte
+	UserID    int64
+	ExpiresAt time.Time
+	Principal Principal
 }
 
 type SessionRepository interface {
@@ -72,18 +73,18 @@ func NewSessionManager(repository SessionRepository, ttl time.Duration) *Session
 }
 
 func (manager *SessionManager) NewSession(ctx context.Context, principal Principal) (string, error) {
+	if principal.UserID < 1 {
+		return "", errors.New("persistent user is required for a session")
+	}
 	random := make([]byte, 32)
 	if _, err := rand.Read(random); err != nil {
 		return "", err
 	}
 	token := base64.RawURLEncoding.EncodeToString(random)
 	session := Session{
-		TokenHash:   HashSessionToken(token),
-		Subject:     principal.Subject,
-		Email:       principal.Email,
-		DisplayName: principal.DisplayName,
-		Roles:       append([]string(nil), principal.Roles...),
-		ExpiresAt:   time.Now().UTC().Add(manager.ttl),
+		TokenHash: HashSessionToken(token),
+		UserID:    principal.UserID,
+		ExpiresAt: time.Now().UTC().Add(manager.ttl),
 	}
 	if err := manager.repository.StoreSession(ctx, session); err != nil {
 		return "", err
@@ -103,12 +104,7 @@ func (manager *SessionManager) Authenticate(ctx context.Context, request *http.R
 		}
 		return Principal{}, err
 	}
-	return Principal{
-		Subject:     session.Subject,
-		Email:       session.Email,
-		DisplayName: session.DisplayName,
-		Roles:       append([]string(nil), session.Roles...),
-	}, nil
+	return session.Principal, nil
 }
 
 func (manager *SessionManager) Revoke(ctx context.Context, request *http.Request) error {

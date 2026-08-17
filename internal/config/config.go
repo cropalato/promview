@@ -27,9 +27,6 @@ type Config struct {
 	OIDCEmailClaim       string
 	OIDCDisplayNameClaim string
 	OIDCGroupsClaim      string
-	OIDCViewerGroups     []string
-	OIDCOperatorGroups   []string
-	OIDCAdminGroups      []string
 	OIDCCookieSecure     bool
 }
 
@@ -52,9 +49,6 @@ func Load() (Config, error) {
 		OIDCEmailClaim:       envOrDefault("PROMVIEW_OIDC_EMAIL_CLAIM", "email"),
 		OIDCDisplayNameClaim: envOrDefault("PROMVIEW_OIDC_DISPLAY_NAME_CLAIM", "name"),
 		OIDCGroupsClaim:      envOrDefault("PROMVIEW_OIDC_GROUPS_CLAIM", "groups"),
-		OIDCViewerGroups:     splitCSV(os.Getenv("PROMVIEW_OIDC_VIEWER_GROUPS")),
-		OIDCOperatorGroups:   splitCSV(os.Getenv("PROMVIEW_OIDC_OPERATOR_GROUPS")),
-		OIDCAdminGroups:      splitCSV(os.Getenv("PROMVIEW_OIDC_ADMIN_GROUPS")),
 		OIDCCookieSecure:     true,
 	}
 	if raw := os.Getenv("PROMVIEW_OIDC_COOKIE_SECURE"); raw != "" {
@@ -69,9 +63,9 @@ func Load() (Config, error) {
 		return Config{}, errors.New("PROMVIEW_DATABASE_URL is required")
 	}
 	switch cfg.AuthMode {
-	case "open", "ldap", "oidc":
+	case "open", "oidc":
 	default:
-		return Config{}, errors.New("PROMVIEW_AUTH_MODE must be open, ldap, or oidc")
+		return Config{}, errors.New("PROMVIEW_AUTH_MODE must be open or oidc")
 	}
 	bootstrapValues := 0
 	for _, value := range []string{cfg.BootstrapSourceSlug, cfg.BootstrapSourceToken} {
@@ -125,9 +119,6 @@ func validateOIDC(cfg Config) error {
 	}
 	if !cfg.OIDCCookieSecure && !isLoopbackHost(redirect.Hostname()) {
 		return errors.New("PROMVIEW_OIDC_COOKIE_SECURE may be false only on loopback hosts")
-	}
-	if len(cfg.OIDCViewerGroups)+len(cfg.OIDCOperatorGroups)+len(cfg.OIDCAdminGroups) == 0 {
-		return errors.New("at least one OIDC viewer, operator, or administrator group must be configured")
 	}
 	if !contains(cfg.OIDCScopes, "openid") {
 		return errors.New("PROMVIEW_OIDC_SCOPES must include openid")

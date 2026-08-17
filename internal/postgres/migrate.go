@@ -140,6 +140,7 @@ func baselineLegacySchema(ctx context.Context, connection *pgxpool.Conn) error {
 		{version: 3, name: "000003_alert_history.up.sql", table: "alert_history"},
 		{version: 4, name: "000004_auth_sources.up.sql", table: "sessions"},
 		{version: 5, name: "000005_oidc_transactions.up.sql", table: "oidc_login_transactions"},
+		{version: 7, name: "000007_oidc_authorization.up.sql", table: "users"},
 	} {
 		var exists bool
 		if err := connection.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", known.table).Scan(&exists); err != nil {

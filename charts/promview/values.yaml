@@ -38,9 +38,6 @@ oidc:
   emailClaim: email
   displayNameClaim: name
   groupsClaim: groups
-  viewerGroups: []
-  operatorGroups: []
-  adminGroups: []
   cookieSecure: true
 
 bootstrapSource:

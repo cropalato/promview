@@ -64,12 +64,6 @@ oidc:
   clientID: promview
   existingSecret: promview-oidc
   redirectURL: https://promview.example.com/api/v1/auth/oidc/callback
-  viewerGroups:
-    - promview-viewers
-  operatorGroups:
-    - promview-operators
-  adminGroups:
-    - promview-administrators
 
 ingress:
   enabled: true
@@ -98,6 +92,21 @@ helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --version 0.1.0-alpha.2 \
   --values oidc-values.yaml
 ```
+
+Create an initial administrator binding before signing in:
+
+```sh
+kubectl --namespace promview exec deployment/promview -- \
+  promview access set \
+  --name promview-administrators \
+  --role administrator \
+  --oidc-issuer 'https://your-org.okta.com/oauth2/default' \
+  --oidc-group 'promview-administrators'
+```
+
+The issuer must exactly match `oidc.issuerURL`. Use repeated `--selector` flags for scoped viewer or operator bindings.
+
+See [`../../docs/authorization.md`](../../docs/authorization.md) for complete binding and selector semantics.
 
 See [`../../docs/okta-oidc.md`](../../docs/okta-oidc.md) for Okta application and claim configuration.
 
@@ -155,7 +164,7 @@ make verify-helm
 | `image.digest` | empty | Optional immutable image digest; mutually exclusive with tag |
 | `database.existingSecret` | `promview-database` | Secret containing the PostgreSQL URL |
 | `database.urlKey` | `url` | PostgreSQL URL key |
-| `auth.mode` | `open` | `open`, `ldap`, or `oidc`; LDAP login is not implemented yet |
+| `auth.mode` | `open` | `open` or `oidc` |
 | `oidc.existingSecret` | empty | Secret containing the OIDC client secret |
 | `bootstrapSource.enabled` | `false` | Initialize one Alertmanager source |
 | `migration.enabled` | `true` | Run migrations before install and upgrade |

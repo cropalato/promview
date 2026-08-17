@@ -27,7 +27,7 @@
       "type": "object",
       "required": ["mode"],
       "properties": {
-        "mode": {"type": "string", "enum": ["open", "ldap", "oidc"]}
+        "mode": {"type": "string", "enum": ["open", "oidc"]}
       }
     },
     "bootstrapSource": {

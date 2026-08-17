@@ -8,7 +8,7 @@
  * same logic without a browser notification stack.
  */
 import { normalizeSeverity } from '../alerts/severity';
-import type { AlertStreamEvent } from '../alerts/stream';
+import type { AlertStreamEvent, AlertStreamNotificationEvent } from '../alerts/stream';
 import type { SeenEventStore } from './store';
 
 /**
@@ -94,23 +94,25 @@ export interface AlertNotifier {
   handleEvent: (event: AlertStreamEvent) => void;
 }
 
-function notificationTitle(event: AlertStreamEvent): string {
+function notificationTitle(event: AlertStreamNotificationEvent): string {
   return `Critical: ${event.alertName}`;
 }
 
-function notificationBody(event: AlertStreamEvent): string {
+function notificationBody(event: AlertStreamNotificationEvent): string {
   const context = [event.source, event.team].filter((part) => part !== '').join(' · ');
   return [event.summary, context].filter((part) => part !== '').join('\n');
 }
 
 /**
  * Evaluates each stream event against the notification criteria: only
- * `alert.created` events with critical severity qualify. Every qualifying
- * event id is recorded in the seen ledger up front — including ones
- * suppressed because the document was visible or notifications were off —
- * so a replayed event can never notify late. A notification is shown only
- * when opted in and the document is hidden; clicking it focuses the window
- * and navigates to the alert detail.
+ * `alert.created` events with critical severity qualify. Redacted
+ * `alert.removed` events can never notify — they carry no context to show,
+ * and the type check turns them away before any criterion runs. Every
+ * qualifying event id is recorded in the seen ledger up front — including
+ * ones suppressed because the document was visible or notifications were
+ * off — so a replayed event can never notify late. A notification is shown
+ * only when opted in and the document is hidden; clicking it focuses the
+ * window and navigates to the alert detail.
  */
 export function createAlertNotifier(options: AlertNotifierOptions): AlertNotifier {
   return {

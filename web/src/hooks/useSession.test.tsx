@@ -38,16 +38,6 @@ describe('useSession', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('stays idle without a /me request in ldap mode', async () => {
-    const fetchImpl = vi.fn();
-    const { result } = renderHook(() => useSession('ldap', { fetchImpl }));
-
-    await act(async () => {});
-
-    expect(result.current.state).toEqual({ status: 'idle' });
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
   it('verifies the session in oidc mode', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(PRINCIPAL));
     const { result } = renderHook(() => useSession('oidc', { fetchImpl }));

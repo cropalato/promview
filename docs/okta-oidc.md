@@ -99,23 +99,34 @@ export PROMVIEW_OIDC_CLIENT_ID='your-okta-client-id'
 export PROMVIEW_OIDC_CLIENT_SECRET='your-okta-client-secret'
 export PROMVIEW_OIDC_REDIRECT_URL='https://promview.example.com/api/v1/auth/oidc/callback'
 
-export PROMVIEW_OIDC_VIEWER_GROUPS='promview-viewers'
-export PROMVIEW_OIDC_OPERATOR_GROUPS='promview-operators'
-export PROMVIEW_OIDC_ADMIN_GROUPS='promview-administrators'
-
 docker compose up --detach --build
 ```
 
-Group lists are comma-separated, so multiple Okta groups can grant the same role:
+Create server-owned bindings for the Okta groups before users sign in:
 
 ```sh
-export PROMVIEW_OIDC_VIEWER_GROUPS='promview-viewers,operations-readers'
+docker compose run --rm app access set \
+  --name promview-viewers \
+  --role viewer \
+  --oidc-issuer 'https://your-org.okta.com/oauth2/default' \
+  --oidc-group 'promview-viewers'
+
+docker compose run --rm app access set \
+  --name promview-administrators \
+  --role administrator \
+  --oidc-issuer 'https://your-org.okta.com/oauth2/default' \
+  --oidc-group 'promview-administrators'
 ```
 
-At least one viewer, operator, or administrator group must be configured. Users without a mapped group are denied. If a user belongs to groups mapped to multiple roles, Promview selects the highest privilege in this order:
+Users without a matching binding are denied. Multiple bindings are unioned. Viewer and operator bindings can restrict access with label selectors:
 
-```text
-administrator > operator > viewer
+```sh
+docker compose run --rm app access set \
+  --name platform-operators \
+  --role operator \
+  --oidc-issuer 'https://your-org.okta.com/oauth2/default' \
+  --oidc-group 'promview-platform' \
+  --selector 'team=platform'
 ```
 
 Optional claim and scope settings are:
@@ -150,7 +161,6 @@ export PROMVIEW_OIDC_ISSUER_URL='https://your-org.okta.com/oauth2/default'
 export PROMVIEW_OIDC_CLIENT_ID='your-test-client-id'
 export PROMVIEW_OIDC_CLIENT_SECRET='your-test-client-secret'
 export PROMVIEW_OIDC_REDIRECT_URL='http://localhost:8080/api/v1/auth/oidc/callback'
-export PROMVIEW_OIDC_VIEWER_GROUPS='promview-viewers'
 export PROMVIEW_OIDC_COOKIE_SECURE=false
 
 docker compose up --detach --build
@@ -164,7 +174,7 @@ Never set `PROMVIEW_OIDC_COOKIE_SECURE=false` for a non-loopback deployment. Pro
 2. Confirm the console shows **Sign in with your identity provider** instead of loading alerts.
 3. Sign in through Okta.
 4. Confirm Okta returns to `/api/v1/auth/oidc/callback` and Promview redirects to `/`.
-5. Confirm the top bar shows the expected display name and mapped role.
+5. Confirm the top bar shows the expected display name and bound role.
 6. Confirm alerts and the live stream start only after authentication.
 7. Select **Sign out** and confirm Promview returns to the sign-in screen.
 
@@ -199,7 +209,7 @@ The Okta sign-in redirect URI and `PROMVIEW_OIDC_REDIRECT_URL` must match exactl
 
 - Decode the ID token in a secure administrative environment and confirm the configured group claim is present as a string array.
 - Confirm the user is assigned to the Okta application.
-- Confirm the user belongs to a group listed in one of Promview's group-mapping variables.
+- Confirm the user belongs to an Okta group referenced by a Promview role binding with the exact same issuer URL.
 - Confirm the `groups` scope and claim inclusion rules apply to the ID token, not only the access token.
 - Avoid logging or sharing a real ID token while troubleshooting.
 
