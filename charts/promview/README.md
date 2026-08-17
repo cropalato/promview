@@ -27,7 +27,7 @@ Install from the OCI registry after a release is published:
 ```sh
 helm install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.4
+  --version 0.1.0-alpha.5
 ```
 
 Install a local checkout:
@@ -89,7 +89,7 @@ Apply it with:
 ```sh
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.4 \
+  --version 0.1.0-alpha.5 \
   --values oidc-values.yaml
 ```
 

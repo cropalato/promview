@@ -23,6 +23,23 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+type alertSort struct {
+	expression string
+	cursorType string
+}
+
+var alertSorts = map[string]alertSort{
+	"lastSeen":  {expression: "alert.last_seen", cursorType: "timestamptz"},
+	"startsAt":  {expression: "alert.starts_at", cursorType: "timestamptz"},
+	"severity":  {expression: "CASE COALESCE(alert.labels->>'severity', 'warning') WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 WHEN 'info' THEN 1 ELSE 0 END", cursorType: "integer"},
+	"alertname": {expression: "COALESCE(alert.labels->>'alertname', '')", cursorType: "text"},
+	"summary":   {expression: "COALESCE(alert.annotations->>'summary', '')", cursorType: "text"},
+	"status":    {expression: "alert.source_status", cursorType: "text"},
+	"team":      {expression: "COALESCE(alert.labels->>'team', '')", cursorType: "text"},
+	"instance":  {expression: "COALESCE(alert.labels->>'instance', '')", cursorType: "text"},
+	"source":    {expression: "alert.source_slug", cursorType: "text"},
+}
+
 func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
@@ -554,6 +571,16 @@ func (store *Store) Ingest(ctx context.Context, alerts []alertmanager.IncomingAl
 }
 
 func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, query alerts.Query) (alerts.ListResult, error) {
+	if query.Sort == "" {
+		query.Sort = alerts.DefaultSort
+	}
+	if query.Order == "" {
+		query.Order = alerts.DefaultOrder
+	}
+	sort, ok := alertSorts[query.Sort]
+	if !ok || (query.Order != "asc" && query.Order != "desc") {
+		return alerts.ListResult{}, errors.New("invalid alert sort")
+	}
 	streamAccess, streamArgs := readAccessCondition(principal, "event.labels", nil)
 	previousAccess, streamArgs := readAccessCondition(principal, "event.previous_labels", streamArgs)
 	var streamCursor int64
@@ -594,8 +621,12 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 	listWhere := where
 	listArgs := append([]any(nil), args...)
 	if query.Cursor != nil {
-		listArgs = append(listArgs, query.Cursor.LastSeen, query.Cursor.ID)
-		listWhere = appendCondition(listWhere, fmt.Sprintf("(alert.last_seen, alert.id) < ($%d, $%d)", len(listArgs)-1, len(listArgs)))
+		listArgs = append(listArgs, query.Cursor.Value, query.Cursor.ID)
+		comparison := ">"
+		if query.Order == "desc" {
+			comparison = "<"
+		}
+		listWhere = appendCondition(listWhere, fmt.Sprintf("(%s, alert.id) %s ($%d::%s, $%d)", sort.expression, comparison, len(listArgs)-1, sort.cursorType, len(listArgs)))
 	}
 	listArgs = append(listArgs, query.Limit+1)
 	listSQL := `
@@ -603,7 +634,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen, alert.repeat_count,
 		       alert.occurrence, alert.acknowledged, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
 		FROM alerts AS alert` + listWhere + fmt.Sprintf(`
-		ORDER BY alert.last_seen DESC, alert.id DESC
+		ORDER BY `+sort.expression+" "+strings.ToUpper(query.Order)+`, alert.id `+strings.ToUpper(query.Order)+`
 		LIMIT $%d`, len(listArgs))
 
 	rows, err = store.pool.Query(ctx, listSQL, listArgs...)
@@ -641,7 +672,14 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 	if len(items) > query.Limit {
 		items = items[:query.Limit]
 		last := items[len(items)-1]
-		next = &alerts.Cursor{LastSeen: last.LastSeen, ID: last.ID}
+		next = &alerts.Cursor{
+			LastSeen: last.LastSeen,
+			ID:       last.ID,
+			Sort:     query.Sort,
+			Order:    query.Order,
+			Query:    query.CursorIdentity(),
+			Value:    alertCursorValue(last, query.Sort),
+		}
 	}
 
 	return alerts.ListResult{
@@ -947,10 +985,55 @@ func alertFilters(principal auth.Principal, query alerts.Query, alias string) (s
 	if query.Team != "" {
 		add(alias+".labels->>'team' = $%d", query.Team)
 	}
+	for _, matcher := range query.Matches {
+		args = append(args, matcher.Name, matcher.Value)
+		namePosition := len(args) - 1
+		valuePosition := len(args)
+		if matcher.Operator == "!=" {
+			// Like Prometheus, a negative matcher also includes absent labels.
+			conditions = append(conditions, fmt.Sprintf("(NOT (%s ? $%d) OR %s->>$%d <> $%d)", alias+".labels", namePosition, alias+".labels", namePosition, valuePosition))
+			continue
+		}
+		conditions = append(conditions, fmt.Sprintf("(%s ? $%d AND %s->>$%d = $%d)", alias+".labels", namePosition, alias+".labels", namePosition, valuePosition))
+	}
 	if len(conditions) == 0 {
 		return "", args
 	}
 	return " WHERE " + strings.Join(conditions, " AND "), args
+}
+
+func alertCursorValue(alert alerts.Alert, sort string) string {
+	switch sort {
+	case "lastSeen":
+		return alert.LastSeen.UTC().Format(time.RFC3339Nano)
+	case "startsAt":
+		return alert.StartsAt.UTC().Format(time.RFC3339Nano)
+	case "severity":
+		switch alert.Labels["severity"] {
+		case "critical":
+			return "3"
+		case "info":
+			return "1"
+		case "warning", "":
+			return "2"
+		default:
+			return "0"
+		}
+	case "alertname":
+		return alert.Labels["alertname"]
+	case "summary":
+		return alert.Annotations["summary"]
+	case "status":
+		return alert.SourceStatus
+	case "team":
+		return alert.Labels["team"]
+	case "instance":
+		return alert.Labels["instance"]
+	case "source":
+		return alert.SourceSlug
+	default:
+		return ""
+	}
 }
 
 func readAccessCondition(principal auth.Principal, labelsExpression string, args []any) (string, []any) {

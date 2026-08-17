@@ -98,7 +98,6 @@ describe('AlertTable', () => {
     render(<AlertTable alerts={[firingAlert]} pagination={page} />);
 
     expect(screen.getByText(/showing 1 of 3 firing alerts/i)).toBeInTheDocument();
-    expect(screen.getByText(/filter matches loaded rows only/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /load more/i }));
     expect(page.onLoadMore).toHaveBeenCalledTimes(1);
@@ -166,5 +165,72 @@ describe('AlertTable', () => {
     const row = screen.getByRole('row', { name: /HighErrorRate/ });
     expect(row).not.toHaveAttribute('tabindex');
     expect(row).not.toHaveAttribute('aria-selected');
+  });
+
+  it('renders plain headers when no sort handler is provided', () => {
+    render(<AlertTable alerts={[]} />);
+
+    expect(screen.queryByRole('button', { name: /sort by/i })).not.toBeInTheDocument();
+    for (const header of screen.getAllByRole('columnheader')) {
+      expect(header).not.toHaveAttribute('aria-sort');
+    }
+  });
+
+  it('renders sort buttons on the sortable columns only', () => {
+    render(<AlertTable alerts={[]} sort={null} onSortChange={vi.fn()} />);
+
+    const sortable = ['Severity', 'State', 'Alert', 'Summary', 'Team', 'Instance', 'Source', 'Age'];
+    for (const label of sortable) {
+      expect(screen.getByRole('button', { name: `Sort by ${label}` })).toBeInTheDocument();
+    }
+    // Assignee and Notes are not server-sortable.
+    expect(screen.queryByRole('button', { name: /assignee/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /notes/i })).not.toBeInTheDocument();
+    // No column is sorted yet.
+    for (const header of screen.getAllByRole('columnheader')) {
+      expect(header).not.toHaveAttribute('aria-sort');
+    }
+  });
+
+  it('requests an ascending sort for an inactive column', () => {
+    const onSortChange = vi.fn();
+    render(<AlertTable alerts={[]} sort={null} onSortChange={onSortChange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Severity' }));
+    expect(onSortChange).toHaveBeenCalledWith({ field: 'severity', order: 'asc' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Age' }));
+    expect(onSortChange).toHaveBeenCalledWith({ field: 'age', order: 'asc' });
+
+    // The Alert column sorts by the alert name server-side.
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Alert' }));
+    expect(onSortChange).toHaveBeenCalledWith({ field: 'name', order: 'asc' });
+  });
+
+  it('marks the sorted column with aria-sort and toggles its direction', () => {
+    const onSortChange = vi.fn();
+    const { rerender } = render(
+      <AlertTable alerts={[]} sort={{ field: 'team', order: 'asc' }} onSortChange={onSortChange} />,
+    );
+
+    const headerOf = (label: string) =>
+      screen.getByRole('button', { name: `Sort by ${label}` }).closest('th');
+    expect(headerOf('Team')).toHaveAttribute('aria-sort', 'ascending');
+    expect(headerOf('Age')).not.toHaveAttribute('aria-sort');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Team' }));
+    expect(onSortChange).toHaveBeenCalledWith({ field: 'team', order: 'desc' });
+
+    rerender(
+      <AlertTable
+        alerts={[]}
+        sort={{ field: 'team', order: 'desc' }}
+        onSortChange={onSortChange}
+      />,
+    );
+    expect(headerOf('Team')).toHaveAttribute('aria-sort', 'descending');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Team' }));
+    expect(onSortChange).toHaveBeenCalledWith({ field: 'team', order: 'asc' });
   });
 });

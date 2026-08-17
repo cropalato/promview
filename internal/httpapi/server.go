@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ import (
 )
 
 const maxWebhookBodyBytes = 4 << 20
+
+var labelNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 type Store interface {
 	Ingest(context.Context, []alertmanager.IncomingAlert) error
@@ -447,15 +450,84 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		Status:   status,
 		Severity: strings.TrimSpace(values.Get("severity")),
 		Team:     strings.TrimSpace(values.Get("team")),
+		Sort:     values.Get("sort"),
+		Order:    values.Get("order"),
+	}
+	if query.Sort == "" {
+		query.Sort = alerts.DefaultSort
+	}
+	if !isAlertSort(query.Sort) {
+		return alerts.Query{}, errors.New("sort is invalid")
+	}
+	if query.Order == "" {
+		query.Order = alerts.DefaultOrder
+	}
+	if query.Order != "asc" && query.Order != "desc" {
+		return alerts.Query{}, errors.New("order must be asc or desc")
+	}
+	for _, raw := range values["match"] {
+		matcher, err := parseLabelMatcher(raw)
+		if err != nil {
+			return alerts.Query{}, err
+		}
+		query.Matches = append(query.Matches, matcher)
 	}
 	if raw := values.Get("cursor"); raw != "" {
 		cursor, err := decodeCursor(raw)
 		if err != nil {
 			return alerts.Query{}, errors.New("cursor is invalid")
 		}
+		if cursor.Sort != query.Sort || cursor.Order != query.Order || cursor.Query != query.CursorIdentity() {
+			return alerts.Query{}, errors.New("cursor does not match query")
+		}
+		if !validCursorValue(cursor) {
+			return alerts.Query{}, errors.New("cursor is invalid")
+		}
 		query.Cursor = &cursor
 	}
 	return query, nil
+}
+
+func parseLabelMatcher(raw string) (alerts.LabelMatcher, error) {
+	if strings.Contains(raw, "=~") || strings.Contains(raw, "!~") {
+		return alerts.LabelMatcher{}, errors.New("match supports only = and !=")
+	}
+	operatorAt := strings.Index(raw, "!=")
+	operator := "!="
+	if operatorAt < 0 {
+		operatorAt = strings.IndexByte(raw, '=')
+		operator = "="
+	}
+	if operatorAt < 1 {
+		return alerts.LabelMatcher{}, errors.New("match must be label=value or label!=value")
+	}
+	name := raw[:operatorAt]
+	if !labelNamePattern.MatchString(name) {
+		return alerts.LabelMatcher{}, errors.New("match label is invalid")
+	}
+	return alerts.LabelMatcher{Name: name, Operator: operator, Value: raw[operatorAt+len(operator):]}, nil
+}
+
+func isAlertSort(value string) bool {
+	switch value {
+	case "lastSeen", "startsAt", "severity", "alertname", "summary", "status", "team", "instance", "source":
+		return true
+	default:
+		return false
+	}
+}
+
+func validCursorValue(cursor alerts.Cursor) bool {
+	switch cursor.Sort {
+	case "lastSeen", "startsAt":
+		_, err := time.Parse(time.RFC3339Nano, cursor.Value)
+		return err == nil
+	case "severity":
+		value, err := strconv.Atoi(cursor.Value)
+		return err == nil && value >= 0 && value <= 3
+	default:
+		return true
+	}
 }
 
 func encodeCursor(cursor alerts.Cursor) (string, error) {
@@ -475,7 +547,7 @@ func decodeCursor(value string) (alerts.Cursor, error) {
 	if err := json.Unmarshal(data, &cursor); err != nil {
 		return alerts.Cursor{}, fmt.Errorf("unmarshal cursor: %w", err)
 	}
-	if cursor.ID < 1 || cursor.LastSeen.IsZero() {
+	if cursor.ID < 1 || cursor.LastSeen.IsZero() || cursor.Sort == "" || cursor.Order == "" || cursor.Query == "" {
 		return alerts.Cursor{}, errors.New("cursor is incomplete")
 	}
 	return cursor, nil

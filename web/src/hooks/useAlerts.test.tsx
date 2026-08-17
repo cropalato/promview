@@ -67,7 +67,7 @@ describe('useAlerts live refresh', () => {
     fetchMock().mockResolvedValue(
       jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1, streamCursor: 7 })),
     );
-    const { result } = renderHook(() => useAlerts(true, { liveRefreshDebounceMs: 0 }));
+    const { result } = renderHook(() => useAlerts(true, {}, { liveRefreshDebounceMs: 0 }));
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
     expect(readyData(result.current.state).streamCursor).toBe(7);
@@ -100,7 +100,7 @@ describe('useAlerts live refresh', () => {
     });
     const seenStatuses: string[] = [];
     const { result } = renderHook(() => {
-      const hook = useAlerts(true, { liveRefreshDebounceMs: 0 });
+      const hook = useAlerts(true, {}, { liveRefreshDebounceMs: 0 });
       seenStatuses.push(hook.state.status);
       return hook;
     });
@@ -145,7 +145,7 @@ describe('useAlerts live refresh', () => {
       }
       return Promise.resolve(jsonResponse(alertsPage({ total: alertFetches })));
     });
-    const { result } = renderHook(() => useAlerts(true, { liveRefreshDebounceMs: 0 }));
+    const { result } = renderHook(() => useAlerts(true, {}, { liveRefreshDebounceMs: 0 }));
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
 
@@ -180,7 +180,7 @@ describe('useAlerts live refresh', () => {
           )
         : Promise.reject(new TypeError('fetch failed'));
     });
-    const { result } = renderHook(() => useAlerts(true, { liveRefreshDebounceMs: 0 }));
+    const { result } = renderHook(() => useAlerts(true, {}, { liveRefreshDebounceMs: 0 }));
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
     act(() => result.current.scheduleLiveRefresh());
@@ -215,7 +215,7 @@ describe('useAlerts live refresh', () => {
       }
       return Promise.resolve(jsonResponse(alertFetches === 1 ? firstPage : refreshedPage));
     });
-    const { result } = renderHook(() => useAlerts(true, { liveRefreshDebounceMs: 0 }));
+    const { result } = renderHook(() => useAlerts(true, {}, { liveRefreshDebounceMs: 0 }));
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
     act(() => result.current.scheduleLiveRefresh());
@@ -231,7 +231,9 @@ describe('useAlerts live refresh', () => {
   it('cancels a pending live-refresh timer on unmount', async () => {
     vi.useFakeTimers();
     fetchMock().mockResolvedValue(jsonResponse(alertsPage({ total: 1, streamCursor: 7 })));
-    const { result, unmount } = renderHook(() => useAlerts(true, { liveRefreshDebounceMs: 500 }));
+    const { result, unmount } = renderHook(() =>
+      useAlerts(true, {}, { liveRefreshDebounceMs: 500 }),
+    );
 
     await act(async () => {});
     expect(result.current.state.status).toBe('ready');
@@ -251,7 +253,7 @@ describe('useAlerts session expiry', () => {
   it('reports a 401 from the first page fetch', async () => {
     fetchMock().mockResolvedValue(jsonResponse({ error: 'expired' }, 401));
     const onUnauthorized = vi.fn();
-    const { result } = renderHook(() => useAlerts(true, { onUnauthorized }));
+    const { result } = renderHook(() => useAlerts(true, {}, { onUnauthorized }));
 
     await waitFor(() => expect(result.current.state.status).toBe('error'));
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
@@ -260,7 +262,7 @@ describe('useAlerts session expiry', () => {
   it('does not report other failures as expiry', async () => {
     fetchMock().mockResolvedValue(jsonResponse({ error: 'boom' }, 500));
     const onUnauthorized = vi.fn();
-    const { result } = renderHook(() => useAlerts(true, { onUnauthorized }));
+    const { result } = renderHook(() => useAlerts(true, {}, { onUnauthorized }));
 
     await waitFor(() => expect(result.current.state.status).toBe('error'));
     expect(onUnauthorized).not.toHaveBeenCalled();
@@ -276,7 +278,7 @@ describe('useAlerts session expiry', () => {
     });
     const onUnauthorized = vi.fn();
     const { result } = renderHook(() =>
-      useAlerts(true, { liveRefreshDebounceMs: 0, onUnauthorized }),
+      useAlerts(true, {}, { liveRefreshDebounceMs: 0, onUnauthorized }),
     );
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
@@ -299,7 +301,7 @@ describe('useAlerts session expiry', () => {
     });
     const onUnauthorized = vi.fn();
     const { result } = renderHook(() =>
-      useAlerts(true, { liveRefreshDebounceMs: 0, onUnauthorized }),
+      useAlerts(true, {}, { liveRefreshDebounceMs: 0, onUnauthorized }),
     );
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
@@ -313,7 +315,7 @@ describe('useAlerts session expiry', () => {
       Promise.resolve(jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1 }))),
     );
     const { result, rerender } = renderHook(
-      ({ enabled }: { enabled: boolean }) => useAlerts(enabled, { liveRefreshDebounceMs: 0 }),
+      ({ enabled }: { enabled: boolean }) => useAlerts(enabled, {}, { liveRefreshDebounceMs: 0 }),
       { initialProps: { enabled: true } },
     );
 
@@ -327,5 +329,111 @@ describe('useAlerts session expiry', () => {
     rerender({ enabled: true });
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
     expect(alertsFetchCalls()).toHaveLength(2);
+  });
+});
+
+describe('useAlerts server-side query', () => {
+  it('threads match and sort params into every request', async () => {
+    fetchMock().mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes('cursor=cursor-2')
+          ? jsonResponse(alertsPage({ alerts: [apiAlert({ id: '2' })], total: 2 }))
+          : jsonResponse(alertsPage({ alerts: [apiAlert()], nextCursor: 'cursor-2', total: 2 })),
+      ),
+    );
+    const query = {
+      match: ['team=core', 'severity!=info'],
+      sort: 'age' as const,
+      order: 'desc' as const,
+    };
+    const { result } = renderHook(() => useAlerts(true, query, { liveRefreshDebounceMs: 0 }));
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(readyData(result.current.state).nextCursor).toBe(''));
+    act(() => result.current.scheduleLiveRefresh());
+    await waitFor(() => expect(alertsFetchCalls()).toHaveLength(3));
+
+    const suffix = 'match=team%3Dcore&match=severity%21%3Dinfo&sort=startsAt&order=asc';
+    expect(alertsFetchCalls()).toEqual([
+      `/api/v1/alerts?limit=100&status=firing&${suffix}`,
+      `/api/v1/alerts?limit=100&cursor=cursor-2&status=firing&${suffix}`,
+      `/api/v1/alerts?limit=100&status=firing&${suffix}`,
+    ]);
+  });
+
+  it('restarts from the first page when the query content changes', async () => {
+    fetchMock().mockImplementation(() =>
+      Promise.resolve(jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1 }))),
+    );
+    const { result, rerender } = renderHook(
+      ({ query }: { query: { match?: string[] } }) =>
+        useAlerts(true, query, { liveRefreshDebounceMs: 0 }),
+      { initialProps: { query: { match: ['team=core'] } } },
+    );
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    rerender({ query: { match: ['team=infra'] } });
+    await waitFor(() => expect(alertsFetchCalls()).toHaveLength(2));
+
+    expect(alertsFetchCalls()).toEqual([
+      '/api/v1/alerts?limit=100&status=firing&match=team%3Dcore',
+      '/api/v1/alerts?limit=100&status=firing&match=team%3Dinfra',
+    ]);
+  });
+
+  it('ignores identity-only query changes', async () => {
+    fetchMock().mockImplementation(() =>
+      Promise.resolve(jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1 }))),
+    );
+    const { result, rerender } = renderHook(
+      ({ query }: { query: { match: string[] } }) =>
+        useAlerts(true, query, { liveRefreshDebounceMs: 0 }),
+      { initialProps: { query: { match: ['team=core'] } } },
+    );
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    // Same content, new object: no refetch.
+    rerender({ query: { match: ['team=core'] } });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(alertsFetchCalls()).toHaveLength(1);
+  });
+
+  it('drops a pending page when the query changes mid-pagination', async () => {
+    let resolveSecondPage: (response: Response) => void = () => {};
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('cursor=cursor-2')) {
+        return new Promise<Response>((resolve) => {
+          resolveSecondPage = resolve;
+        });
+      }
+      return Promise.resolve(
+        jsonResponse(alertsPage({ alerts: [apiAlert()], nextCursor: 'cursor-2', total: 2 })),
+      );
+    });
+    const { result, rerender } = renderHook(
+      ({ query }: { query: { match?: string[] } }) =>
+        useAlerts(true, query, { liveRefreshDebounceMs: 0 }),
+      { initialProps: { query: {} } },
+    );
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(alertsFetchCalls()).toHaveLength(2));
+
+    // The filter changes while page two is in flight: a fresh first page
+    // goes out with the new matcher, and the stale page response is ignored.
+    rerender({ query: { match: ['team=core'] } });
+    await waitFor(() => expect(alertsFetchCalls()).toHaveLength(3));
+    expect(alertsFetchCalls()[2]).toBe('/api/v1/alerts?limit=100&status=firing&match=team%3Dcore');
+
+    await act(async () => {
+      resolveSecondPage(jsonResponse(alertsPage({ alerts: [apiAlert({ id: '2' })], total: 2 })));
+    });
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    expect(readyData(result.current.state).alerts.map((alert) => alert.id)).toEqual(['1']);
   });
 });

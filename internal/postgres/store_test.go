@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,42 @@ import (
 	"github.com/cropalato/promview/internal/auth"
 	"github.com/cropalato/promview/internal/sources"
 )
+
+func TestAlertCursorValue(t *testing.T) {
+	at := time.Date(2026, 8, 14, 12, 0, 0, 123456000, time.UTC)
+	alert := alerts.Alert{
+		SourceSlug: "primary", SourceStatus: "firing", StartsAt: at, LastSeen: at,
+		Labels:      map[string]string{"severity": "critical", "alertname": "Down", "team": "platform", "instance": "api-1"},
+		Annotations: map[string]string{"summary": "API is down"},
+	}
+	for sort, want := range map[string]string{
+		"lastSeen": at.Format(time.RFC3339Nano), "startsAt": at.Format(time.RFC3339Nano), "severity": "3",
+		"alertname": "Down", "summary": "API is down", "status": "firing", "team": "platform", "instance": "api-1", "source": "primary",
+	} {
+		if got := alertCursorValue(alert, sort); got != want {
+			t.Errorf("alertCursorValue(%q) = %q, want %q", sort, got, want)
+		}
+		if _, ok := alertSorts[sort]; !ok {
+			t.Errorf("alertSorts missing %q", sort)
+		}
+	}
+	if got := alertCursorValue(alerts.Alert{Labels: map[string]string{}}, "severity"); got != "2" {
+		t.Errorf("absent severity rank = %q, want 2", got)
+	}
+}
+
+func TestAlertFiltersBindMatchersAndIncludeAbsentNegativeLabels(t *testing.T) {
+	where, args := alertFilters(auth.Principal{Anonymous: true}, alerts.Query{Matches: []alerts.LabelMatcher{
+		{Name: "team", Operator: "=", Value: "platform"},
+		{Name: "instance", Operator: "!=", Value: "api-2"},
+	}}, "alert")
+	if !strings.Contains(where, "alert.labels ? $1") || !strings.Contains(where, "NOT (alert.labels ? $3)") {
+		t.Fatalf("where = %q, want positive presence and absent-label negative matching", where)
+	}
+	if len(args) != 4 || args[0] != "team" || args[1] != "platform" || args[2] != "instance" || args[3] != "api-2" {
+		t.Fatalf("args = %#v, want bound matcher names and values", args)
+	}
+}
 
 func TestStoreIngestAndList(t *testing.T) {
 	databaseURL := os.Getenv("PROMVIEW_TEST_DATABASE_URL")

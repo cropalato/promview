@@ -452,7 +452,7 @@ describe('App', () => {
 
     expect(await screen.findByText('Connected')).toBeInTheDocument();
     const input = await screen.findByRole('textbox', { name: /filter alerts/i });
-    fireEvent.change(input, { target: { value: 'critical' } });
+    fireEvent.change(input, { target: { value: 'severity="critical"' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
     expect(screen.getByRole('heading', { name: /no alerts match/i })).toBeInTheDocument();
@@ -656,36 +656,182 @@ describe('App', () => {
     expect(pageTwoAttempts).toBe(2);
   });
 
-  it('filters the loaded rows only and says so', async () => {
-    mockApi(
-      alertsPage({
-        alerts: [
-          apiAlert({ id: '1' }),
-          apiAlert({
-            id: '2',
-            severity: 'warning',
-            labels: { alertname: 'DiskFull', severity: 'warning' },
-            annotations: { summary: 'Root filesystem above 90%' },
-          }),
-        ],
-        severityCounts: { critical: 1, warning: 1 },
-        total: 2,
-      }),
+  it('applies the label filter server-side with repeated match params', async () => {
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.startsWith('/api/v1/alerts')) {
+        const filtered = target.includes('match=');
+        return Promise.resolve(
+          jsonResponse(
+            filtered
+              ? alertsPage({
+                  alerts: [
+                    apiAlert({
+                      id: '2',
+                      severity: 'warning',
+                      labels: { alertname: 'DiskFull', severity: 'warning' },
+                      annotations: { summary: 'Root filesystem above 90%' },
+                    }),
+                  ],
+                  severityCounts: { warning: 1 },
+                  total: 1,
+                })
+              : alertsPage({
+                  alerts: [
+                    apiAlert({ id: '1' }),
+                    apiAlert({
+                      id: '2',
+                      severity: 'warning',
+                      labels: { alertname: 'DiskFull', severity: 'warning' },
+                      annotations: { summary: 'Root filesystem above 90%' },
+                    }),
+                  ],
+                  severityCounts: { critical: 1, warning: 1 },
+                  total: 2,
+                }),
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    render(<App />);
+
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(screen.getByText('HighErrorRate')).toBeInTheDocument();
+
+    const input = await screen.findByRole('textbox', { name: /filter alerts/i });
+    fireEvent.change(input, { target: { value: 'alertname="DiskFull"' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    // The server-side result replaces the list; the total follows the filter.
+    expect(await screen.findByText('1 of 1 alerts')).toBeInTheDocument();
+    expect(screen.queryByText('HighErrorRate')).not.toBeInTheDocument();
+    expect(screen.getByText('DiskFull')).toBeInTheDocument();
+    expect(alertCalls()).toContain(
+      '/api/v1/alerts?limit=100&status=firing&match=alertname%3DDiskFull',
     );
+
+    // Escape clears the draft and the applied filter: the unfiltered first
+    // page comes back.
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    expect(input).toHaveValue('');
+    expect(alertCalls()[alertCalls().length - 1]).toBe('/api/v1/alerts?limit=100&status=firing');
+  });
+
+  it('parses brace-wrapped comma-separated filters into one match param each', async () => {
+    mockApi();
     render(<App />);
 
     expect(await screen.findByText('Connected')).toBeInTheDocument();
     const input = await screen.findByRole('textbox', { name: /filter alerts/i });
-    fireEvent.change(input, { target: { value: 'disk' } });
+    fireEvent.change(input, { target: { value: '{severity="critical", team!="infra"}' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(screen.queryByText('HighErrorRate')).not.toBeInTheDocument();
-    expect(screen.getByText('DiskFull')).toBeInTheDocument();
-    expect(screen.getByText(/filter matches loaded rows only/i)).toBeInTheDocument();
+    await waitFor(() => expect(alertCalls()).toHaveLength(2));
+    expect(alertCalls()[1]).toBe(
+      '/api/v1/alerts?limit=100&status=firing&match=severity%3Dcritical&match=team%21%3Dinfra',
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 
-    fireEvent.keyDown(input, { key: 'Escape' });
-    expect(screen.getByText('HighErrorRate')).toBeInTheDocument();
-    expect(input).toHaveValue('');
+  it('shows a parse error and sends no request for an invalid filter', async () => {
+    mockApi();
+    render(<App />);
+
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    const input = await screen.findByRole('textbox', { name: /filter alerts/i });
+    fireEvent.change(input, { target: { value: 'critical' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    const message = await screen.findByRole('alert');
+    expect(message).toHaveTextContent(/expected one of = or !=/);
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveValue('critical');
+    // Only the initial page was requested.
+    expect(alertCalls()).toEqual(['/api/v1/alerts?limit=100&status=firing']);
+
+    // Editing the draft retires the error; a valid draft applies again.
+    fireEvent.change(input, { target: { value: 'severity="critical"' } });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(alertCalls()).toHaveLength(2));
+    expect(alertCalls()[1]).toBe(
+      '/api/v1/alerts?limit=100&status=firing&match=severity%3Dcritical',
+    );
+  });
+
+  it('sorts server-side from the table headers', async () => {
+    mockApi(alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 }));
+    render(<App />);
+
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+
+    const severityHeader = () =>
+      screen.getByRole('button', { name: 'Sort by Severity' }).closest('th');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Severity' }));
+    await waitFor(() => expect(alertCalls()).toHaveLength(2));
+    expect(alertCalls()[1]).toBe('/api/v1/alerts?limit=100&status=firing&sort=severity&order=asc');
+    expect(severityHeader()).toHaveAttribute('aria-sort', 'ascending');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Severity' }));
+    await waitFor(() => expect(alertCalls()).toHaveLength(3));
+    expect(alertCalls()[2]).toBe('/api/v1/alerts?limit=100&status=firing&sort=severity&order=desc');
+    expect(severityHeader()).toHaveAttribute('aria-sort', 'descending');
+  });
+
+  it('combines the label filter with the active sort in one request', async () => {
+    mockApi();
+    render(<App />);
+
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    const input = await screen.findByRole('textbox', { name: /filter alerts/i });
+    fireEvent.change(input, { target: { value: 'team="core"' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(alertCalls()).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Age' }));
+    await waitFor(() => expect(alertCalls()).toHaveLength(3));
+    expect(alertCalls()[2]).toBe(
+      '/api/v1/alerts?limit=100&status=firing&match=team%3Dcore&sort=startsAt&order=desc',
+    );
+  });
+
+  it('applies and upserts matchers from the detail drawer label buttons', async () => {
+    mockApiWithDetail(alertsPage({ alerts: [apiAlert()], total: 1 }));
+    render(<App />);
+
+    const row = await screen.findByRole('row', { name: /HighErrorRate/ });
+    fireEvent.click(row);
+    const dialog = await screen.findByRole('dialog', { name: 'HighErrorRate' });
+
+    // Include: team="core" is applied and reflected into the filter input.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Filter to team="core"' }));
+    const input = screen.getByRole('textbox', { name: /filter alerts/i });
+    expect(input).toHaveValue('team="core"');
+    await waitFor(() =>
+      expect(alertCalls()).toContain('/api/v1/alerts?limit=100&status=firing&match=team%3Dcore'),
+    );
+
+    // Exclude upserts the same label in place instead of adding a second
+    // matcher for it.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Exclude team="core"' }));
+    expect(input).toHaveValue('team!="core"');
+    await waitFor(() =>
+      expect(alertCalls()).toContain('/api/v1/alerts?limit=100&status=firing&match=team%21%3Dcore'),
+    );
+
+    // A second label wraps the expression in braces.
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Filter to instance="api-1:9090"' }),
+    );
+    expect(input).toHaveValue('{team!="core", instance="api-1:9090"}');
+    await waitFor(() =>
+      expect(alertCalls()).toContain(
+        '/api/v1/alerts?limit=100&status=firing&match=team%21%3Dcore&match=instance%3Dapi-1%3A9090',
+      ),
+    );
   });
 
   it('connects the stream from the snapshot cursor and quietly refreshes on alert events', async () => {

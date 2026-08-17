@@ -161,6 +161,39 @@ describe('AlertDetailOverview', () => {
     expect(fact).not.toHaveTextContent('at ');
   });
 
+  it('offers include/exclude filter buttons per label when a handler is present', () => {
+    const onFilterLabel = vi.fn();
+    render(<AlertDetailOverview detail={detail()} onFilterLabel={onFilterLabel} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter to team="core"' }));
+    expect(onFilterLabel).toHaveBeenCalledWith({ name: 'team', op: '=', value: 'core' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude team="core"' }));
+    expect(onFilterLabel).toHaveBeenCalledWith({ name: 'team', op: '!=', value: 'core' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter to alertname="HighErrorRate"' }));
+    expect(onFilterLabel).toHaveBeenCalledWith({
+      name: 'alertname',
+      op: '=',
+      value: 'HighErrorRate',
+    });
+  });
+
+  it('omits the label filter buttons without a handler', () => {
+    render(<AlertDetailOverview detail={detail()} />);
+
+    expect(screen.queryByRole('button', { name: /filter to /i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /exclude /i })).not.toBeInTheDocument();
+    // The copy controls stay.
+    expect(screen.getByRole('button', { name: 'Copy team' })).toBeInTheDocument();
+  });
+
+  it('never adds filter buttons to annotations', () => {
+    render(<AlertDetailOverview detail={detail()} onFilterLabel={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: /filter to summary/i })).not.toBeInTheDocument();
+  });
+
   it('renders the acknowledge action only with both permission and handler', () => {
     const onAcknowledge = vi.fn().mockResolvedValue(undefined);
     const { rerender } = render(

@@ -202,11 +202,32 @@ func TestListAlerts(t *testing.T) {
 	}
 }
 
+func TestListAlertsParsesMatchersAndSorting(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?match=team%3Dplatform&match=instance%21%3Dapi-2&sort=severity&order=asc", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if store.query.Sort != "severity" || store.query.Order != "asc" || len(store.query.Matches) != 2 {
+		t.Fatalf("query = %#v, want sorting and two matchers", store.query)
+	}
+	if store.query.Matches[0] != (alerts.LabelMatcher{Name: "team", Operator: "=", Value: "platform"}) ||
+		store.query.Matches[1] != (alerts.LabelMatcher{Name: "instance", Operator: "!=", Value: "api-2"}) {
+		t.Fatalf("matchers = %#v", store.query.Matches)
+	}
+}
+
 func TestListAlertsRejectsInvalidQuery(t *testing.T) {
 	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{})
 	for _, target := range []string{
 		"/api/v1/alerts?limit=0",
 		"/api/v1/alerts?status=closed",
+		"/api/v1/alerts?sort=unknown",
+		"/api/v1/alerts?order=sideways",
+		"/api/v1/alerts?match=team%3D~platform",
+		"/api/v1/alerts?match=bad-label%3Dplatform",
 		"/api/v1/alerts?cursor=not-base64",
 	} {
 		response := httptest.NewRecorder()
@@ -214,6 +235,24 @@ func TestListAlertsRejectsInvalidQuery(t *testing.T) {
 		if response.Code != http.StatusBadRequest {
 			t.Errorf("%s status = %d, want %d", target, response.Code, http.StatusBadRequest)
 		}
+	}
+}
+
+func TestListAlertsRejectsCursorForDifferentQuery(t *testing.T) {
+	query := alerts.Query{Sort: alerts.DefaultSort, Order: alerts.DefaultOrder}
+	cursor := alerts.Cursor{
+		ID: 42, LastSeen: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC),
+		Sort: query.Sort, Order: query.Order, Query: query.CursorIdentity(), Value: "2026-08-14T12:00:00Z",
+	}
+	encoded, err := encodeCursor(cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?status=firing&cursor="+encoded, nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
 	}
 }
 
@@ -331,7 +370,7 @@ func TestAcknowledgeAlertRejectsViewerAndCookieCSRF(t *testing.T) {
 }
 
 func TestCursorRoundTrip(t *testing.T) {
-	want := alerts.Cursor{ID: 42, LastSeen: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)}
+	want := alerts.Cursor{ID: 42, LastSeen: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC), Sort: "summary", Order: "asc", Query: "identity", Value: "API is down"}
 	encoded, err := encodeCursor(want)
 	if err != nil {
 		t.Fatal(err)

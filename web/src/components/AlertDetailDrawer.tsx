@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import type { LabelMatcher } from '../alerts/filter';
 import type { AlertDetailState } from '../hooks/useAlertDetail';
 import { AlertDetailOverview } from './AlertDetailOverview';
 import { AlertRawView } from './AlertRawView';
@@ -21,6 +22,8 @@ interface AlertDetailDrawerProps {
   onRetry: () => void;
   /** Runs an acknowledge toggle; forwarded to the overview's gated action. */
   onAcknowledge?: (acknowledged: boolean) => Promise<void>;
+  /** Applies a label matcher to the console filter; enables the label buttons. */
+  onFilterLabel?: (matcher: LabelMatcher) => void;
 }
 
 /**
@@ -37,6 +40,7 @@ export function AlertDetailDrawer({
   onClose,
   onRetry,
   onAcknowledge,
+  onFilterLabel,
 }: AlertDetailDrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -162,7 +166,11 @@ export function AlertDetailDrawer({
               className="detail-panel"
             >
               {activeTab === 'overview' ? (
-                <AlertDetailOverview detail={ready.alert} onAcknowledge={onAcknowledge} />
+                <AlertDetailOverview
+                  detail={ready.alert}
+                  onAcknowledge={onAcknowledge}
+                  onFilterLabel={onFilterLabel}
+                />
               ) : null}
               {activeTab === 'timeline' ? <AlertTimeline history={ready.history} /> : null}
               {activeTab === 'raw' ? <AlertRawView rawData={ready.alert.rawData} /> : null}
