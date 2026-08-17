@@ -93,7 +93,19 @@ helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --values oidc-values.yaml
 ```
 
-Create an initial administrator binding before signing in:
+Configure initial role bindings through Helm values before signing in:
+
+```yaml
+roleBindings:
+  - name: promview-administrators
+    role: administrator
+    oidcIssuer: https://identity.example.com
+    oidcGroup: promview-administrators
+```
+
+The chart applies each binding after install and upgrade. A binding with the same name is replaced atomically; bindings not declared in chart values are left unchanged. The chart requires `auth.mode: oidc` when `roleBindings` is set.
+
+Alternatively, create an initial administrator binding manually:
 
 ```sh
 kubectl --namespace promview exec deployment/promview -- \
@@ -167,6 +179,7 @@ make verify-helm
 | `auth.mode` | `open` | `open` or `oidc` |
 | `oidc.existingSecret` | empty | Secret containing the OIDC client secret |
 | `bootstrapSource.enabled` | `false` | Initialize one Alertmanager source |
+| `roleBindings` | `[]` | OIDC group role bindings applied after install and upgrade |
 | `migration.enabled` | `true` | Run migrations before install and upgrade |
 | `ingress.enabled` | `false` | Create an Ingress |
 | `podDisruptionBudget.enabled` | `false` | Create a PodDisruptionBudget |

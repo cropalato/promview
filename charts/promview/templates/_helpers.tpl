@@ -65,4 +65,14 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $sourceSecret := required "bootstrapSource.existingSecret is required when bootstrapSource.enabled=true" .Values.bootstrapSource.existingSecret -}}
 {{- $sourceTokenKey := required "bootstrapSource.tokenKey is required when bootstrapSource.enabled=true" .Values.bootstrapSource.tokenKey -}}
 {{- end -}}
+{{- if .Values.roleBindings -}}
+{{- if ne .Values.auth.mode "oidc" -}}
+{{- fail "roleBindings require auth.mode=oidc" -}}
+{{- end -}}
+{{- range .Values.roleBindings -}}
+{{- if and (eq .role "administrator") .selectors -}}
+{{- fail "administrator roleBindings cannot include selectors" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end }}

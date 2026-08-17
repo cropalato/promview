@@ -1,0 +1,71 @@
+{{- if .Values.roleBindings }}
+{{- include "promview.validateValues" . }}
+{{- range $index, $binding := .Values.roleBindings }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-access-%d" (include "promview.fullname" $) $index | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "promview.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: authorization
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ $.Values.migration.backoffLimit }}
+  activeDeadlineSeconds: {{ $.Values.migration.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "promview.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: authorization
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      {{- with $.Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: access
+          image: {{ include "promview.image" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          args:
+            - access
+            - set
+            - --name
+            - {{ $binding.name | quote }}
+            - --role
+            - {{ $binding.role | quote }}
+            - --oidc-issuer
+            - {{ $binding.oidcIssuer | quote }}
+            - --oidc-group
+            - {{ $binding.oidcGroup | quote }}
+            {{- range $binding.selectors }}
+            - --selector
+            - {{ . | quote }}
+            {{- end }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          env:
+            - name: PROMVIEW_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.database.existingSecret }}
+                  key: {{ $.Values.database.urlKey }}
+          resources:
+            {{- toYaml $.Values.migration.resources | nindent 12 }}
+          {{- with $.Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with $.Values.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}
