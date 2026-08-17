@@ -11,6 +11,10 @@ psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000005_oidc_
 psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000006_stream_notification_metadata.up.sql
 psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000007_oidc_authorization.up.sql
 psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000008_alert_acknowledgements.up.sql
+
+# Leave the disposable database in the same ledger-backed state used in production.
+psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+PROMVIEW_DATABASE_URL="$PROMVIEW_TEST_DATABASE_URL" go run ./cmd/promview migrate
 psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000008_alert_acknowledgements.down.sql
 psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000007_oidc_authorization.down.sql
 psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000006_stream_notification_metadata.down.sql
