@@ -47,6 +47,18 @@ bootstrapSource:
   existingSecret: ""
   tokenKey: token
 
+roleBindings: []
+# - name: promview-administrators
+#   role: administrator
+#   oidcIssuer: https://identity.example.com
+#   oidcGroup: promview-administrators
+# - name: platform-operators
+#   role: operator
+#   oidcIssuer: https://identity.example.com
+#   oidcGroup: promview-operators
+#   selectors:
+#     - team=platform
+
 migration:
   enabled: true
   backoffLimit: 3

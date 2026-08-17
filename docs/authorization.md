@@ -7,7 +7,7 @@ Promview separates OIDC authentication from authorization. The identity provider
 | Role | Access |
 | --- | --- |
 | `viewer` | Read alerts and history matching the binding selectors |
-| `operator` | Viewer access plus future alert actions within the same selectors |
+| `operator` | Viewer access plus acknowledge and unacknowledge actions within the same selectors |
 | `administrator` | Global access; administrator bindings cannot have selectors |
 
 Open mode supplies an anonymous global viewer. OIDC mode denies identities without at least one readable binding.

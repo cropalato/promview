@@ -11,8 +11,8 @@ jobs:
   go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -21,8 +21,8 @@ jobs:
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -50,8 +50,8 @@ jobs:
     env:
       PROMVIEW_TEST_DATABASE_URL: postgres://promview:promview@localhost:5432/promview_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -62,15 +62,15 @@ jobs:
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: make compose-check
       - run: make docker-build
 
   helm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
         with:
-          version: v4.2.2
+          version: v4.2.4
       - run: make verify-helm

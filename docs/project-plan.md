@@ -26,7 +26,7 @@ The current implementation provides:
 - deterministic fallback fingerprints
 - PostgreSQL current-state upserts and repeat counts
 - cursor-paginated current-alert queries
-- exact source, status, severity, and team filters
+- server-side positive and negative label filters with cursor-safe sorting
 - severity counts for the active query
 - durable created, updated, and resolved stream events
 - resumable SSE using snapshot cursors and `Last-Event-ID`
@@ -43,11 +43,12 @@ The current implementation provides:
 - persistent OIDC identities and database-backed user or group role bindings
 - SQL-enforced team/label scopes for alert lists, counts, details, history, and SSE
 - a responsive React console connected to firing alerts
+- acknowledgement and unacknowledgement actions for authorized operators, with occurrence-local state, history, and live updates
 - opt-in browser notifications for newly created critical alerts while the console is open
 - a Helm chart with serialized pre-install and pre-upgrade migrations for external PostgreSQL
 - migration, persistence, API, frontend, image, Compose, and Helm verification in GitHub Actions
 
-Operator actions, notes, authorization administration APIs, and stream retention remain planned work.
+Assignment, local close, notes, bulk actions, authorization administration APIs, and stream retention remain planned work.
 
 ## Goals
 
@@ -210,10 +211,10 @@ GET    /api/v1/alert-counts
 GET    /api/v1/labels
 GET    /api/v1/labels/{name}/values
 POST   /api/v1/alerts/{id}/acknowledge
-POST   /api/v1/alerts/{id}/assign
-POST   /api/v1/alerts/{id}/close
-POST   /api/v1/alerts/{id}/notes
-POST   /api/v1/alerts/actions
+POST   /api/v1/alerts/{id}/assign              (planned)
+POST   /api/v1/alerts/{id}/close               (planned)
+POST   /api/v1/alerts/{id}/notes               (planned)
+POST   /api/v1/alerts/actions                  (planned)
 GET    /api/v1/stream
 POST   /api/v1/ingest/alertmanager/{source}
 GET    /health/live
@@ -244,14 +245,14 @@ Support `Last-Event-ID`, detect retention gaps, and instruct clients to refresh 
 The primary experience is one dense operational console, not a card dashboard:
 
 - sticky identity, source, user, and connection bar
-- Prometheus-style label filter with autocomplete
+- server-side positive and negative label filters, with detail-driven label actions
 - compact severity and lifecycle summary strip
-- server-filtered, virtualized alert table
+- server-filtered alert table with sortable severity, state, alert, summary, team, instance, source, and age columns
 - keyboard navigation and multi-selection
 - resizable detail drawer on desktop
 - full-screen detail view on mobile
-- labels, annotations, raw payload, source links, timeline, and notes
-- single and bulk operator actions
+- labels, annotations, raw payload, source links, and timeline
+- acknowledgement actions; other single and bulk operator actions remain planned
 - visible stale/reconnecting state
 
 Default columns are severity, lifecycle state, alert name, summary, team, instance, source, age, assignee, and note count.

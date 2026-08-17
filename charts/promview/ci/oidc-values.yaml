@@ -6,6 +6,13 @@ oidc:
   clientID: promview
   existingSecret: promview-oidc
   redirectURL: https://promview.example.com/api/v1/auth/oidc/callback
+
+roleBindings:
+  - name: promview-administrators
+    role: administrator
+    oidcIssuer: https://identity.example.com/oauth2/default
+    oidcGroup: promview-administrators
+
 ingress:
   enabled: true
   className: nginx

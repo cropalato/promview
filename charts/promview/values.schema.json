@@ -46,6 +46,20 @@
         "tokenKey": {"type": "string", "minLength": 1}
       }
     },
+    "roleBindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "role", "oidcIssuer", "oidcGroup"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"},
+          "role": {"type": "string", "enum": ["viewer", "operator", "administrator"]},
+          "oidcIssuer": {"type": "string", "minLength": 1},
+          "oidcGroup": {"type": "string", "minLength": 1},
+          "selectors": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
     "service": {
       "type": "object",
       "required": ["type", "port"],

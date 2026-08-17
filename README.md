@@ -163,7 +163,9 @@ See [`docs/authorization.md`](docs/authorization.md) for binding administration,
 
 Production issuer and redirect URLs must use HTTPS. Loopback HTTP is supported for provider testing by setting `PROMVIEW_OIDC_COOKIE_SECURE=false`; insecure cookies are rejected for non-loopback redirect hosts.
 
-The list endpoint supports opaque cursor pagination and exact `source`, `status`, `severity`, and `team` filters. The browser console currently applies its free-text search only to rows already loaded from this endpoint.
+The list endpoint supports opaque cursor pagination, source/status filters, and repeated label matchers. Use `match=label=value` or `match=label!=value` for ANDed positive and negative label filters, plus `sort` and `order=asc|desc` for supported columns. The browser console applies these filters and sorts server-side; detail labels can add or replace a positive or negative filter.
+
+Authorized operators can acknowledge or unacknowledge an alert from its detail view. This records Promview-local state and timeline history but does not alter Alertmanager routing, notifications, or silences.
 
 Live alert changes are available as resumable server-sent events:
 
