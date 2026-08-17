@@ -40,10 +40,6 @@ Open the system browser, use Authorization Code with PKCE, and return through a 
 
 Exchange the callback result for revocable Promview desktop credentials and place them in the OS keychain. Do not expose identity-provider refresh tokens to React code.
 
-### LDAP
-
-Use an in-app credential form over TLS. The server authenticates against LDAP and returns Promview desktop credentials. LDAP passwords are never persisted by the client or server.
-
 ### Open
 
 Connect as the anonymous viewer without stored credentials. The client must not display enabled mutation controls.
@@ -71,7 +67,7 @@ React owns presentation and user interaction. The Rust core sends normalized str
 - open full console action
 - background resumable SSE
 - native critical/warning notifications
-- OIDC, LDAP, and open mode login
+- OIDC and open mode login
 - OS keychain storage
 - view, acknowledge, assign, close, and notes according to server permissions
 - manual update check

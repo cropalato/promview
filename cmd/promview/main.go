@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,8 +53,10 @@ func run() error {
 			return postgres.ApplyMigrations(ctx, pool, cfg.MigrationsDir)
 		case "source":
 			return runSourceCommand(ctx, postgres.New(pool), os.Args[2:])
+		case "access":
+			return runAccessCommand(ctx, postgres.New(pool), os.Args[2:])
 		default:
-			return errors.New("usage: promview [migrate|source set]")
+			return errors.New("usage: promview [migrate|source set|access set|access delete]")
 		}
 	}
 
@@ -68,7 +71,7 @@ func run() error {
 	}
 	var authenticator auth.Authenticator = auth.OpenAuthenticator{}
 	var authenticationHandler http.Handler
-	if cfg.AuthMode != "open" {
+	if cfg.AuthMode == "oidc" {
 		const sessionTTL = 12 * time.Hour
 		sessionManager := auth.NewSessionManager(store, sessionTTL)
 		authenticator = sessionManager
@@ -85,11 +88,7 @@ func run() error {
 				return err
 			}
 			authenticationHandler = auth.NewOIDCHandler(
-				store, sessionManager, provider,
-				auth.OIDCRoleMapping{
-					ViewerGroups: cfg.OIDCViewerGroups, OperatorGroups: cfg.OIDCOperatorGroups,
-					AdminGroups: cfg.OIDCAdminGroups,
-				},
+				store, store, sessionManager, provider,
 				cfg.OIDCCookieSecure, sessionTTL,
 			)
 		}
@@ -119,6 +118,74 @@ func run() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
+	}
+}
+
+type accessStore interface {
+	SetRoleBinding(context.Context, auth.RoleBinding) error
+	DeleteRoleBinding(context.Context, string) error
+}
+
+type repeatedStrings []string
+
+func (values *repeatedStrings) String() string { return strings.Join(*values, ",") }
+func (values *repeatedStrings) Set(value string) error {
+	*values = append(*values, value)
+	return nil
+}
+
+func runAccessCommand(ctx context.Context, store accessStore, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: promview access [set|delete]")
+	}
+	switch args[0] {
+	case "delete":
+		flags := flag.NewFlagSet("promview access delete", flag.ContinueOnError)
+		name := flags.String("name", "", "binding name")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *name == "" {
+			return errors.New("--name is required")
+		}
+		return store.DeleteRoleBinding(ctx, *name)
+	case "set":
+		flags := flag.NewFlagSet("promview access set", flag.ContinueOnError)
+		name := flags.String("name", "", "binding name")
+		role := flags.String("role", "", "viewer, operator, or administrator")
+		userID := flags.Int64("user-id", 0, "Promview user ID")
+		issuer := flags.String("oidc-issuer", "", "OIDC issuer URL")
+		group := flags.String("oidc-group", "", "OIDC group name")
+		var selectors repeatedStrings
+		flags.Var(&selectors, "selector", "label selector; repeat for AND semantics")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		binding := auth.RoleBinding{Name: *name, Role: auth.Role(*role)}
+		switch {
+		case *userID > 0 && *issuer == "" && *group == "":
+			binding.SubjectKind = auth.SubjectUser
+			binding.UserID = *userID
+		case *userID == 0 && *issuer != "" && *group != "":
+			binding.SubjectKind = auth.SubjectOIDCGroup
+			binding.OIDCIssuer = *issuer
+			binding.OIDCGroup = *group
+		default:
+			return errors.New("set exactly one subject with --user-id or --oidc-issuer and --oidc-group")
+		}
+		for _, raw := range selectors {
+			matcher, err := auth.ParseLabelMatcher(raw)
+			if err != nil {
+				return err
+			}
+			binding.Matchers = append(binding.Matchers, matcher)
+		}
+		if err := auth.ValidateRoleBinding(binding); err != nil {
+			return err
+		}
+		return store.SetRoleBinding(ctx, binding)
+	default:
+		return errors.New("usage: promview access [set|delete]")
 	}
 }
 

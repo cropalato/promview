@@ -17,7 +17,6 @@ const CONNECTION_LABEL: Record<ConnectionState, string> = {
 
 const MODE_LABEL: Record<AuthMode, string> = {
   open: 'Open access',
-  ldap: 'LDAP',
   oidc: 'OIDC',
 };
 

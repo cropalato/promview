@@ -108,7 +108,7 @@ Inspect the current principal:
 curl 'http://localhost:8080/api/v1/me'
 ```
 
-Open mode returns an anonymous viewer and keeps ingestion authenticated. LDAP mode requires an existing opaque session; its provider login flow is not implemented yet. OIDC mode provides browser sign-in and logout while keeping provider tokens on the server.
+Open mode returns an anonymous global viewer and keeps ingestion authenticated. OIDC is the only interactive authentication mode; provider tokens remain on the server.
 
 ## OIDC Authentication
 
@@ -128,15 +128,38 @@ export PROMVIEW_OIDC_ISSUER_URL='https://identity.example.com'
 export PROMVIEW_OIDC_CLIENT_ID='promview'
 export PROMVIEW_OIDC_CLIENT_SECRET='replace-with-client-secret'
 export PROMVIEW_OIDC_REDIRECT_URL='https://promview.example.com/api/v1/auth/oidc/callback'
-export PROMVIEW_OIDC_VIEWER_GROUPS='promview-viewers'
-export PROMVIEW_OIDC_OPERATOR_GROUPS='promview-operators'
-export PROMVIEW_OIDC_ADMIN_GROUPS='promview-administrators'
 docker compose up --build
+```
+
+Create at least one server-owned binding before the first OIDC login:
+
+```sh
+docker compose run --rm app access set \
+  --name promview-administrators \
+  --role administrator \
+  --oidc-issuer 'https://identity.example.com' \
+  --oidc-group 'promview-administrators'
+```
+
+Create a scoped operator binding by repeating `--selector` for AND semantics:
+
+```sh
+docker compose run --rm app access set \
+  --name platform-operators \
+  --role operator \
+  --oidc-issuer 'https://identity.example.com' \
+  --oidc-group 'promview-platform' \
+  --selector 'team=platform' \
+  --selector 'environment!=development'
 ```
 
 Promview uses provider discovery and Authorization Code with PKCE. It validates the ID token signature, issuer, audience, expiry, state, and nonce, then issues its own opaque 12-hour session in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie. Provider access and ID tokens are not persisted.
 
-The default scopes are `openid,profile,email,groups`; the default claims are `preferred_username`, `email`, `name`, and `groups`. Override them with `PROMVIEW_OIDC_SCOPES`, `PROMVIEW_OIDC_USERNAME_CLAIM`, `PROMVIEW_OIDC_EMAIL_CLAIM`, `PROMVIEW_OIDC_DISPLAY_NAME_CLAIM`, and `PROMVIEW_OIDC_GROUPS_CLAIM`. Group lists are comma-separated. Unmapped identities are denied, and administrator mappings take precedence over operator and viewer mappings.
+The default scopes are `openid,profile,email,groups`; the default claims are `preferred_username`, `email`, `name`, and `groups`. Override them with `PROMVIEW_OIDC_SCOPES`, `PROMVIEW_OIDC_USERNAME_CLAIM`, `PROMVIEW_OIDC_EMAIL_CLAIM`, `PROMVIEW_OIDC_DISPLAY_NAME_CLAIM`, and `PROMVIEW_OIDC_GROUPS_CLAIM`. Unbound identities are denied. Bindings are evaluated from the database on every request, so policy changes affect existing sessions immediately. Provider group changes take effect when Promview next observes them during a successful login.
+
+Selectors support `=`, `!=`, `=~`, and `!~`. Selectors within one binding are ANDed; multiple matching bindings are ORed. Viewer and operator bindings may be scoped, while administrator bindings are always global.
+
+See [`docs/authorization.md`](docs/authorization.md) for binding administration, selector semantics, revocation behavior, and deployment-specific commands.
 
 Production issuer and redirect URLs must use HTTPS. Loopback HTTP is supported for provider testing by setting `PROMVIEW_OIDC_COOKIE_SECURE=false`; insecure cookies are rejected for non-loopback redirect hosts.
 

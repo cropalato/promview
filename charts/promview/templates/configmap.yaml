@@ -16,9 +16,6 @@ data:
   PROMVIEW_OIDC_EMAIL_CLAIM: {{ .Values.oidc.emailClaim | quote }}
   PROMVIEW_OIDC_DISPLAY_NAME_CLAIM: {{ .Values.oidc.displayNameClaim | quote }}
   PROMVIEW_OIDC_GROUPS_CLAIM: {{ .Values.oidc.groupsClaim | quote }}
-  PROMVIEW_OIDC_VIEWER_GROUPS: {{ join "," .Values.oidc.viewerGroups | quote }}
-  PROMVIEW_OIDC_OPERATOR_GROUPS: {{ join "," .Values.oidc.operatorGroups | quote }}
-  PROMVIEW_OIDC_ADMIN_GROUPS: {{ join "," .Values.oidc.adminGroups | quote }}
   PROMVIEW_OIDC_COOKIE_SECURE: {{ .Values.oidc.cookieSecure | quote }}
   {{- end }}
   {{- if .Values.bootstrapSource.enabled }}

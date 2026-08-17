@@ -59,9 +59,6 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $oidcSecret := required "oidc.existingSecret is required when auth.mode=oidc" .Values.oidc.existingSecret -}}
 {{- $clientSecretKey := required "oidc.clientSecretKey is required when auth.mode=oidc" .Values.oidc.clientSecretKey -}}
 {{- $redirectURL := required "oidc.redirectURL is required when auth.mode=oidc" .Values.oidc.redirectURL -}}
-{{- if eq (add (len .Values.oidc.viewerGroups) (len .Values.oidc.operatorGroups) (len .Values.oidc.adminGroups)) 0 -}}
-{{- fail "at least one OIDC viewer, operator, or administrator group is required" -}}
-{{- end -}}
 {{- end -}}
 {{- if .Values.bootstrapSource.enabled -}}
 {{- $sourceSlug := required "bootstrapSource.slug is required when bootstrapSource.enabled=true" .Values.bootstrapSource.slug -}}

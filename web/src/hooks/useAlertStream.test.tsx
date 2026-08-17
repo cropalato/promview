@@ -1,6 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AlertStreamEvent } from '../alerts/stream';
+import type {
+  AlertStreamEvent,
+  AlertStreamNotificationEvent,
+  AlertStreamRemovedEvent,
+} from '../alerts/stream';
 import { FakeEventSource } from '../test/fakeEventSource';
 import { useAlertStream } from './useAlertStream';
 
@@ -19,7 +23,9 @@ function streamEventPayload(overrides: Record<string, unknown> = {}): Record<str
   };
 }
 
-function streamEvent(overrides: Partial<AlertStreamEvent> = {}): AlertStreamEvent {
+function streamEvent(
+  overrides: Partial<AlertStreamNotificationEvent> = {},
+): AlertStreamNotificationEvent {
   return {
     id: 8,
     type: 'alert.updated',
@@ -30,6 +36,29 @@ function streamEvent(overrides: Partial<AlertStreamEvent> = {}): AlertStreamEven
     summary: 'Error rate above 5% for 10m',
     source: 'am-eu',
     team: 'core',
+    ...overrides,
+  };
+}
+
+/** Redacted payload matching the server schema for removals: envelope only. */
+function removedEventPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 8,
+    type: 'alert.removed',
+    alertId: '42',
+    occurredAt: '2026-08-14T12:00:00Z',
+    ...overrides,
+  };
+}
+
+function removedStreamEvent(
+  overrides: Partial<AlertStreamRemovedEvent> = {},
+): AlertStreamRemovedEvent {
+  return {
+    id: 8,
+    type: 'alert.removed',
+    alertId: '42',
+    occurredAt: '2026-08-14T12:00:00Z',
     ...overrides,
   };
 }
@@ -92,6 +121,17 @@ describe('useAlertStream', () => {
     });
 
     expect(events).toEqual([streamEvent()]);
+  });
+
+  it('forwards redacted alert.removed events to the handler', () => {
+    const events: AlertStreamEvent[] = [];
+    renderStream(7, (event) => events.push(event));
+
+    act(() => {
+      FakeEventSource.latest().emit('alert.removed', removedEventPayload(), '8');
+    });
+
+    expect(events).toEqual([removedStreamEvent()]);
   });
 
   it('reports reconnecting after a drop and resumes from the newest snapshot cursor', () => {

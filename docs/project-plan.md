@@ -10,7 +10,7 @@
 - Initial source: Prometheus Alertmanager webhooks only
 - Source topology: multiple Alertmanager installations
 - Expected scale: up to 50,000 active alerts and 100 received alerts per second
-- Authentication modes: open, LDAP, or OIDC
+- Authentication modes: open or OIDC
 - Open mode: anonymous read-only
 - Roles: viewer, operator, and administrator
 - Authorization scope: Prometheus label selectors, including team-scoped access
@@ -39,13 +39,15 @@ The current implementation provides:
 - health, readiness, and runtime configuration endpoints
 - source-specific hashed ingestion credentials and source provisioning CLI
 - anonymous open-mode principals and hashed opaque cookie or bearer sessions
-- OIDC browser sign-in with configured group-to-role mappings
+- OIDC browser sign-in with server-owned group-to-role bindings
+- persistent OIDC identities and database-backed user or group role bindings
+- SQL-enforced team/label scopes for alert lists, counts, details, history, and SSE
 - a responsive React console connected to firing alerts
 - opt-in browser notifications for newly created critical alerts while the console is open
 - a Helm chart with serialized pre-install and pre-upgrade migrations for external PostgreSQL
 - migration, persistence, API, frontend, image, Compose, and Helm verification in GitHub Actions
 
-LDAP login, operator actions, notes, scoped authorization, and stream retention remain planned work.
+Operator actions, notes, authorization administration APIs, and stream retention remain planned work.
 
 ## Goals
 
@@ -161,14 +163,6 @@ Only one interactive mode is active per deployment.
 - all mutations denied
 - source ingestion remains authenticated
 
-### LDAP
-
-- bind-and-search authentication
-- TLS and custom CA support
-- configurable user and group filters
-- map LDAP groups to role bindings
-- never persist LDAP passwords
-
 ### OIDC
 
 - Authorization Code flow with PKCE
@@ -177,7 +171,7 @@ Only one interactive mode is active per deployment.
 - configurable username, email, display name, and group claims
 - map OIDC groups to role bindings
 
-The browser OIDC flow is implemented with database-backed one-time login transactions, a short-lived state correlation cookie, configured group-to-role mappings, and deny-by-default access for unmapped identities. Provider tokens stay server-side and are not persisted.
+The browser OIDC flow is implemented with database-backed one-time login transactions, a short-lived state correlation cookie, server-owned group-to-role bindings, and deny-by-default access for unbound identities. Provider tokens stay server-side and are not persisted.
 
 ### Sessions And Desktop Tokens
 
@@ -185,7 +179,7 @@ Browser sessions use random opaque IDs in `HttpOnly`, `Secure`, `SameSite=Lax` c
 
 Desktop clients use revocable opaque bearer credentials stored in the operating system keychain. REST and SSE must accept browser sessions or desktop credentials without changing authorization semantics.
 
-The shared session storage, cookie or bearer authentication, OIDC session issuance, and logout revocation flows are implemented. LDAP login and CSRF enforcement for future browser mutations remain planned.
+The shared session storage, cookie or bearer authentication, OIDC session issuance, and logout revocation flows are implemented. CSRF enforcement for future browser mutations remains planned.
 
 ## Authorization
 
@@ -307,7 +301,7 @@ CI configuration and documented local commands must be updated together. Postgre
 1. Foundation: module, workspace, Compose, migrations, OpenAPI, local checks, and matching Actions workflows.
 2. Ingestion: source credentials, Alertmanager parser, identity, occurrence lifecycle, and contract fixtures.
 3. Query API: scoped filtering, cursor pagination, counts, details, history, and realistic database performance tests.
-4. Authentication: open, LDAP, OIDC, browser sessions, desktop credentials, and provider security tests.
+4. Authentication: open, OIDC, browser sessions, desktop credentials, and provider security tests.
 5. Authorization and actions: scoped RBAC, acknowledge, assign, close, notes, bulk actions, and audit events.
 6. Browser UI: virtualized console, detail timeline, actions, responsive triage, SSE, accessibility, and keyboard flows.
 7. Hardening: load, recovery, retention, backup, multi-architecture images, and release documentation.
@@ -320,7 +314,7 @@ CI configuration and documented local commands must be updated together. Postgre
 - Resolved and subsequently firing alerts create correct occurrence transitions.
 - Acknowledgements survive repeated firing deliveries.
 - Open mode cannot mutate alerts.
-- LDAP and OIDC group mappings produce expected roles and label scopes.
+- OIDC group bindings produce expected roles and label scopes.
 - A scoped operator cannot list, count, stream, or mutate another team's alerts.
 - The console remains usable with 50,000 active alerts and 100 received alerts per second.
 - Restarting the application loses no alert or operator state.

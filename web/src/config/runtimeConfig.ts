@@ -5,7 +5,7 @@
  * intentionally client-neutral (same-origin, cookie-based) so the same code
  * runs in the embedded browser build and the future Tauri desktop client.
  */
-export type AuthMode = 'open' | 'ldap' | 'oidc';
+export type AuthMode = 'open' | 'oidc';
 
 export interface RuntimeConfig {
   authMode: AuthMode;
@@ -14,7 +14,7 @@ export interface RuntimeConfig {
 
 export const RUNTIME_CONFIG_URL = '/api/v1/config';
 
-const AUTH_MODES: readonly AuthMode[] = ['open', 'ldap', 'oidc'];
+const AUTH_MODES: readonly AuthMode[] = ['open', 'oidc'];
 const DEFAULT_PRODUCT_NAME = 'Promview';
 
 export class RuntimeConfigError extends Error {

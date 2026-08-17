@@ -49,15 +49,23 @@ type ListResult struct {
 }
 
 type StreamEvent struct {
-	ID         int64     `json:"id"`
-	Type       string    `json:"type"`
-	AlertID    int64     `json:"-"`
-	OccurredAt time.Time `json:"occurredAt"`
-	Severity   string    `json:"severity"`
-	AlertName  string    `json:"alertName"`
-	Summary    string    `json:"summary"`
-	SourceSlug string    `json:"source"`
-	Team       string    `json:"team"`
+	ID             int64             `json:"id"`
+	Type           string            `json:"type"`
+	AlertID        int64             `json:"-"`
+	OccurredAt     time.Time         `json:"occurredAt"`
+	Severity       string            `json:"severity"`
+	AlertName      string            `json:"alertName"`
+	Summary        string            `json:"summary"`
+	SourceSlug     string            `json:"source"`
+	Team           string            `json:"team"`
+	Labels         map[string]string `json:"-"`
+	PreviousLabels map[string]string `json:"-"`
+	Redacted       bool              `json:"-"`
+}
+
+type StreamBatch struct {
+	Events         []StreamEvent
+	ScannedThrough int64
 }
 
 type HistoryEvent struct {

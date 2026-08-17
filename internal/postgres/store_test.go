@@ -36,15 +36,23 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 6 {
-		t.Fatalf("migration count = %d, want 6", migrationCount)
+	if migrationCount != 7 {
+		t.Fatalf("migration count = %d, want 7", migrationCount)
 	}
-	if _, err := pool.Exec(ctx, "TRUNCATE oidc_login_transactions, sessions, stream_events, alert_history, alerts RESTART IDENTITY"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE oidc_login_transactions, sessions, role_binding_matchers, role_bindings, auth_identity_groups, auth_identities, users, stream_events, alert_history, alerts RESTART IDENTITY"); err != nil {
 		t.Fatal(err)
 	}
 
 	base := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	store := New(pool)
+	principal, err := auth.OpenAuthenticator{}.Authenticate(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamEvents := func(afterID int64) ([]alerts.StreamEvent, error) {
+		batch, err := store.StreamEvents(ctx, principal, afterID, 100)
+		return batch.Events, err
+	}
 	const sourceToken = "0123456789abcdef"
 	if err := store.SetSource(ctx, sources.Source{Slug: "primary", Name: "Primary"}, sourceToken); err != nil {
 		t.Fatal(err)
@@ -73,7 +81,7 @@ func TestStoreIngestAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := store.ListAlerts(ctx, alerts.Query{Limit: 2})
+	first, err := store.ListAlerts(ctx, principal, alerts.Query{Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +98,7 @@ func TestStoreIngestAndList(t *testing.T) {
 		t.Fatalf("severity counts = %#v", first.SeverityCounts)
 	}
 
-	second, err := store.ListAlerts(ctx, alerts.Query{Limit: 2, Cursor: first.NextCursor})
+	second, err := store.ListAlerts(ctx, principal, alerts.Query{Limit: 2, Cursor: first.NextCursor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +106,7 @@ func TestStoreIngestAndList(t *testing.T) {
 		t.Fatalf("second page = %#v, want final oldest alert", second)
 	}
 
-	filtered, err := store.ListAlerts(ctx, alerts.Query{Limit: 10, Team: "platform", Severity: "critical"})
+	filtered, err := store.ListAlerts(ctx, principal, alerts.Query{Limit: 10, Team: "platform", Severity: "critical"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +114,7 @@ func TestStoreIngestAndList(t *testing.T) {
 		t.Fatalf("filtered result = %#v, want newest alert", filtered)
 	}
 
-	events, err := store.StreamEvents(ctx, 0, 100)
+	events, err := streamEvents(0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +129,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{repeated}); err != nil {
 		t.Fatal(err)
 	}
-	events, err = store.StreamEvents(ctx, 3, 100)
+	events, err = streamEvents(3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +141,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{repeated}); err != nil {
 		t.Fatal(err)
 	}
-	events, err = store.StreamEvents(ctx, 3, 100)
+	events, err = streamEvents(3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +153,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{repeated}); err != nil {
 		t.Fatal(err)
 	}
-	events, err = store.StreamEvents(ctx, 4, 100)
+	events, err = streamEvents(4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +161,7 @@ func TestStoreIngestAndList(t *testing.T) {
 		t.Fatalf("resolved events = %#v, want one resolved event", events)
 	}
 
-	detail, err := store.GetAlertDetail(ctx, 2)
+	detail, err := store.GetAlertDetail(ctx, principal, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +176,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{repeated}); err != nil {
 		t.Fatal(err)
 	}
-	detail, err = store.GetAlertDetail(ctx, 2)
+	detail, err = store.GetAlertDetail(ctx, principal, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,15 +192,107 @@ func TestStoreIngestAndList(t *testing.T) {
 		t.Fatal("source last_delivery_at was not updated")
 	}
 
+	binding := auth.RoleBinding{
+		Name: "platform-viewers", SubjectKind: auth.SubjectOIDCGroup,
+		OIDCIssuer: "https://identity.example.com", OIDCGroup: "platform-viewers", Role: auth.RoleViewer,
+		Matchers: []auth.LabelMatcher{{Name: "team", Operator: "=", Value: "platform"}},
+	}
+	if err := store.SetRoleBinding(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	oidcPrincipal, err := store.ResolveOIDCIdentity(ctx, auth.OIDCIdentity{
+		Issuer: "https://identity.example.com", Subject: "user-1", Email: "user@example.com",
+		DisplayName: "User One", Groups: []string{"platform-viewers"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paymentsBinding := auth.RoleBinding{
+		Name: "payments-viewers", SubjectKind: auth.SubjectOIDCGroup,
+		OIDCIssuer: "https://identity.example.com", OIDCGroup: "payments-viewers", Role: auth.RoleViewer,
+		Matchers: []auth.LabelMatcher{
+			{Name: "team", Operator: "=~", Value: "pay.*"},
+			{Name: "severity", Operator: "!=", Value: "critical"},
+		},
+	}
+	if err := store.SetRoleBinding(ctx, paymentsBinding); err != nil {
+		t.Fatal(err)
+	}
+	paymentsPrincipal, err := store.ResolveOIDCIdentity(ctx, auth.OIDCIdentity{
+		Issuer: "https://identity.example.com", Subject: "user-2", DisplayName: "Payments User",
+		Groups: []string{"payments-viewers"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paymentsAlerts, err := store.ListAlerts(ctx, paymentsPrincipal, alerts.Query{Limit: 10})
+	if err != nil || paymentsAlerts.Total != 1 || len(paymentsAlerts.Alerts) != 1 || paymentsAlerts.Alerts[0].Labels["team"] != "payments" {
+		t.Fatalf("regex-scoped alerts = %#v, error = %v", paymentsAlerts, err)
+	}
+	scoped, err := store.ListAlerts(ctx, oidcPrincipal, alerts.Query{Limit: 10})
+	if err != nil || scoped.Total != 2 || len(scoped.Alerts) != 2 {
+		t.Fatalf("scoped alerts = %#v, error = %v, want two platform alerts", scoped, err)
+	}
+	if scoped.SeverityCounts["warning"] != 0 || scoped.SeverityCounts["critical"] != 1 || scoped.SeverityCounts["info"] != 1 {
+		t.Fatalf("scoped severity counts = %#v", scoped.SeverityCounts)
+	}
+	broadened, err := store.ListAlerts(ctx, oidcPrincipal, alerts.Query{Limit: 10, Team: "payments"})
+	if err != nil || broadened.Total != 0 || len(broadened.Alerts) != 0 {
+		t.Fatalf("out-of-scope client filter = %#v, error = %v", broadened, err)
+	}
+	scopedFirst, err := store.ListAlerts(ctx, oidcPrincipal, alerts.Query{Limit: 1})
+	if err != nil || len(scopedFirst.Alerts) != 1 || scopedFirst.NextCursor == nil {
+		t.Fatalf("first scoped page = %#v, error = %v", scopedFirst, err)
+	}
+	scopedSecond, err := store.ListAlerts(ctx, oidcPrincipal, alerts.Query{Limit: 1, Cursor: scopedFirst.NextCursor})
+	if err != nil || len(scopedSecond.Alerts) != 1 || scopedSecond.Alerts[0].Labels["team"] != "platform" {
+		t.Fatalf("second scoped page = %#v, error = %v", scopedSecond, err)
+	}
+	if _, err := store.GetAlertDetail(ctx, oidcPrincipal, 2); !errors.Is(err, alerts.ErrNotFound) {
+		t.Fatalf("out-of-scope detail error = %v, want not found", err)
+	}
+	scopedBatch, err := store.StreamEvents(ctx, oidcPrincipal, 0, 100)
+	if err != nil || len(scopedBatch.Events) != 2 {
+		t.Fatalf("scoped stream = %#v, error = %v, want two platform events", scopedBatch, err)
+	}
+	transition := incoming("newest", "critical", "security", base.Add(10*time.Minute))
+	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{transition}); err != nil {
+		t.Fatal(err)
+	}
+	transitionBatch, err := store.StreamEvents(ctx, oidcPrincipal, 6, 100)
+	if err != nil || len(transitionBatch.Events) != 1 || transitionBatch.Events[0].Type != "alert.removed" || !transitionBatch.Events[0].Redacted {
+		t.Fatalf("scope transition stream = %#v, error = %v", transitionBatch, err)
+	}
+
 	manager := auth.NewSessionManager(store, time.Hour)
-	principal := auth.Principal{Subject: "user-1", DisplayName: "User One", Roles: []string{"viewer"}}
-	token, err := manager.NewSession(ctx, principal)
+	token, err := manager.NewSession(ctx, oidcPrincipal)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session, err := store.FindSession(ctx, auth.HashSessionToken(token), time.Now().UTC())
-	if err != nil || session.Subject != principal.Subject {
+	if err != nil || session.Principal.Subject != oidcPrincipal.Subject || !session.Principal.CanRead() {
 		t.Fatalf("session = %#v, error = %v", session, err)
+	}
+	if _, err := store.ResolveOIDCIdentity(ctx, auth.OIDCIdentity{
+		Issuer: "https://identity.example.com", Subject: "user-1", DisplayName: "User One",
+		Groups: []string{"unmapped"},
+	}); !errors.Is(err, auth.ErrAccessDenied) {
+		t.Fatalf("identity after group removal error = %v, want access denied", err)
+	}
+	if _, err := store.FindSession(ctx, auth.HashSessionToken(token), time.Now().UTC()); !errors.Is(err, auth.ErrUnauthenticated) {
+		t.Fatalf("session after group removal error = %v, want unauthenticated", err)
+	}
+	if oidcPrincipal, err = store.ResolveOIDCIdentity(ctx, auth.OIDCIdentity{
+		Issuer: "https://identity.example.com", Subject: "user-1", DisplayName: "User One",
+		Groups: []string{"platform-viewers"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteRoleBinding(ctx, binding.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.FindSession(ctx, auth.HashSessionToken(token), time.Now().UTC()); !errors.Is(err, auth.ErrUnauthenticated) {
+		t.Fatalf("session after binding revocation error = %v, want unauthenticated", err)
 	}
 	transaction := auth.OIDCTransaction{
 		StateHash: auth.HashSessionToken("state"), Nonce: "nonce", CodeVerifier: "verifier", ExpiresAt: base.Add(time.Hour),

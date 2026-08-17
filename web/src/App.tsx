@@ -39,8 +39,8 @@ export interface AppProps {
  * console behind a sign-in link, a 403 behind an access-denied panel. A 401
  * from any alert request after boot (session expired) drops back to that
  * same sign-in gate and stops alert/SSE activity. Open mode keeps its
- * anonymous viewer without the extra request, and LDAP keeps its unavailable
- * notice. Once unlocked, it pages in firing alerts from
+ * anonymous viewer without the extra request. Once unlocked, it pages in
+ * firing alerts from
  * `GET /api/v1/alerts`, keeping the alerts loading and error states inside
  * the console area so the configured shell stays put. After the first ready
  * snapshot it opens the live event stream; stream events coalesce into quiet
@@ -89,9 +89,10 @@ export default function App({ navigate }: AppProps = {}) {
     toggleOptIn: toggleNotificationOptIn,
     handleEvent: handleNotificationEvent,
   } = useAlertNotifications({ navigateToAlert: openAlert });
-  // A stream event refreshes the list; when it targets the open alert, the
-  // detail drawer quietly refreshes alongside it. The same event also feeds
-  // the notification check (opted in + hidden tab + new critical alert).
+  // Every stream event — including redacted removals — refreshes the list;
+  // when it targets the open alert, the detail drawer quietly refreshes
+  // alongside it. The same event also feeds the notification check (opted
+  // in + hidden tab + new critical alert; removals never qualify).
   const handleAlertEvent = useCallback(
     (event: AlertStreamEvent) => {
       scheduleLiveRefresh();
@@ -227,12 +228,6 @@ export default function App({ navigate }: AppProps = {}) {
               <h1 className="console-title">Alerts</h1>
               <p className="console-meta">live view · all sources</p>
             </div>
-            {configState.config.authMode === 'ldap' ? (
-              <div className="notice" role="note">
-                This deployment uses LDAP sign-in. Interactive authentication is not available in
-                this build yet, so the console is shown read-only.
-              </div>
-            ) : null}
             {signOutState === 'error' ? (
               <div className="notice" role="alert">
                 Sign-out failed. Check the connection to the Promview API and try again.

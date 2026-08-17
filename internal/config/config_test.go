@@ -30,14 +30,13 @@ func TestLoadOIDCConfiguration(t *testing.T) {
 	t.Setenv("PROMVIEW_OIDC_CLIENT_ID", "promview")
 	t.Setenv("PROMVIEW_OIDC_CLIENT_SECRET", "secret")
 	t.Setenv("PROMVIEW_OIDC_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oidc/callback")
-	t.Setenv("PROMVIEW_OIDC_VIEWER_GROUPS", "promview-viewers, shared")
 	t.Setenv("PROMVIEW_OIDC_COOKIE_SECURE", "false")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.OIDCCookieSecure || len(cfg.OIDCViewerGroups) != 2 || cfg.OIDCGroupsClaim != "groups" {
+	if cfg.OIDCCookieSecure || cfg.OIDCGroupsClaim != "groups" {
 		t.Fatalf("OIDC config = %#v", cfg)
 	}
 }
@@ -57,7 +56,14 @@ func TestLoadRejectsInsecureRemoteOIDCConfiguration(t *testing.T) {
 	t.Setenv("PROMVIEW_OIDC_CLIENT_ID", "promview")
 	t.Setenv("PROMVIEW_OIDC_CLIENT_SECRET", "secret")
 	t.Setenv("PROMVIEW_OIDC_REDIRECT_URL", "https://promview.example.com/api/v1/auth/oidc/callback")
-	t.Setenv("PROMVIEW_OIDC_VIEWER_GROUPS", "promview-viewers")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want error")
+	}
+}
+
+func TestLoadRejectsLDAPMode(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_AUTH_MODE", "ldap")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() error = nil, want error")
 	}

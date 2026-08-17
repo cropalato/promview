@@ -24,9 +24,9 @@ const maxWebhookBodyBytes = 4 << 20
 type Store interface {
 	Ingest(context.Context, []alertmanager.IncomingAlert) error
 	AuthenticateSource(context.Context, string, string) (bool, error)
-	ListAlerts(context.Context, alerts.Query) (alerts.ListResult, error)
-	GetAlertDetail(context.Context, int64) (alerts.Detail, error)
-	StreamEvents(context.Context, int64, int) ([]alerts.StreamEvent, error)
+	ListAlerts(context.Context, auth.Principal, alerts.Query) (alerts.ListResult, error)
+	GetAlertDetail(context.Context, auth.Principal, int64) (alerts.Detail, error)
+	StreamEvents(context.Context, auth.Principal, int64, int) (alerts.StreamBatch, error)
 	Ping(context.Context) error
 }
 
@@ -70,7 +70,7 @@ func (api *API) requireAuthentication(next http.Handler) http.Handler {
 			}
 			return
 		}
-		if !principal.HasRole("viewer") && !principal.HasRole("operator") && !principal.HasRole("administrator") {
+		if !principal.CanRead() {
 			writeError(w, http.StatusForbidden, "read access denied")
 			return
 		}
@@ -80,7 +80,7 @@ func (api *API) requireAuthentication(next http.Handler) http.Handler {
 }
 
 func (api *API) getMe(w http.ResponseWriter, r *http.Request) {
-	principal, ok := r.Context().Value(principalContextKey{}).(auth.Principal)
+	principal, ok := requestPrincipal(r)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "principal is unavailable")
 		return
@@ -113,7 +113,12 @@ func (api *API) loadAlertDetail(w http.ResponseWriter, r *http.Request) (alerts.
 		writeError(w, http.StatusBadRequest, "alert id is invalid")
 		return alerts.Detail{}, false
 	}
-	detail, err := api.store.GetAlertDetail(r.Context(), id)
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		return alerts.Detail{}, false
+	}
+	detail, err := api.store.GetAlertDetail(r.Context(), principal, id)
 	if errors.Is(err, alerts.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "alert not found")
 		return alerts.Detail{}, false
@@ -131,7 +136,12 @@ func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result, err := api.store.ListAlerts(r.Context(), query)
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		return
+	}
+	result, err := api.store.ListAlerts(r.Context(), principal, query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query alerts")
 		return
@@ -177,39 +187,54 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	lastKeepalive := time.Now()
+	lastAuthentication := time.Now()
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		return
+	}
 	for {
 		if err := r.Context().Err(); err != nil {
 			return
 		}
-		events, err := api.store.StreamEvents(r.Context(), afterID, 100)
+		if time.Since(lastAuthentication) >= 15*time.Second {
+			principal, err = api.authenticator.Authenticate(r.Context(), r)
+			if err != nil || !principal.CanRead() {
+				return
+			}
+			lastAuthentication = time.Now()
+		}
+		batch, err := api.store.StreamEvents(r.Context(), principal, afterID, 100)
 		if err != nil {
 			return
 		}
-		for _, event := range events {
+		for _, event := range batch.Events {
 			payload := map[string]any{
 				"id":         event.ID,
 				"type":       event.Type,
 				"alertId":    strconv.FormatInt(event.AlertID, 10),
 				"occurredAt": event.OccurredAt,
-				"severity":   event.Severity,
-				"alertName":  event.AlertName,
-				"summary":    event.Summary,
-				"source":     event.SourceSlug,
-				"team":       event.Team,
+			}
+			if !event.Redacted {
+				payload["severity"] = event.Severity
+				payload["alertName"] = event.AlertName
+				payload["summary"] = event.Summary
+				payload["source"] = event.SourceSlug
+				payload["team"] = event.Team
 			}
 			data, err := json.Marshal(payload)
 			if err != nil {
 				return
 			}
 			_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.ID, event.Type, data)
-			afterID = event.ID
 		}
-		if len(events) > 0 {
+		previousAfterID := afterID
+		afterID = batch.ScannedThrough
+		if len(batch.Events) > 0 {
 			flusher.Flush()
 			lastKeepalive = time.Now()
-			if len(events) == 100 {
-				continue
-			}
+		}
+		if afterID > previousAfterID {
+			continue
 		}
 		if time.Since(lastKeepalive) >= 15*time.Second {
 			_, _ = fmt.Fprint(w, ": keepalive\n\n")
@@ -225,6 +250,11 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 		case <-timer.C:
 		}
 	}
+}
+
+func requestPrincipal(r *http.Request) (auth.Principal, bool) {
+	principal, ok := r.Context().Value(principalContextKey{}).(auth.Principal)
+	return principal, ok
 }
 
 func (api *API) getConfig(w http.ResponseWriter, _ *http.Request) {

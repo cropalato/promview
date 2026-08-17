@@ -104,6 +104,17 @@ function streamEventPayload(overrides: Record<string, unknown> = {}): Record<str
   };
 }
 
+/** Redacted removal payload matching the server schema: envelope only. */
+function removedEventPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 8,
+    type: 'alert.removed',
+    alertId: '1',
+    occurredAt: '2026-08-14T12:00:00Z',
+    ...overrides,
+  };
+}
+
 function apiHistoryEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 11,
@@ -210,16 +221,6 @@ describe('App', () => {
     expect(await screen.findByText('Connected')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
     expect(fetchMock()).toHaveBeenCalledTimes(3);
-  });
-
-  it('announces that ldap sign-in is not available yet', async () => {
-    mockApi(alertsPage(), { authMode: 'ldap', productName: 'Promview' });
-    render(<App />);
-
-    expect(await screen.findByRole('note')).toHaveTextContent(/ldap sign-in/i);
-    expect(screen.getByRole('banner')).toHaveTextContent('Sign-in pending');
-    expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
-    expect(await screen.findByText('Connected')).toBeInTheDocument();
   });
 
   it('never requests the session in open mode', async () => {
@@ -726,7 +727,8 @@ describe('App', () => {
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7');
 
-    // A burst of stream events coalesces into one quiet first-page refresh.
+    // A burst of stream events — including a redacted removal — coalesces
+    // into one quiet first-page refresh.
     act(() => {
       FakeEventSource.latest().emit(
         'alert.created',
@@ -746,6 +748,11 @@ describe('App', () => {
           alertId: '3',
           occurredAt: '2026-08-14T12:00:02Z',
         }),
+        '9',
+      );
+      FakeEventSource.latest().emit(
+        'alert.removed',
+        removedEventPayload({ id: 9, alertId: '3', occurredAt: '2026-08-14T12:00:03Z' }),
         '9',
       );
     });
@@ -921,6 +928,19 @@ describe('App', () => {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     });
     expect(detailFetches).toBe(2);
+
+    // A redacted removal targeting the open alert refreshes it like any
+    // other event.
+    act(() => {
+      FakeEventSource.latest().emit(
+        'alert.removed',
+        removedEventPayload({ id: 10, occurredAt: '2026-08-14T12:00:02Z' }),
+        '10',
+      );
+    });
+    await waitFor(() => expect(detailFetches).toBe(3), { timeout: 3000 });
+    expect(screen.getByRole('dialog', { name: 'HighErrorRate' })).toBeInTheDocument();
+    expect(screen.queryByText(/loading alert detail/i)).not.toBeInTheDocument();
   });
 });
 
@@ -1084,6 +1104,12 @@ describe('App browser notifications', () => {
         'alert.updated',
         streamEventPayload({ id: 9, alertId: '2' }),
         '9',
+      );
+      // Redacted removals never notify, even opted in and hidden.
+      FakeEventSource.latest().emit(
+        'alert.removed',
+        removedEventPayload({ id: 10, alertId: '2' }),
+        '10',
       );
     });
 

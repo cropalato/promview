@@ -9,6 +9,12 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 ### Features
 
 - **web:** add opt-in browser notifications for newly created critical alerts while Promview is open.
+- **auth:** persist OIDC identities and enforce database-backed role and label-selector bindings across alert queries and streams.
+
+### Changed
+
+- Remove the unfinished LDAP mode and require explicit server-owned OIDC role bindings.
+- Invalidate existing alpha sessions when migrating to database-authoritative authorization.
 
 ### Build System
 
@@ -18,6 +24,7 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 ### Documentation
 
 - Add Kubernetes installation, upgrade, rollback, OIDC, and production-operation guidance.
+- Add OIDC role-binding and label-selector administration guidance.
 
 ## [0.1.0-alpha.1] - 2026-08-15
 

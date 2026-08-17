@@ -1,11 +1,13 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AlertStreamEvent } from '../alerts/stream';
+import type { AlertStreamNotificationEvent, AlertStreamRemovedEvent } from '../alerts/stream';
 import { NOTIFICATION_PREFERENCE_KEY } from '../notifications/store';
 import { FakeNotification } from '../test/fakeNotification';
 import { useAlertNotifications } from './useAlertNotifications';
 
-function createdCritical(overrides: Partial<AlertStreamEvent> = {}): AlertStreamEvent {
+function createdCritical(
+  overrides: Partial<AlertStreamNotificationEvent> = {},
+): AlertStreamNotificationEvent {
   return {
     id: 8,
     type: 'alert.created',
@@ -16,6 +18,16 @@ function createdCritical(overrides: Partial<AlertStreamEvent> = {}): AlertStream
     summary: 'Error rate above 5% for 10m',
     source: 'am-eu',
     team: 'core',
+    ...overrides,
+  };
+}
+
+function removedEvent(overrides: Partial<AlertStreamRemovedEvent> = {}): AlertStreamRemovedEvent {
+  return {
+    id: 8,
+    type: 'alert.removed',
+    alertId: '42',
+    occurredAt: '2026-08-14T12:00:00Z',
     ...overrides,
   };
 }
@@ -158,6 +170,8 @@ describe('useAlertNotifications', () => {
     hidden = true;
     act(() => result.current.handleEvent(createdCritical({ id: 10, severity: 'warning' })));
     act(() => result.current.handleEvent(createdCritical({ id: 11, type: 'alert.updated' })));
+    // Redacted removals never notify, even while enabled and hidden.
+    act(() => result.current.handleEvent(removedEvent({ id: 12 })));
     expect(FakeNotification.instances).toHaveLength(1);
   });
 

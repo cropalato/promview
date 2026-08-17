@@ -29,6 +29,7 @@ type fakeStore struct {
 	cancel      context.CancelFunc
 	pingErr     error
 	sourceToken string
+	principal   auth.Principal
 }
 
 type fakeAuthenticator struct {
@@ -37,7 +38,13 @@ type fakeAuthenticator struct {
 }
 
 func (authenticator fakeAuthenticator) Authenticate(context.Context, *http.Request) (auth.Principal, error) {
-	return authenticator.principal, authenticator.err
+	principal := authenticator.principal
+	if len(principal.Grants) == 0 {
+		for _, role := range principal.Roles {
+			principal.Grants = append(principal.Grants, auth.Grant{Role: auth.Role(role)})
+		}
+	}
+	return principal, authenticator.err
 }
 
 func (store *fakeStore) Ingest(_ context.Context, alerts []alertmanager.IncomingAlert) error {
@@ -57,20 +64,23 @@ func (store *fakeStore) Ping(context.Context) error {
 	return store.pingErr
 }
 
-func (store *fakeStore) ListAlerts(_ context.Context, query alerts.Query) (alerts.ListResult, error) {
+func (store *fakeStore) ListAlerts(_ context.Context, principal auth.Principal, query alerts.Query) (alerts.ListResult, error) {
+	store.principal = principal
 	store.query = query
 	return store.result, nil
 }
 
-func (store *fakeStore) StreamEvents(_ context.Context, afterID int64, _ int) ([]alerts.StreamEvent, error) {
+func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal, afterID int64, _ int) (alerts.StreamBatch, error) {
+	store.principal = principal
 	store.afterID = afterID
 	if store.cancel != nil {
 		store.cancel()
 	}
-	return store.events, nil
+	return alerts.StreamBatch{Events: store.events, ScannedThrough: afterID + int64(len(store.events))}, nil
 }
 
-func (store *fakeStore) GetAlertDetail(context.Context, int64) (alerts.Detail, error) {
+func (store *fakeStore) GetAlertDetail(_ context.Context, principal auth.Principal, _ int64) (alerts.Detail, error) {
+	store.principal = principal
 	return store.detail, store.detailErr
 }
 
@@ -293,6 +303,31 @@ func TestStreamAlertsResumesFromCursor(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("stream body = %q, want %q", body, want)
+		}
+	}
+}
+
+func TestStreamAlertsRedactsScopeExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	store := &fakeStore{
+		events: []alerts.StreamEvent{{
+			ID: 9, Type: "alert.removed", AlertID: 42, Redacted: true,
+			Severity: "critical", AlertName: "SecretAlert", Summary: "secret summary", SourceSlug: "private", Team: "private",
+			OccurredAt: time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC),
+		}},
+		cancel: cancel,
+	}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream?cursor=8", nil).WithContext(ctx)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if !strings.Contains(body, "event: alert.removed") || !strings.Contains(body, `"alertId":"42"`) {
+		t.Fatalf("stream body = %q", body)
+	}
+	for _, leaked := range []string{"SecretAlert", "secret summary", `"severity"`, `"source"`, `"team"`} {
+		if strings.Contains(body, leaked) {
+			t.Fatalf("stream body leaked %q: %s", leaked, body)
 		}
 	}
 }

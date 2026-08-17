@@ -26,9 +26,8 @@ function toError(value: unknown): Error {
 /**
  * Resolves the session for protected deployments. Only OIDC mode calls
  * `/api/v1/me`: open mode keeps its anonymous viewer without an extra
- * request, and LDAP stays on its unavailable notice. In OIDC mode the state
- * gates the console — alerts and the live stream must not start until the
- * state is `ready`:
+ * request. In OIDC mode the state gates the console — alerts and the live
+ * stream must not start until the state is `ready`:
  *
  * - `unauthenticated` (401) → sign-in link to the OIDC login endpoint;
  * - `forbidden` (403) → access-denied panel with a sign-out escape;
