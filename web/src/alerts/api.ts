@@ -32,6 +32,40 @@ export function isAlertsUnauthorized(error: unknown): boolean {
   return error instanceof AlertsApiError && error.status === 401;
 }
 
+/** Sortable alert fields, in the console's vocabulary (column ids). */
+export const ALERT_SORT_FIELDS = [
+  'severity',
+  'state',
+  'name',
+  'summary',
+  'team',
+  'instance',
+  'source',
+  'age',
+] as const;
+
+export type AlertSortField = (typeof ALERT_SORT_FIELDS)[number];
+
+export type AlertSortOrder = 'asc' | 'desc';
+
+/** Active server-side sort: one field plus direction. */
+export interface AlertSort {
+  field: AlertSortField;
+  order: AlertSortOrder;
+}
+
+/** Endpoint vocabulary for each console sort field. */
+const SORT_PARAM_FIELDS: Record<AlertSortField, string> = {
+  severity: 'severity',
+  state: 'status',
+  name: 'alertname',
+  summary: 'summary',
+  team: 'team',
+  instance: 'instance',
+  source: 'source',
+  age: 'startsAt',
+};
+
 /** Query parameters accepted by the alerts endpoint. */
 export interface AlertsQuery {
   limit?: number;
@@ -40,6 +74,19 @@ export interface AlertsQuery {
   source?: string;
   severity?: string;
   team?: string;
+  /**
+   * Serialized label matchers (`severity=critical`, `team!=infra`), sent as
+   * repeated `match` parameters. All matchers must hold for an alert to
+   * appear.
+   */
+  match?: readonly string[];
+  /**
+   * Server-side sort field, in the console vocabulary; the wire mapping is
+   * applied here. Without one the server's default order applies.
+   */
+  sort?: AlertSortField;
+  /** Sort direction applied together with `sort`. */
+  order?: AlertSortOrder;
 }
 
 /** One validated page from the alerts API, mapped into UI rows. */
@@ -79,6 +126,19 @@ export function buildAlertsUrl(query: AlertsQuery = {}): string {
   }
   if (query.team !== undefined && query.team !== '') {
     params.set('team', query.team);
+  }
+  for (const matcher of query.match ?? []) {
+    if (matcher !== '') {
+      params.append('match', matcher);
+    }
+  }
+  if (query.sort !== undefined) {
+    params.set('sort', SORT_PARAM_FIELDS[query.sort]);
+    if (query.order !== undefined) {
+      // Age ascending reads youngest-first, which is startsAt descending.
+      const flipped = query.order === 'asc' ? 'desc' : 'asc';
+      params.set('order', query.sort === 'age' ? flipped : query.order);
+    }
   }
   const suffix = params.toString();
   return suffix === '' ? ALERTS_URL : `${ALERTS_URL}?${suffix}`;

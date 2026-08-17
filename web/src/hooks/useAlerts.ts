@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ALERTS_PAGE_SIZE, fetchAlerts, isAlertsUnauthorized } from '../alerts/api';
-import type { AlertsPage } from '../alerts/api';
+import type { AlertsPage, AlertsQuery } from '../alerts/api';
 import type { AlertSummary } from '../alerts/types';
+
+/**
+ * Server-side query applied to every alerts request: serialized label
+ * matchers (repeated `match` params) plus the sort field/order. The hook
+ * restarts from the first page whenever the query content changes.
+ */
+export type AlertsQueryInput = Pick<AlertsQuery, 'match' | 'sort' | 'order'>;
+
+/** Content key for a query; object identity is irrelevant to the hook. */
+function queryKeyOf(query: AlertsQueryInput): string {
+  return JSON.stringify([query.match ?? [], query.sort ?? null, query.order ?? null]);
+}
 
 /** Accumulated alert data: the rows loaded so far plus server-side totals. */
 export interface AlertsData {
@@ -78,6 +90,11 @@ export interface UseAlertsOptions {
  * rows, cursors, and pending refreshes are dropped so nothing stale shows or
  * streams when the console unlocks again.
  *
+ * `query` carries the server-side filter (label matchers) and sort applied
+ * to every request; when its content changes the hook drops back to the
+ * first page and re-paginates from scratch, and any page request still in
+ * flight from the previous query is discarded.
+ *
  * `scheduleLiveRefresh` is the stream entry point: alert events funnel
  * through it into a debounced, coalesced first-page refetch that quietly
  * replaces the current rows/totals without dropping back to the loading
@@ -86,6 +103,7 @@ export interface UseAlertsOptions {
  */
 export function useAlerts(
   enabled: boolean,
+  query: AlertsQueryInput = {},
   options: UseAlertsOptions = {},
 ): {
   state: AlertsState;
@@ -96,7 +114,7 @@ export function useAlerts(
   const { liveRefreshDebounceMs = LIVE_REFRESH_DEBOUNCE_MS, onUnauthorized } = options;
   const [state, setState] = useState<AlertsState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
-  const [pendingCursor, setPendingCursor] = useState<string | null>(null);
+  const [pendingPage, setPendingPage] = useState<{ cursor: string; key: string } | null>(null);
   const nextCursorRef = useRef('');
   const pageInFlightRef = useRef(false);
   const readyRef = useRef(false);
@@ -104,6 +122,14 @@ export function useAlerts(
   const liveInFlightRef = useRef(false);
   const livePendingRef = useRef(false);
   const disposedRef = useRef(false);
+
+  const queryKey = queryKeyOf(query);
+  // Fetch closures read the latest query through this ref; `queryKey` drives
+  // the effect dependencies so callers never have to memoize the object.
+  const queryRef = useRef({ key: queryKey, query });
+  useEffect(() => {
+    queryRef.current = { key: queryKey, query };
+  });
 
   const onUnauthorizedRef = useRef(onUnauthorized);
   useEffect(() => {
@@ -116,7 +142,8 @@ export function useAlerts(
     }
   }, []);
 
-  // First page: firing alerts, fetched once the shell is configured.
+  // First page: firing alerts, fetched once the shell is configured and
+  // quietly re-fetched from scratch whenever the server-side query changes.
   useEffect(() => {
     if (!enabled) {
       // Auth gate closed (or shell not ready yet): reset to a clean loading
@@ -133,9 +160,12 @@ export function useAlerts(
     let cancelled = false;
     nextCursorRef.current = '';
     pageInFlightRef.current = false;
-    setState({ status: 'loading' });
+    // A query change while ready keeps the current rows on screen and swaps
+    // in the new first page when it lands; only the initial load (or a
+    // retry after an error) drops back to the loading panel.
+    setState((current) => (current.status === 'ready' ? current : { status: 'loading' }));
 
-    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing' })
+    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing', ...queryRef.current.query })
       .then((page) => {
         if (cancelled) {
           return;
@@ -153,11 +183,18 @@ export function useAlerts(
     return () => {
       cancelled = true;
     };
-  }, [enabled, attempt, reportIfUnauthorized]);
+  }, [enabled, attempt, queryKey, reportIfUnauthorized]);
 
   // Subsequent pages, driven by the cursor pending in state.
   useEffect(() => {
-    if (pendingCursor === null) {
+    if (pendingPage === null) {
+      return;
+    }
+    if (pendingPage.key !== queryKey) {
+      // The filter/sort changed after this page was requested; the fresh
+      // first page supersedes the stale cursor.
+      pageInFlightRef.current = false;
+      setPendingPage(null);
       return;
     }
     let cancelled = false;
@@ -165,7 +202,12 @@ export function useAlerts(
       current.status === 'ready' ? { ...current, loadingMore: true, moreError: null } : current,
     );
 
-    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing', cursor: pendingCursor })
+    fetchAlerts({
+      limit: ALERTS_PAGE_SIZE,
+      status: 'firing',
+      ...queryRef.current.query,
+      cursor: pendingPage.cursor,
+    })
       .then((page) => {
         if (cancelled) {
           return;
@@ -201,14 +243,14 @@ export function useAlerts(
       .finally(() => {
         pageInFlightRef.current = false;
         if (!cancelled) {
-          setPendingCursor(null);
+          setPendingPage(null);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [pendingCursor, reportIfUnauthorized]);
+  }, [pendingPage, queryKey, reportIfUnauthorized]);
 
   // Track readiness in a ref so the stable live-refresh callbacks below can
   // gate on it without capturing state.
@@ -236,7 +278,7 @@ export function useAlerts(
       return;
     }
     liveInFlightRef.current = true;
-    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing' })
+    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing', ...queryRef.current.query })
       .then((page) => {
         if (disposedRef.current) {
           return;
@@ -282,7 +324,7 @@ export function useAlerts(
       return;
     }
     pageInFlightRef.current = true;
-    setPendingCursor(nextCursorRef.current);
+    setPendingPage({ cursor: nextCursorRef.current, key: queryRef.current.key });
   }, []);
 
   return { state, retry, loadMore, scheduleLiveRefresh };

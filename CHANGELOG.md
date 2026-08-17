@@ -6,6 +6,16 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] - 2026-08-17
+
+### Features
+
+- **web:** add server-backed positive and negative label filtering, sortable alert columns, and label-to-filter actions from alert details.
+
+### Fixed
+
+- **web:** apply Prometheus-style filter expressions to the full authorized alert result instead of treating them as literal text over loaded rows.
+
 ## [0.1.0-alpha.4] - 2026-08-17
 
 ### Features

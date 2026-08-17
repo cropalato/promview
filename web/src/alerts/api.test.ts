@@ -73,6 +73,49 @@ describe('buildAlertsUrl', () => {
       '/api/v1/alerts?status=resolved',
     );
   });
+
+  it('repeats the match param for every label matcher', () => {
+    expect(buildAlertsUrl({ match: ['severity=critical'] })).toBe(
+      '/api/v1/alerts?match=severity%3Dcritical',
+    );
+    expect(
+      buildAlertsUrl({
+        limit: 100,
+        status: 'firing',
+        match: ['severity=critical', 'team!=infra'],
+      }),
+    ).toBe(
+      '/api/v1/alerts?limit=100&status=firing&match=severity%3Dcritical&match=team%21%3Dinfra',
+    );
+    expect(buildAlertsUrl({ match: [] })).toBe('/api/v1/alerts');
+    expect(buildAlertsUrl({ match: [''] })).toBe('/api/v1/alerts');
+  });
+
+  it('encodes sort and order params in the endpoint vocabulary', () => {
+    expect(buildAlertsUrl({ sort: 'severity', order: 'asc' })).toBe(
+      '/api/v1/alerts?sort=severity&order=asc',
+    );
+    // Console fields map to the endpoint's names.
+    expect(buildAlertsUrl({ sort: 'state', order: 'asc' })).toBe(
+      '/api/v1/alerts?sort=status&order=asc',
+    );
+    expect(buildAlertsUrl({ sort: 'name', order: 'desc' })).toBe(
+      '/api/v1/alerts?sort=alertname&order=desc',
+    );
+    // Age ascending (youngest first) is startsAt descending.
+    expect(buildAlertsUrl({ sort: 'age', order: 'asc' })).toBe(
+      '/api/v1/alerts?sort=startsAt&order=desc',
+    );
+    expect(
+      buildAlertsUrl({
+        limit: 100,
+        status: 'firing',
+        match: ['team=core'],
+        sort: 'age',
+        order: 'desc',
+      }),
+    ).toBe('/api/v1/alerts?limit=100&status=firing&match=team%3Dcore&sort=startsAt&order=asc');
+  });
 });
 
 describe('fetchAlerts', () => {

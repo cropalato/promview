@@ -1,8 +1,10 @@
 package alerts
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -32,6 +34,16 @@ type Alert struct {
 type Cursor struct {
 	LastSeen time.Time `json:"lastSeen"`
 	ID       int64     `json:"id"`
+	Sort     string    `json:"sort"`
+	Order    string    `json:"order"`
+	Query    string    `json:"query"`
+	Value    string    `json:"value"`
+}
+
+type LabelMatcher struct {
+	Name     string `json:"name"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
 }
 
 type Query struct {
@@ -41,6 +53,29 @@ type Query struct {
 	Status   string
 	Severity string
 	Team     string
+	Matches  []LabelMatcher
+	Sort     string
+	Order    string
+}
+
+const (
+	DefaultSort  = "lastSeen"
+	DefaultOrder = "desc"
+)
+
+// CursorIdentity binds a cursor to the filters that produced it.
+func (query Query) CursorIdentity() string {
+	payload, err := json.Marshal(struct {
+		Source   string         `json:"source"`
+		Status   string         `json:"status"`
+		Severity string         `json:"severity"`
+		Team     string         `json:"team"`
+		Matches  []LabelMatcher `json:"matches"`
+	}{query.Source, query.Status, query.Severity, query.Team, query.Matches})
+	if err != nil {
+		panic(fmt.Sprintf("marshal cursor identity: %v", err))
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(payload))
 }
 
 type ListResult struct {

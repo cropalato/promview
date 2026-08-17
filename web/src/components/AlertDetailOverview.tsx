@@ -1,5 +1,6 @@
 import { safeExternalUrl } from '../alerts/detail';
 import type { AlertDetail } from '../alerts/detail';
+import type { LabelMatcher } from '../alerts/filter';
 import { formatTimestamp } from '../alerts/format';
 import { AcknowledgeButton } from './AcknowledgeButton';
 import { CopyButton } from './CopyButton';
@@ -12,6 +13,12 @@ interface AlertDetailOverviewProps {
    * this handler and the server-provided per-alert permission are present.
    */
   onAcknowledge?: (acknowledged: boolean) => Promise<void>;
+  /**
+   * Upserts a label matcher into the console filter and applies it. When
+   * present, every label row gains include (`key="value"`) and exclude
+   * (`key!="value"`) buttons.
+   */
+  onFilterLabel?: (matcher: LabelMatcher) => void;
 }
 
 function byKey([a]: [string, string], [b]: [string, string]): number {
@@ -26,7 +33,11 @@ function byKey([a]: [string, string], [b]: [string, string]): number {
  * gated on the server-provided per-alert permissions; open mode (anonymous
  * viewer) never receives them, so it never sees the controls.
  */
-export function AlertDetailOverview({ detail, onAcknowledge }: AlertDetailOverviewProps) {
+export function AlertDetailOverview({
+  detail,
+  onAcknowledge,
+  onFilterLabel,
+}: AlertDetailOverviewProps) {
   const labels = Object.entries(detail.labels).sort(byKey);
   const annotations = Object.entries(detail.annotations).sort(byKey);
 
@@ -128,6 +139,28 @@ export function AlertDetailOverview({ detail, onAcknowledge }: AlertDetailOvervi
               <li key={key} className="kv-row">
                 <span className="kv-key">{key}</span>
                 <span className="kv-value">{value}</span>
+                {onFilterLabel !== undefined ? (
+                  <span className="kv-filter-actions">
+                    <button
+                      type="button"
+                      className="kv-filter"
+                      aria-label={`Filter to ${key}="${value}"`}
+                      title={`Filter to ${key}="${value}"`}
+                      onClick={() => onFilterLabel({ name: key, op: '=', value })}
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      className="kv-filter"
+                      aria-label={`Exclude ${key}="${value}"`}
+                      title={`Exclude ${key}="${value}"`}
+                      onClick={() => onFilterLabel({ name: key, op: '!=', value })}
+                    >
+                      −
+                    </button>
+                  </span>
+                ) : null}
                 <CopyButton value={value} label={`Copy ${key}`} />
               </li>
             ))}

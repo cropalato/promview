@@ -188,6 +188,19 @@ export function ExternalLinkIcon({ className }: IconProps): JSX.Element {
   );
 }
 
+/**
+ * Dual chevron for sortable column headers. The active direction lights up
+ * via the parent button's data-direction attribute (see global.css).
+ */
+export function SortIcon({ className }: IconProps): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" {...a11y(className)}>
+      <path className="sort-arrow sort-arrow-asc" d="M12 4l5 8H7Z" fill="currentColor" />
+      <path className="sort-arrow sort-arrow-desc" d="M12 20l-5-8h10Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Quiet radar: rings plus a sweep, used by the no-alert state. */
 export function RadarIcon({ className }: IconProps): JSX.Element {
   return (

@@ -1,26 +1,44 @@
 import type { KeyboardEvent } from 'react';
+import type { AlertSort, AlertSortField } from '../alerts/api';
 import { formatAge } from '../alerts/format';
 import { SEVERITY_LABELS } from '../alerts/severity';
 import type { AlertSummary } from '../alerts/types';
 import { EmptyState } from './EmptyState';
-import { SeverityIcon } from './icons';
+import { SeverityIcon, SortIcon } from './icons';
 
 /**
  * Default console columns from the project plan. `optional` columns collapse
- * first on narrow viewports.
+ * first on narrow viewports. `sortField` marks columns the alerts endpoint
+ * can sort server-side; the rest render plain headers.
  */
-const COLUMNS: ReadonlyArray<{ id: string; label: string; optional: boolean }> = [
-  { id: 'severity', label: 'Severity', optional: false },
-  { id: 'state', label: 'State', optional: false },
-  { id: 'alert', label: 'Alert', optional: false },
-  { id: 'summary', label: 'Summary', optional: true },
-  { id: 'team', label: 'Team', optional: true },
-  { id: 'instance', label: 'Instance', optional: true },
-  { id: 'source', label: 'Source', optional: false },
-  { id: 'age', label: 'Age', optional: false },
+const COLUMNS: ReadonlyArray<{
+  id: string;
+  label: string;
+  optional: boolean;
+  sortField?: AlertSortField;
+}> = [
+  { id: 'severity', label: 'Severity', optional: false, sortField: 'severity' },
+  { id: 'state', label: 'State', optional: false, sortField: 'state' },
+  { id: 'alert', label: 'Alert', optional: false, sortField: 'name' },
+  { id: 'summary', label: 'Summary', optional: true, sortField: 'summary' },
+  { id: 'team', label: 'Team', optional: true, sortField: 'team' },
+  { id: 'instance', label: 'Instance', optional: true, sortField: 'instance' },
+  { id: 'source', label: 'Source', optional: false, sortField: 'source' },
+  { id: 'age', label: 'Age', optional: false, sortField: 'age' },
   { id: 'assignee', label: 'Assignee', optional: true },
   { id: 'notes', label: 'Notes', optional: true },
 ];
+
+/**
+ * Next sort when a header is activated: an inactive column starts ascending,
+ * the active column toggles direction.
+ */
+export function nextSort(field: AlertSortField, current: AlertSort | null): AlertSort {
+  if (current !== null && current.field === field) {
+    return { field, order: current.order === 'asc' ? 'desc' : 'asc' };
+  }
+  return { field, order: 'asc' };
+}
 
 /** Cursor-pagination status and controls rendered below the table. */
 export interface AlertPagination {
@@ -45,11 +63,17 @@ interface AlertTableProps {
   selectedId?: string | null;
   /** Row activation (click or Enter) opens the alert detail view. */
   onSelect?: (alert: AlertSummary) => void;
+  /** Active server-side sort; the matching header exposes it via aria-sort. */
+  sort?: AlertSort | null;
+  /** Header activation requests a server-side sort for that column. */
+  onSortChange?: (sort: AlertSort) => void;
 }
 
 /** Dense alert table. Renders real rows when given data; otherwise the
  *  explicit empty state occupies the table body. Rows are focusable and
- *  activate with click or Enter when `onSelect` is provided. */
+ *  activate with click or Enter when `onSelect` is provided. Sortable
+ *  columns render an APG-style header button; the actively sorted column
+ *  carries `aria-sort`. */
 export function AlertTable({
   alerts,
   filterActive = false,
@@ -58,6 +82,8 @@ export function AlertTable({
   pagination,
   selectedId = null,
   onSelect,
+  sort = null,
+  onSortChange,
 }: AlertTableProps) {
   return (
     <div className="table-panel">
@@ -67,13 +93,12 @@ export function AlertTable({
           <thead>
             <tr>
               {COLUMNS.map((column) => (
-                <th
+                <ColumnHeader
                   key={column.id}
-                  scope="col"
-                  className={column.optional ? 'col-optional' : undefined}
-                >
-                  {column.label}
-                </th>
+                  column={column}
+                  sort={sort}
+                  onSortChange={onSortChange}
+                />
               ))}
             </tr>
           </thead>
@@ -106,12 +131,55 @@ export function AlertTable({
   );
 }
 
+/**
+ * One column header. Sortable columns render a button following the APG
+ * sortable-table pattern: the sorted column's `<th>` carries `aria-sort`,
+ * and the button name describes the action.
+ */
+function ColumnHeader({
+  column,
+  sort,
+  onSortChange,
+}: {
+  column: (typeof COLUMNS)[number];
+  sort: AlertSort | null;
+  onSortChange?: (sort: AlertSort) => void;
+}) {
+  const sortField = column.sortField;
+  if (sortField === undefined || onSortChange === undefined) {
+    return (
+      <th scope="col" className={column.optional ? 'col-optional' : undefined}>
+        {column.label}
+      </th>
+    );
+  }
+  const active = sort !== null && sort.field === sortField;
+  return (
+    <th
+      scope="col"
+      className={column.optional ? 'col-optional' : undefined}
+      aria-sort={active ? (sort.order === 'asc' ? 'ascending' : 'descending') : undefined}
+    >
+      <button
+        type="button"
+        className="th-sort"
+        aria-label={`Sort by ${column.label}`}
+        data-direction={active ? sort.order : 'none'}
+        onClick={() => onSortChange(nextSort(sortField, sort))}
+      >
+        <span>{column.label}</span>
+        <SortIcon className="th-sort-icon" />
+      </button>
+    </th>
+  );
+}
+
 function TableFoot({ pagination }: { pagination: AlertPagination }) {
   const { loaded, total, hasMore, loadingMore, error, onLoadMore } = pagination;
   return (
     <div className="table-foot">
       <p className="table-foot-count">
-        Showing {loaded} of {total} firing alerts · the text filter matches loaded rows only
+        Showing {loaded} of {total} firing alerts
       </p>
       {error !== null ? (
         <p className="table-foot-error" role="alert">

@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
-import { matchesFilter } from './alerts/filter';
+import type { AlertSort } from './alerts/api';
+import {
+  FilterParseError,
+  formatFilter,
+  parseFilter,
+  serializeMatcher,
+  upsertMatcher,
+} from './alerts/filter';
+import type { LabelMatcher } from './alerts/filter';
 import type { AlertStreamEvent } from './alerts/stream';
 import type { AlertSummary } from './alerts/types';
 import { OIDC_LOGIN_URL } from './auth/session';
@@ -69,12 +77,63 @@ export default function App({ navigate }: AppProps = {}) {
   const consoleUnlocked =
     configState.status === 'ready' &&
     (configState.config.authMode !== 'oidc' || sessionState.status === 'ready');
+  // Server-side filter/sort state. The filter input holds a draft; only a
+  // draft that parses into label matchers is applied, and applying restarts
+  // the alert query from the first page with repeated `match` params.
+  const [filterDraft, setFilterDraft] = useState('');
+  const [appliedMatchers, setAppliedMatchers] = useState<readonly LabelMatcher[]>([]);
+  const [filterError, setFilterError] = useState<string | null>(null);
+  const [sort, setSort] = useState<AlertSort | null>(null);
+
+  const applyFilter = useCallback((raw: string) => {
+    try {
+      setAppliedMatchers(parseFilter(raw));
+      setFilterError(null);
+    } catch (error) {
+      // The invalid draft stays in the input; the previous filter remains
+      // applied and no request goes out with broken syntax.
+      setFilterError(
+        error instanceof FilterParseError ? error.message : 'Invalid filter expression',
+      );
+    }
+  }, []);
+
+  const changeFilter = useCallback((value: string) => {
+    setFilterDraft(value);
+    // Editing the draft retires the last apply attempt's error.
+    setFilterError(null);
+  }, []);
+
+  const clearFilter = useCallback(() => {
+    setFilterDraft('');
+    setAppliedMatchers([]);
+    setFilterError(null);
+  }, []);
+
+  // Include/exclude buttons in the detail drawer upsert one matcher and
+  // apply immediately; the canonical expression is reflected into the input.
+  const applyLabelMatcher = (matcher: LabelMatcher) => {
+    const next = upsertMatcher(appliedMatchers, matcher);
+    setAppliedMatchers(next);
+    setFilterDraft(formatFilter(next));
+    setFilterError(null);
+  };
+
+  const alertsQuery = useMemo(
+    () => ({
+      match: appliedMatchers.map(serializeMatcher),
+      sort: sort?.field,
+      order: sort?.order,
+    }),
+    [appliedMatchers, sort],
+  );
+
   const {
     state: alertsState,
     retry: retryAlerts,
     loadMore,
     scheduleLiveRefresh,
-  } = useAlerts(consoleUnlocked, { onUnauthorized: expireSession });
+  } = useAlerts(consoleUnlocked, alertsQuery, { onUnauthorized: expireSession });
   const { selectedAlertId, openAlert, closeAlert } = useAlertRoute();
   const effectiveSelectedAlertId = consoleUnlocked ? selectedAlertId : null;
   const {
@@ -107,17 +166,12 @@ export default function App({ navigate }: AppProps = {}) {
       consoleUnlocked && alertsState.status === 'ready' ? alertsState.data.streamCursor : null,
     onAlertEvent: handleAlertEvent,
   });
-  const [filterDraft, setFilterDraft] = useState('');
-  const [appliedFilter, setAppliedFilter] = useState('');
 
   const loadedAlerts = alertsState.status === 'ready' ? alertsState.data.alerts : NO_ALERTS;
-  const visibleAlerts = useMemo(
-    () => loadedAlerts.filter((alert) => matchesFilter(alert, appliedFilter)),
-    [loadedAlerts, appliedFilter],
-  );
 
   const config = configState.status === 'ready' ? configState.config : undefined;
-  const filterActive = appliedFilter.trim() !== '';
+  const filterActive = appliedMatchers.length > 0;
+  const appliedFilterText = formatFilter(appliedMatchers);
 
   // The indicator follows the live path end to end: shell sync, session
   // verification, hard request failures, then the stream itself.
@@ -257,25 +311,25 @@ export default function App({ navigate }: AppProps = {}) {
               <>
                 <FilterBar
                   value={filterDraft}
-                  shown={visibleAlerts.length}
+                  shown={loadedAlerts.length}
                   total={alertsState.data.total}
-                  onChange={setFilterDraft}
-                  onApply={setAppliedFilter}
+                  error={filterError}
+                  onChange={changeFilter}
+                  onApply={applyFilter}
                 />
                 <SeverityStrip
                   counts={alertsState.data.severityCounts}
                   total={alertsState.data.total}
                 />
                 <AlertTable
-                  alerts={visibleAlerts}
+                  alerts={loadedAlerts}
                   filterActive={filterActive}
-                  filterQuery={appliedFilter}
+                  filterQuery={appliedFilterText}
                   selectedId={effectiveSelectedAlertId}
                   onSelect={(alert) => openAlert(alert.id)}
-                  onClearFilter={() => {
-                    setFilterDraft('');
-                    setAppliedFilter('');
-                  }}
+                  onClearFilter={clearFilter}
+                  sort={sort}
+                  onSortChange={setSort}
                   pagination={{
                     loaded: alertsState.data.alerts.length,
                     total: alertsState.data.total,
@@ -298,6 +352,7 @@ export default function App({ navigate }: AppProps = {}) {
           onClose={closeAlert}
           onRetry={retryDetail}
           onAcknowledge={acknowledgeDetail}
+          onFilterLabel={applyLabelMatcher}
         />
       ) : null}
       <StatusFooter
