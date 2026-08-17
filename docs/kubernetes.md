@@ -36,7 +36,7 @@ kubectl --namespace promview create secret generic promview-database \
 
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.2
+  --version 0.1.0-alpha.3
 ```
 
 The PostgreSQL Secret must exist before installation because the migration Job is a Helm pre-install hook.
