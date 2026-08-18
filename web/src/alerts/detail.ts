@@ -216,7 +216,7 @@ function parseAlertDetail(value: unknown): AlertDetail {
   const raw = asRecord(value, 'alert');
   const id = requiredString(raw.id, 'alert.id');
   const status = raw.status;
-  if (status !== 'firing' && status !== 'resolved') {
+  if (status !== 'firing' && status !== 'resolved' && status !== 'expired') {
     throw new AlertsApiError(`Alert ${id} has an unsupported status: ${String(status)}`);
   }
   const severityRaw = requiredString(raw.severity, 'alert.severity');

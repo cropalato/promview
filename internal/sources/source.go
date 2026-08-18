@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"regexp"
+	"time"
 )
 
 const MinimumTokenLength = 16
@@ -15,6 +16,12 @@ type Source struct {
 	Name      string
 	TokenHash []byte
 	Enabled   bool
+	// StaleAfter is how long an alert from this source may go unreported before
+	// it expires. It has to exceed the source Alertmanager's repeat_interval, so
+	// it belongs to the source rather than to the server. Nil leaves the stored
+	// value alone and falls back to the server default; zero disables expiry for
+	// this source.
+	StaleAfter *time.Duration
 }
 
 func Validate(source Source, rawToken string) error {
@@ -26,6 +33,9 @@ func Validate(source Source, rawToken string) error {
 	}
 	if len(rawToken) < MinimumTokenLength {
 		return errors.New("source token must contain at least 16 characters")
+	}
+	if source.StaleAfter != nil && *source.StaleAfter < 0 {
+		return errors.New("source stale-after must not be negative")
 	}
 	return nil
 }

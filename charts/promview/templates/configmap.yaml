@@ -7,6 +7,8 @@ metadata:
     {{- include "promview.labels" . | nindent 4 }}
 data:
   PROMVIEW_AUTH_MODE: {{ .Values.auth.mode | quote }}
+  PROMVIEW_ALERT_STALE_AFTER: {{ .Values.alertExpiry.staleAfter | quote }}
+  PROMVIEW_ALERT_EXPIRY_INTERVAL: {{ .Values.alertExpiry.interval | quote }}
   {{- if eq .Values.auth.mode "oidc" }}
   PROMVIEW_OIDC_ISSUER_URL: {{ .Values.oidc.issuerURL | quote }}
   PROMVIEW_OIDC_CLIENT_ID: {{ .Values.oidc.clientID | quote }}

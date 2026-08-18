@@ -109,6 +109,12 @@ func run() error {
 		errCh <- server.ListenAndServe()
 	}()
 
+	sweepDone := make(chan struct{})
+	go func() {
+		defer close(sweepDone)
+		runExpirySweeps(ctx, store, cfg.AlertStaleAfter, cfg.AlertExpiryInterval)
+	}()
+
 	select {
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -118,7 +124,46 @@ func run() error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return server.Shutdown(shutdownCtx)
+		err := server.Shutdown(shutdownCtx)
+		<-sweepDone
+		return err
+	}
+}
+
+// expiryStore is the slice of the store the sweep loop needs, kept narrow so the
+// loop can be tested without a database.
+type expiryStore interface {
+	ExpireStaleAlerts(ctx context.Context, defaultStaleAfter time.Duration, now time.Time) (int, error)
+}
+
+// runExpirySweeps marks alerts whose source went quiet as expired, on a ticker,
+// until the context is cancelled. A zero window disables expiry entirely; a
+// failing sweep is logged and retried on the next tick rather than taking the
+// server down, since a stale console still serves every other request.
+func runExpirySweeps(ctx context.Context, store expiryStore, staleAfter, interval time.Duration) {
+	if staleAfter == 0 {
+		slog.Info("alert expiry disabled", "reason", "PROMVIEW_ALERT_STALE_AFTER is zero")
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			expired, err := store.ExpireStaleAlerts(ctx, staleAfter, time.Now().UTC())
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				slog.Error("alert expiry sweep failed", "error", err)
+				continue
+			}
+			if expired > 0 {
+				slog.Info("expired stale alerts", "count", expired, "staleAfter", staleAfter)
+			}
+		}
 	}
 }
 
@@ -206,14 +251,23 @@ type sourceSetter interface {
 
 func runSourceCommand(ctx context.Context, store sourceSetter, args []string) error {
 	if len(args) == 0 || args[0] != "set" {
-		return errors.New("usage: promview source set --slug <slug> --name <name> --token <token>")
+		return errors.New("usage: promview source set --slug <slug> --name <name> --token <token> [--stale-after <duration>]")
 	}
 	flags := flag.NewFlagSet("promview source set", flag.ContinueOnError)
 	slug := flags.String("slug", "", "stable source slug")
 	name := flags.String("name", "", "source display name")
 	token := flags.String("token", "", "source bearer token")
+	staleAfter := flags.String("stale-after", "", "how long an alert may go unreported before it expires; must exceed this source's repeat_interval (0 disables expiry, empty keeps the stored value)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
-	return store.SetSource(ctx, sources.Source{Slug: *slug, Name: *name}, *token)
+	source := sources.Source{Slug: *slug, Name: *name}
+	if *staleAfter != "" {
+		window, err := time.ParseDuration(*staleAfter)
+		if err != nil {
+			return fmt.Errorf("parse --stale-after: %w", err)
+		}
+		source.StaleAfter = &window
+	}
+	return store.SetSource(ctx, source, *token)
 }

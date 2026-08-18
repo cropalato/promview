@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -28,6 +29,11 @@ type Config struct {
 	OIDCDisplayNameClaim string
 	OIDCGroupsClaim      string
 	OIDCCookieSecure     bool
+	// AlertStaleAfter is the default window an alert may go unreported before it
+	// expires, used for sources that do not set their own. Zero disables expiry.
+	AlertStaleAfter time.Duration
+	// AlertExpiryInterval is how often the expiry sweep runs.
+	AlertExpiryInterval time.Duration
 }
 
 func Load() (Config, error) {
@@ -50,6 +56,11 @@ func Load() (Config, error) {
 		OIDCDisplayNameClaim: envOrDefault("PROMVIEW_OIDC_DISPLAY_NAME_CLAIM", "name"),
 		OIDCGroupsClaim:      envOrDefault("PROMVIEW_OIDC_GROUPS_CLAIM", "groups"),
 		OIDCCookieSecure:     true,
+		// Three times Alertmanager's default repeat_interval of 4h: long enough
+		// that a live alert is always re-reported before its window closes, so
+		// expiry never fights a repeat notification.
+		AlertStaleAfter:     12 * time.Hour,
+		AlertExpiryInterval: time.Minute,
 	}
 	if raw := os.Getenv("PROMVIEW_OIDC_COOKIE_SECURE"); raw != "" {
 		secure, err := strconv.ParseBool(raw)
@@ -57,6 +68,21 @@ func Load() (Config, error) {
 			return Config{}, errors.New("PROMVIEW_OIDC_COOKIE_SECURE must be true or false")
 		}
 		cfg.OIDCCookieSecure = secure
+	}
+
+	if raw := os.Getenv("PROMVIEW_ALERT_STALE_AFTER"); raw != "" {
+		window, err := time.ParseDuration(raw)
+		if err != nil || window < 0 {
+			return Config{}, errors.New("PROMVIEW_ALERT_STALE_AFTER must be a non-negative duration such as 12h")
+		}
+		cfg.AlertStaleAfter = window
+	}
+	if raw := os.Getenv("PROMVIEW_ALERT_EXPIRY_INTERVAL"); raw != "" {
+		interval, err := time.ParseDuration(raw)
+		if err != nil || interval <= 0 {
+			return Config{}, errors.New("PROMVIEW_ALERT_EXPIRY_INTERVAL must be a positive duration such as 1m")
+		}
+		cfg.AlertExpiryInterval = interval
 	}
 
 	if cfg.DatabaseURL == "" {
