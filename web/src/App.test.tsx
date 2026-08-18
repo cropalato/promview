@@ -431,7 +431,7 @@ describe('App', () => {
 
     // Alert/SSE activity stopped: the stream is closed and no further alert
     // requests fire while gated.
-    expect(source.closed).toBe(true);
+    await waitFor(() => expect(source.closed).toBe(true));
     expect(alertCalls()).toHaveLength(2);
     act(() => {
       source.emit(
