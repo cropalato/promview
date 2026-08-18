@@ -237,3 +237,19 @@ func groupedAlert(sourceSlug, fingerprint, alertname, severity, team string, las
 		ReceivedAt:  lastSeen,
 	}
 }
+
+func TestAlertGroupKeysCoverVocabulary(t *testing.T) {
+	// The HTTP layer validates against alerts.GroupKeys and this map turns those
+	// keys into SQL; a key in one and not the other is a request that validates
+	// and then fails in the store.
+	for _, key := range alerts.GroupKeys {
+		if _, ok := alertGroupKeys[key]; !ok {
+			t.Errorf("alertGroupKeys is missing %q", key)
+		}
+	}
+	for key := range alertGroupKeys {
+		if !alerts.IsGroupKey(key) {
+			t.Errorf("alertGroupKeys has %q, which is not in the shared vocabulary", key)
+		}
+	}
+}

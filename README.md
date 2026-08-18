@@ -102,6 +102,20 @@ List firing alerts:
 curl 'http://localhost:8080/api/v1/alerts?status=firing&limit=100'
 ```
 
+Collapse a fan-out into one row per alert name and source, and expand one group
+by asking for its members:
+
+```sh
+curl 'http://localhost:8080/api/v1/alerts?groupBy=alertname,source&status=firing'
+curl 'http://localhost:8080/api/v1/alerts?match=alertname%3DPrometheusTimeseriesCardinality'
+```
+
+Grouping accepts `alertname`, `source`, `team`, `severity` and `instance`, up to three
+at once. Group counts are computed under the caller's own read restrictions, so a group
+never reports members the caller cannot open. Expanding a group is the ordinary alerts
+query with a matcher, which is why sorting, cursors and the detail view behave
+identically inside a group.
+
 Inspect the current principal:
 
 ```sh
