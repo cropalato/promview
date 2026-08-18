@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { NOTIFICATION_PREFERENCE_KEY, NOTIFICATION_SEEN_KEY } from './notifications/store';
@@ -178,6 +178,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount before the stubs go away. Testing Library's own cleanup is
+  // registered when it is imported, so it runs after this hook; without an
+  // explicit unmount here the console is still mounted when EventSource and
+  // fetch disappear, and an effect or timer that lands in that window throws
+  // "EventSource is not defined" against whichever test happens to be running.
+  cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
@@ -319,6 +325,9 @@ describe('App', () => {
     expect(await within(banner).findByText('Ada Lovelace')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
     expect(meAttempts).toBe(2);
+    // Unlocking the console starts the stream; wait for it so the connect
+    // happens under the test's stubs rather than during teardown.
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
   });
 
   it('signs out through the logout endpoint and navigates home', async () => {
