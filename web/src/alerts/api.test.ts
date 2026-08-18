@@ -140,6 +140,12 @@ describe('fetchAlerts', () => {
           source: 'am-eu',
           startsAt: '2026-08-14T10:00:00Z',
           notes: 0,
+          labels: {
+            alertname: 'HighErrorRate',
+            team: 'core',
+            instance: 'api-1:9090',
+            severity: 'critical',
+          },
         },
       ],
       nextCursor: 'cursor-2',

@@ -15,6 +15,7 @@ const firingAlert: AlertSummary = {
   source: 'am-eu',
   startsAt: new Date(Date.now() - 5 * 60_000).toISOString(),
   notes: 2,
+  labels: { alertname: 'HighErrorRate', team: 'core', prometheus_cluster: 'yul' },
 };
 
 function pagination(overrides: Partial<AlertPagination> = {}): AlertPagination {

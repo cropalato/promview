@@ -1,0 +1,64 @@
+package preferences
+
+import "testing"
+
+func TestDefaultIsValid(t *testing.T) {
+	if err := Validate(Default()); err != nil {
+		t.Fatalf("Validate(Default()) error = %v", err)
+	}
+	if !Default().Grouping.Enabled {
+		t.Error("grouping is off by default, want on")
+	}
+}
+
+func TestValidateAcceptsLabelColumns(t *testing.T) {
+	// A label column is the whole point of the registry: surface a dimension
+	// the built-in columns do not cover without giving the label console-wide
+	// meaning.
+	value := Default()
+	value.Columns = append(value.Columns, Column{ID: "label:prometheus_cluster", Width: 180})
+	if err := Validate(value); err != nil {
+		t.Fatalf("Validate() with a label column error = %v", err)
+	}
+}
+
+func TestValidateRejectsUnusableLayouts(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*Preferences)
+	}{
+		{name: "no columns", mutate: func(p *Preferences) { p.Columns = nil }},
+		{name: "unknown column", mutate: func(p *Preferences) { p.Columns = []Column{{ID: "nonsense"}} }},
+		{name: "malformed label column", mutate: func(p *Preferences) { p.Columns = []Column{{ID: "label:not a label"}} }},
+		{name: "empty label column", mutate: func(p *Preferences) { p.Columns = []Column{{ID: "label:"}} }},
+		{name: "duplicate column", mutate: func(p *Preferences) {
+			p.Columns = []Column{{ID: "severity"}, {ID: "severity"}}
+		}},
+		{name: "absurd width", mutate: func(p *Preferences) { p.Columns = []Column{{ID: "severity", Width: 5}} }},
+		{name: "unknown density", mutate: func(p *Preferences) { p.Density = "tiny" }},
+		{name: "grouping without keys", mutate: func(p *Preferences) {
+			p.Grouping = Grouping{Enabled: true}
+		}},
+		{name: "grouping by an unknown key", mutate: func(p *Preferences) {
+			p.Grouping = Grouping{Enabled: true, Keys: []string{"nonsense"}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			value := Default()
+			test.mutate(&value)
+			if err := Validate(value); err == nil {
+				t.Fatal("Validate() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateIgnoresGroupingKeysWhenDisabled(t *testing.T) {
+	// Turning grouping off should not require clearing the keys first; the
+	// console keeps them so re-enabling restores the previous choice.
+	value := Default()
+	value.Grouping = Grouping{Enabled: false, Keys: nil}
+	if err := Validate(value); err != nil {
+		t.Fatalf("Validate() with grouping off error = %v", err)
+	}
+}

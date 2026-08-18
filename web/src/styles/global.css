@@ -789,6 +789,26 @@ kbd {
   height: 13px;
 }
 
+/* Density scales the table's rhythm, not the whole page: a NOC wall display
+   wants larger type at a distance, a laptop wants more rows on screen. */
+[data-density='compact'] .alert-table {
+  --row-padding-y: 4px;
+  font-size: 12px;
+}
+
+[data-density='comfortable'] .alert-table {
+  --row-padding-y: 12px;
+  font-size: 14.5px;
+}
+
+[data-density='compact'] .alert-table td,
+[data-density='comfortable'] .alert-table td,
+[data-density='compact'] .alert-table th,
+[data-density='comfortable'] .alert-table th {
+  padding-top: var(--row-padding-y);
+  padding-bottom: var(--row-padding-y);
+}
+
 .state-chip {
   font-family: var(--font-mono);
   font-size: 10.5px;

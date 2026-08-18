@@ -30,4 +30,9 @@ export interface AlertSummary {
   startsAt: string;
   assignee?: string;
   notes: number;
+  /**
+   * Every label the alert carries, so a column bound to an arbitrary label can
+   * render without the label having to be given console-wide meaning first.
+   */
+  labels: Record<string, string>;
 }

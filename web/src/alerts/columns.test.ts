@@ -1,0 +1,60 @@
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_COLUMN_IDS, FIXED_COLUMNS, labelColumn, resolveColumns } from './columns';
+import type { AlertSummary } from './types';
+
+const alert: AlertSummary = {
+  id: 'a1',
+  severity: 'critical',
+  state: 'firing',
+  name: 'Cardinality',
+  summary: 'too many series',
+  team: 'platform',
+  instance: 'api-1',
+  source: 'yul',
+  startsAt: new Date().toISOString(),
+  notes: 0,
+  labels: { alertname: 'Cardinality', prometheus_cluster: 'yul', name: 'windows_service_status' },
+};
+
+describe('column registry', () => {
+  it('resolves stored ids in the order they were saved', () => {
+    const resolved = resolveColumns(['age', 'severity', 'alert']);
+    expect(resolved.map((column) => column.id)).toEqual(['age', 'severity', 'alert']);
+  });
+
+  it('renders a column bound to any label', () => {
+    const column = labelColumn('label:name');
+    expect(column?.label).toBe('name');
+    expect(column?.cell(alert).text).toBe('windows_service_status');
+  });
+
+  it('shows a placeholder when the alert lacks the label', () => {
+    const column = labelColumn('label:absent');
+    expect(column?.cell(alert).text).toBe('—');
+  });
+
+  it('drops ids it cannot render rather than failing the table', () => {
+    // A layout saved by a newer console, or naming a column since removed,
+    // should cost that column and not the whole table.
+    const resolved = resolveColumns(['severity', 'invented', 'label:', 'age']);
+    expect(resolved.map((column) => column.id)).toEqual(['severity', 'age']);
+  });
+
+  it('falls back to the built-in set when nothing resolves', () => {
+    expect(resolveColumns(['invented']).map((column) => column.id)).toEqual([
+      ...DEFAULT_COLUMN_IDS,
+    ]);
+  });
+
+  it('ignores a repeated id', () => {
+    expect(resolveColumns(['age', 'age']).map((column) => column.id)).toEqual(['age']);
+  });
+
+  it('marks only server-sortable columns with a sort field', () => {
+    const assignee = FIXED_COLUMNS.find((column) => column.id === 'assignee');
+    expect(assignee?.sortField).toBeUndefined();
+    // Sorting by an arbitrary label would be a sequential scan, so a label
+    // column carries no sort until an index exists for it.
+    expect(labelColumn('label:name')?.sortField).toBeUndefined();
+  });
+});

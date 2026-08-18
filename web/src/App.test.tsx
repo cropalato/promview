@@ -277,11 +277,15 @@ describe('App', () => {
     expect(await screen.findByText('Connected')).toBeInTheDocument();
 
     // The session check ran before the first alert page, which then opened the stream.
-    expect(fetchMock().mock.calls.map(([url]) => String(url))).toEqual([
+    const requested = fetchMock().mock.calls.map(([url]) => String(url));
+    expect(requested.filter((url) => url !== '/api/v1/preferences')).toEqual([
       '/api/v1/config',
       '/api/v1/me',
       '/api/v1/alerts?limit=100&status=firing',
     ]);
+    // Layout preferences key on the user, so they are fetched once the console
+    // unlocks — and only in deployments that have a user to key against.
+    expect(requested).toContain('/api/v1/preferences');
     expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7');
   });
 
@@ -453,6 +457,35 @@ describe('App', () => {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     });
     expect(alertCalls()).toHaveLength(2);
+  });
+
+  it('renders the columns the operator saved, including one bound to a label', async () => {
+    // The layout is browser-local in open mode, which is what this deployment
+    // falls back to when there is no user to key preferences against.
+    window.localStorage.setItem(
+      'promview.preferences',
+      JSON.stringify({
+        columns: [{ id: 'severity' }, { id: 'alert' }, { id: 'label:prometheus_cluster' }],
+        density: 'compact',
+        grouping: { enabled: true, keys: ['alertname', 'source'] },
+      }),
+    );
+    mockApi(
+      alertsPage({
+        alerts: [apiAlert({ labels: { alertname: 'HighErrorRate', prometheus_cluster: 'yul' } })],
+        severityCounts: { critical: 1 },
+        total: 1,
+      }),
+    );
+    render(<App />);
+
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent?.trim());
+    expect(headers).toEqual(['Severity', 'Alert', 'prometheus_cluster']);
+    // The label column renders the alert's own label value.
+    expect(screen.getByText('yul')).toBeInTheDocument();
+    // Density is applied to the shell so the table can scale with it.
+    expect(document.querySelector('[data-density="compact"]')).not.toBeNull();
   });
 
   it('switches the empty state when a filter is applied and cleared', async () => {

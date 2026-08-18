@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/cropalato/promview/internal/alerts"
 	"github.com/cropalato/promview/internal/auth"
 	"github.com/cropalato/promview/internal/config"
+	"github.com/cropalato/promview/internal/preferences"
 )
 
 type fakeStore struct {
@@ -28,6 +30,9 @@ type fakeStore struct {
 	acknowledged *bool
 	groupResult  alerts.GroupResult
 	groupErr     error
+	preferences  preferences.Preferences
+	prefErr      error
+	written      *preferences.Preferences
 	afterID      int64
 	cancel       context.CancelFunc
 	pingErr      error
@@ -77,6 +82,20 @@ func (store *fakeStore) GroupAlerts(_ context.Context, principal auth.Principal,
 	store.principal = principal
 	store.query = query
 	return store.groupResult, store.groupErr
+}
+
+func (store *fakeStore) ReadPreferences(_ context.Context, principal auth.Principal) (preferences.Preferences, error) {
+	store.principal = principal
+	return store.preferences, store.prefErr
+}
+
+func (store *fakeStore) WritePreferences(_ context.Context, principal auth.Principal, value preferences.Preferences) error {
+	store.principal = principal
+	if store.prefErr != nil {
+		return store.prefErr
+	}
+	store.written = &value
+	return nil
 }
 
 func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal, afterID int64, _ int) (alerts.StreamBatch, error) {
@@ -676,5 +695,102 @@ func TestListAlertsWithoutGroupingKeepsFlatShape(t *testing.T) {
 	}
 	if _, ok := body["groups"]; ok {
 		t.Error("flat response carried a groups key")
+	}
+}
+
+func TestGetPreferences(t *testing.T) {
+	stored := preferences.Default()
+	stored.Density = "compact"
+	stored.Columns = []preferences.Column{{ID: "severity"}, {ID: "alert"}, {ID: "label:prometheus_cluster", Width: 180}}
+	store := &fakeStore{preferences: stored}
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/preferences", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var body preferences.Preferences
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Density != "compact" || len(body.Columns) != 3 || body.Columns[2].ID != "label:prometheus_cluster" {
+		t.Fatalf("preferences = %#v, want the stored layout", body)
+	}
+	if store.principal.UserID != 7 {
+		t.Errorf("store saw user %d, want 7", store.principal.UserID)
+	}
+}
+
+func TestPreferencesAreUnavailableWithoutAUser(t *testing.T) {
+	// Open mode has one anonymous principal for everyone, so there is nothing to
+	// key a layout against. The console falls back to browser storage, which it
+	// can only do if it can tell this case apart from a failure.
+	store := &fakeStore{prefErr: preferences.ErrNoSubject}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/preferences", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("GET status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+
+	body, err := json.Marshal(preferences.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/v1/preferences", bytes.NewReader(body)))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("PUT status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+}
+
+func TestPutPreferences(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}})
+
+	wanted := preferences.Default()
+	wanted.Density = "comfortable"
+	wanted.Grouping = preferences.Grouping{Enabled: true, Keys: []string{"alertname"}}
+	body, err := json.Marshal(wanted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/v1/preferences", bytes.NewReader(body)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if store.written == nil || store.written.Density != "comfortable" {
+		t.Fatalf("stored preferences = %#v, want the submitted layout", store.written)
+	}
+	if len(store.written.Grouping.Keys) != 1 || store.written.Grouping.Keys[0] != "alertname" {
+		t.Errorf("stored grouping = %#v, want grouping by alertname", store.written.Grouping)
+	}
+}
+
+func TestPutPreferencesRejectsUnusableLayouts(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}})
+
+	for _, test := range []struct{ name, payload string }{
+		{name: "not json", payload: "{"},
+		{name: "unknown field", payload: `{"columns":[{"id":"severity"}],"density":"normal","surprise":true}`},
+		{name: "unknown column", payload: `{"columns":[{"id":"nonsense"}],"density":"normal"}`},
+		{name: "unknown density", payload: `{"columns":[{"id":"severity"}],"density":"tiny"}`},
+		{name: "grouping by an unknown key", payload: `{"columns":[{"id":"severity"}],"density":"normal","grouping":{"enabled":true,"keys":["nonsense"]}}`},
+		{name: "empty layout", payload: `{"columns":[],"density":"normal"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/v1/preferences", strings.NewReader(test.payload)))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
+			}
+			if store.written != nil {
+				t.Fatalf("a rejected layout reached the store: %#v", store.written)
+			}
+		})
 	}
 }
