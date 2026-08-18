@@ -20,6 +20,7 @@ import (
 	"github.com/cropalato/promview/internal/alerts"
 	"github.com/cropalato/promview/internal/auth"
 	"github.com/cropalato/promview/internal/config"
+	"github.com/cropalato/promview/internal/preferences"
 )
 
 const maxWebhookBodyBytes = 4 << 20
@@ -34,6 +35,8 @@ type Store interface {
 	GetAlertDetail(context.Context, auth.Principal, int64) (alerts.Detail, error)
 	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
 	StreamEvents(context.Context, auth.Principal, int64, int) (alerts.StreamBatch, error)
+	ReadPreferences(context.Context, auth.Principal) (preferences.Preferences, error)
+	WritePreferences(context.Context, auth.Principal, preferences.Preferences) error
 	Ping(context.Context) error
 }
 
@@ -53,6 +56,8 @@ func New(cfg config.Config, store Store, authenticator auth.Authenticator, authe
 	mux.Handle("GET /api/v1/alerts/{id}/events", api.requireAuthentication(http.HandlerFunc(api.getAlertEvents)))
 	mux.Handle("POST /api/v1/alerts/{id}/acknowledge", api.requireAuthentication(http.HandlerFunc(api.acknowledgeAlert)))
 	mux.Handle("GET /api/v1/stream", api.requireAuthentication(http.HandlerFunc(api.streamAlerts)))
+	mux.Handle("GET /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.getPreferences)))
+	mux.Handle("PUT /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.putPreferences)))
 	mux.HandleFunc("POST /api/v1/ingest/alertmanager/{source}", api.ingestAlertmanager)
 	if len(authenticationHandlers) > 0 && authenticationHandlers[0] != nil {
 		mux.Handle("GET /api/v1/auth/oidc/login", authenticationHandlers[0])
@@ -267,6 +272,56 @@ func (api *API) listAlertGroups(w http.ResponseWriter, r *http.Request, principa
 		"total":          result.TotalAlerts,
 		"totalGroups":    result.TotalGroups,
 	})
+}
+
+// getPreferences returns the caller's console layout. In open mode there is no
+// user to key against, so it answers 404 and the console falls back to storing
+// layout in the browser. That is a statement about identity, not permission,
+// which is why it is not a 401.
+func (api *API) getPreferences(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		return
+	}
+	stored, err := api.store.ReadPreferences(r.Context(), principal)
+	if errors.Is(err, preferences.ErrNoSubject) {
+		writeError(w, http.StatusNotFound, "preferences are unavailable without a signed-in user")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read preferences")
+		return
+	}
+	writeJSON(w, http.StatusOK, stored)
+}
+
+func (api *API) putPreferences(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		return
+	}
+	var value preferences.Preferences
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil {
+		writeError(w, http.StatusBadRequest, "preferences payload is invalid")
+		return
+	}
+	if err := preferences.Validate(value); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := api.store.WritePreferences(r.Context(), principal, value); err != nil {
+		if errors.Is(err, preferences.ErrNoSubject) {
+			writeError(w, http.StatusNotFound, "preferences are unavailable without a signed-in user")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to save preferences")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {

@@ -1,44 +1,13 @@
 import type { KeyboardEvent } from 'react';
-import type { AlertSort, AlertSortField } from '../alerts/api';
-import { formatAge } from '../alerts/format';
+import type { AlertSort } from '../alerts/api';
+import { FIXED_COLUMNS, nextSort } from '../alerts/columns';
+import type { ColumnDefinition } from '../alerts/columns';
 import { SEVERITY_LABELS } from '../alerts/severity';
 import type { AlertSummary } from '../alerts/types';
 import { EmptyState } from './EmptyState';
 import { SeverityIcon, SortIcon } from './icons';
 
-/**
- * Default console columns from the project plan. `optional` columns collapse
- * first on narrow viewports. `sortField` marks columns the alerts endpoint
- * can sort server-side; the rest render plain headers.
- */
-const COLUMNS: ReadonlyArray<{
-  id: string;
-  label: string;
-  optional: boolean;
-  sortField?: AlertSortField;
-}> = [
-  { id: 'severity', label: 'Severity', optional: false, sortField: 'severity' },
-  { id: 'state', label: 'State', optional: false, sortField: 'state' },
-  { id: 'alert', label: 'Alert', optional: false, sortField: 'name' },
-  { id: 'summary', label: 'Summary', optional: true, sortField: 'summary' },
-  { id: 'team', label: 'Team', optional: true, sortField: 'team' },
-  { id: 'instance', label: 'Instance', optional: true, sortField: 'instance' },
-  { id: 'source', label: 'Source', optional: false, sortField: 'source' },
-  { id: 'age', label: 'Age', optional: false, sortField: 'age' },
-  { id: 'assignee', label: 'Assignee', optional: true },
-  { id: 'notes', label: 'Notes', optional: true },
-];
-
-/**
- * Next sort when a header is activated: an inactive column starts ascending,
- * the active column toggles direction.
- */
-export function nextSort(field: AlertSortField, current: AlertSort | null): AlertSort {
-  if (current !== null && current.field === field) {
-    return { field, order: current.order === 'asc' ? 'desc' : 'asc' };
-  }
-  return { field, order: 'asc' };
-}
+export { nextSort };
 
 /** Cursor-pagination status and controls rendered below the table. */
 export interface AlertPagination {
@@ -67,6 +36,8 @@ interface AlertTableProps {
   sort?: AlertSort | null;
   /** Header activation requests a server-side sort for that column. */
   onSortChange?: (sort: AlertSort) => void;
+  /** Columns to render, in order. Defaults to the console's built-in set. */
+  columns?: readonly ColumnDefinition[];
 }
 
 /** Dense alert table. Renders real rows when given data; otherwise the
@@ -84,6 +55,7 @@ export function AlertTable({
   onSelect,
   sort = null,
   onSortChange,
+  columns = FIXED_COLUMNS,
 }: AlertTableProps) {
   return (
     <div className="table-panel">
@@ -92,7 +64,7 @@ export function AlertTable({
           <caption>Active alerts ({alerts.length})</caption>
           <thead>
             <tr>
-              {COLUMNS.map((column) => (
+              {columns.map((column) => (
                 <ColumnHeader
                   key={column.id}
                   column={column}
@@ -105,7 +77,7 @@ export function AlertTable({
           <tbody>
             {alerts.length === 0 ? (
               <tr className="empty-row">
-                <td colSpan={COLUMNS.length}>
+                <td colSpan={columns.length}>
                   <EmptyState
                     filterActive={filterActive}
                     query={filterQuery}
@@ -118,6 +90,7 @@ export function AlertTable({
                 <AlertRow
                   key={alert.id}
                   alert={alert}
+                  columns={columns}
                   selected={alert.id === selectedId}
                   onSelect={onSelect}
                 />
@@ -141,7 +114,7 @@ function ColumnHeader({
   sort,
   onSortChange,
 }: {
-  column: (typeof COLUMNS)[number];
+  column: ColumnDefinition;
   sort: AlertSort | null;
   onSortChange?: (sort: AlertSort) => void;
 }) {
@@ -197,10 +170,12 @@ function TableFoot({ pagination }: { pagination: AlertPagination }) {
 
 function AlertRow({
   alert,
+  columns,
   selected = false,
   onSelect,
 }: {
   alert: AlertSummary;
+  columns: readonly ColumnDefinition[];
   selected?: boolean;
   onSelect?: (alert: AlertSummary) => void;
 }) {
@@ -225,23 +200,39 @@ function AlertRow({
       onClick={() => onSelect?.(alert)}
       onKeyDown={handleKeyDown}
     >
-      <td>
+      {columns.map((column) => (
+        <AlertCell key={column.id} alert={alert} column={column} />
+      ))}
+    </tr>
+  );
+}
+
+/**
+ * One cell. Severity and state keep their own markup because they encode state
+ * in form as well as in text; every other column is text from the registry.
+ */
+function AlertCell({ alert, column }: { alert: AlertSummary; column: ColumnDefinition }) {
+  const cell = column.cell(alert);
+  const className = [cell.className ?? '', column.optional ? 'col-optional' : '']
+    .filter((part) => part !== '')
+    .join(' ');
+
+  if (column.id === 'severity') {
+    return (
+      <td className={className === '' ? undefined : className}>
         <span className={`sev-tag sev-${alert.severity}`}>
           <SeverityIcon severity={alert.severity} />
           <span>{alert.severityLabel ?? SEVERITY_LABELS[alert.severity]}</span>
         </span>
       </td>
-      <td>
+    );
+  }
+  if (column.id === 'state') {
+    return (
+      <td className={className === '' ? undefined : className}>
         <span className={`state-chip state-${alert.state}`}>{alert.state}</span>
       </td>
-      <td className="cell-name">{alert.name}</td>
-      <td className="cell-summary col-optional">{alert.summary}</td>
-      <td className="cell-mono col-optional">{alert.team ?? '—'}</td>
-      <td className="cell-mono col-optional">{alert.instance ?? '—'}</td>
-      <td className="cell-mono">{alert.source}</td>
-      <td className="cell-mono">{formatAge(alert.startsAt)}</td>
-      <td className="cell-mono col-optional">{alert.assignee ?? '—'}</td>
-      <td className="cell-mono col-optional">{alert.notes > 0 ? alert.notes : '—'}</td>
-    </tr>
-  );
+    );
+  }
+  return <td className={className === '' ? undefined : className}>{cell.text}</td>;
 }

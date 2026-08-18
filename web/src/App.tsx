@@ -14,6 +14,7 @@ import { OIDC_LOGIN_URL } from './auth/session';
 import type { NavigateTo } from './auth/session';
 import { AlertDetailDrawer } from './components/AlertDetailDrawer';
 import { AlertTable } from './components/AlertTable';
+import { resolveColumns } from './alerts/columns';
 import { FilterBar } from './components/FilterBar';
 import { SeverityStrip } from './components/SeverityStrip';
 import { StatusFooter } from './components/StatusFooter';
@@ -24,6 +25,7 @@ import { useAlertDetail } from './hooks/useAlertDetail';
 import { useAlertNotifications } from './hooks/useAlertNotifications';
 import { useAlertRoute } from './hooks/useAlertRoute';
 import { useAlerts } from './hooks/useAlerts';
+import { usePreferences } from './hooks/usePreferences';
 import { useAlertStream } from './hooks/useAlertStream';
 import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import { useSession } from './hooks/useSession';
@@ -134,6 +136,11 @@ export default function App({ navigate }: AppProps = {}) {
     loadMore,
     scheduleLiveRefresh,
   } = useAlerts(consoleUnlocked, alertsQuery, { onUnauthorized: expireSession });
+
+  // Layout preferences follow the operator; they are only fetched once the
+  // console is unlocked, since an unauthenticated request would just 401.
+  const { preferences } = usePreferences(consoleUnlocked, authMode === 'oidc');
+  const columns = resolveColumns(preferences.columns.map((column) => column.id));
   const { selectedAlertId, openAlert, closeAlert } = useAlertRoute();
   const effectiveSelectedAlertId = consoleUnlocked ? selectedAlertId : null;
   const {
@@ -197,7 +204,7 @@ export default function App({ navigate }: AppProps = {}) {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-density={preferences.density}>
       <a className="skip-link" href="#main">
         Skip to alerts
       </a>
@@ -323,6 +330,7 @@ export default function App({ navigate }: AppProps = {}) {
                 />
                 <AlertTable
                   alerts={loadedAlerts}
+                  columns={columns}
                   filterActive={filterActive}
                   filterQuery={appliedFilterText}
                   selectedId={effectiveSelectedAlertId}
