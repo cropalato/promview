@@ -26,6 +26,8 @@ type fakeStore struct {
 	detail       alerts.Detail
 	detailErr    error
 	acknowledged *bool
+	groupResult  alerts.GroupResult
+	groupErr     error
 	afterID      int64
 	cancel       context.CancelFunc
 	pingErr      error
@@ -69,6 +71,12 @@ func (store *fakeStore) ListAlerts(_ context.Context, principal auth.Principal, 
 	store.principal = principal
 	store.query = query
 	return store.result, nil
+}
+
+func (store *fakeStore) GroupAlerts(_ context.Context, principal auth.Principal, query alerts.Query) (alerts.GroupResult, error) {
+	store.principal = principal
+	store.query = query
+	return store.groupResult, store.groupErr
 }
 
 func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal, afterID int64, _ int) (alerts.StreamBatch, error) {
@@ -489,5 +497,184 @@ func TestServesSPAIndexForClientRoute(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), "promview shell") {
 		t.Fatalf("body = %q, want SPA index", response.Body.String())
+	}
+}
+
+func TestListAlertGroups(t *testing.T) {
+	latest := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	store := &fakeStore{groupResult: alerts.GroupResult{
+		Groups: []alerts.Group{{
+			Key:              map[string]string{"alertname": "Cardinality", "source": "yul"},
+			Total:            52,
+			Acknowledged:     3,
+			SeverityCounts:   map[string]int64{"critical": 1, "warning": 51},
+			WorstSeverity:    "critical",
+			LatestLastSeen:   latest,
+			EarliestStartsAt: latest.Add(-time.Hour),
+			SampleAlertID:    42,
+		}},
+		NextCursor: &alerts.GroupCursor{
+			SeverityRank: 3, LatestLastSeen: latest, Key: []string{"Cardinality", "yul"},
+		},
+		TotalGroups:    18,
+		TotalAlerts:    236,
+		SeverityCounts: map[string]int64{"critical": 1, "warning": 235},
+		StreamCursor:   7,
+	}}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=alertname,source&status=firing", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if got := store.query.GroupBy; len(got) != 2 || got[0] != "alertname" || got[1] != "source" {
+		t.Fatalf("parsed groupBy = %v, want [alertname source]", got)
+	}
+	// Filters still apply; grouping is a shape, not a replacement for the query.
+	if store.query.Status != "firing" {
+		t.Errorf("status = %q, want firing", store.query.Status)
+	}
+
+	var body struct {
+		Groups []struct {
+			Key            map[string]string `json:"key"`
+			Total          int64             `json:"total"`
+			Acknowledged   int64             `json:"acknowledged"`
+			WorstSeverity  string            `json:"worstSeverity"`
+			SampleAlertID  string            `json:"sampleAlertId"`
+			SeverityCounts map[string]int64  `json:"severityCounts"`
+		} `json:"groups"`
+		NextCursor  string `json:"nextCursor"`
+		TotalGroups int64  `json:"totalGroups"`
+		Total       int64  `json:"total"`
+		Stream      int64  `json:"streamCursor"`
+		Alerts      *[]any `json:"alerts"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Groups) != 1 {
+		t.Fatalf("groups = %d, want 1", len(body.Groups))
+	}
+	group := body.Groups[0]
+	if group.Key["alertname"] != "Cardinality" || group.Total != 52 || group.Acknowledged != 3 {
+		t.Errorf("group = %#v, want the collapsed Cardinality row", group)
+	}
+	if group.WorstSeverity != "critical" || group.SeverityCounts["warning"] != 51 {
+		t.Errorf("group severity = %q %v, want critical with 51 warnings", group.WorstSeverity, group.SeverityCounts)
+	}
+	// Ids are strings everywhere else in this API; a group's sample is no different.
+	if group.SampleAlertID != "42" {
+		t.Errorf("sample alert id = %q, want \"42\"", group.SampleAlertID)
+	}
+	if body.TotalGroups != 18 || body.Total != 236 || body.Stream != 7 {
+		t.Errorf("totals = %d groups, %d alerts, stream %d; want 18, 236, 7", body.TotalGroups, body.Total, body.Stream)
+	}
+	if body.Alerts != nil {
+		t.Error("grouped response carried an alerts array, which would double the payload")
+	}
+	if body.NextCursor == "" {
+		t.Fatal("next cursor is empty, want an encoded group cursor")
+	}
+
+	// The cursor has to survive a round trip through the client.
+	cursor, err := decodeGroupCursor(body.NextCursor)
+	if err != nil {
+		t.Fatalf("decodeGroupCursor() error = %v", err)
+	}
+	if cursor.SeverityRank != 3 || len(cursor.Key) != 2 || cursor.Key[0] != "Cardinality" {
+		t.Errorf("decoded cursor = %#v, want the last group's ordering values", cursor)
+	}
+}
+
+func TestListAlertGroupsRejectsUnusableRequests(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	for _, test := range []struct{ name, target string }{
+		{name: "unknown key", target: "/api/v1/alerts?groupBy=nonsense"},
+		{name: "injection attempt", target: "/api/v1/alerts?groupBy=alertname%3B+DROP+TABLE+alerts"},
+		{name: "duplicate key", target: "/api/v1/alerts?groupBy=alertname,alertname"},
+		{name: "too many keys", target: "/api/v1/alerts?groupBy=alertname,source,team,severity"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.target, nil))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestListAlertGroupsRejectsForeignCursors(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+
+	// A cursor from a different grouping would silently return the wrong page.
+	foreign, err := encodeGroupCursor(alerts.GroupCursor{
+		SeverityRank: 3, Key: []string{"Cardinality"}, Query: "some-other-query",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=alertname&cursor="+foreign, nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("foreign cursor status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+
+	// A flat-list cursor is not a group cursor either, even though both are
+	// opaque base64 to the client.
+	flat, err := encodeCursor(alerts.Cursor{Sort: "lastSeen", Order: "desc", Query: "whatever"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=alertname&cursor="+flat, nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("flat cursor status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestListAlertGroupsAcceptsItsOwnCursor(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	identity := alerts.Query{GroupBy: []string{"alertname"}}.CursorIdentity()
+	cursor, err := encodeGroupCursor(alerts.GroupCursor{
+		SeverityRank: 2, LatestLastSeen: time.Now().UTC(), Key: []string{"Cardinality"}, Query: identity,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=alertname&cursor="+cursor, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if store.query.GroupCursor == nil || store.query.GroupCursor.Key[0] != "Cardinality" {
+		t.Fatalf("group cursor reached the store as %#v, want the decoded cursor", store.query.GroupCursor)
+	}
+}
+
+func TestListAlertsWithoutGroupingKeepsFlatShape(t *testing.T) {
+	// Existing clients send no groupBy and must keep getting exactly what they
+	// got before grouping existed.
+	store := &fakeStore{result: alerts.ListResult{Total: 1, SeverityCounts: map[string]int64{"warning": 1}}}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["alerts"]; !ok {
+		t.Error("flat response lost its alerts array")
+	}
+	if _, ok := body["groups"]; ok {
+		t.Error("flat response carried a groups key")
 	}
 }

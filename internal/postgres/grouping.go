@@ -23,10 +23,9 @@ team sees group totals computed over their slice alone, never the true total of
 a group they cannot open.
 */
 
-// alertGroupKeys is the vocabulary a caller may group by. It is a whitelist
-// rather than an arbitrary label because each key becomes a GROUP BY expression,
-// and an unindexed label with unbounded cardinality is a sequential scan that
-// produces one group per alert.
+// alertGroupKeys maps the shared vocabulary in alerts.GroupKeys to SQL. Nothing
+// outside that vocabulary reaches this map, so no caller-supplied text is ever
+// interpolated into the statement.
 var alertGroupKeys = map[string]string{
 	"alertname": "COALESCE(alert.labels->>'alertname', '')",
 	"source":    "alert.source_slug",
@@ -34,10 +33,6 @@ var alertGroupKeys = map[string]string{
 	"severity":  "COALESCE(alert.labels->>'severity', 'warning')",
 	"instance":  "COALESCE(alert.labels->>'instance', '')",
 }
-
-// maxGroupKeys bounds how finely a caller can slice the result. Beyond a few
-// keys the grouping stops collapsing anything and just costs an aggregation.
-const maxGroupKeys = 3
 
 // severityBuckets are counted per group so the console can render the mix
 // without loading the members.
@@ -201,23 +196,17 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 }
 
 func groupKeyExpressions(groupBy []string) ([]string, error) {
-	if len(groupBy) == 0 {
-		return nil, errors.New("group by requires at least one key")
+	if err := alerts.ValidateGroupBy(groupBy); err != nil {
+		return nil, err
 	}
-	if len(groupBy) > maxGroupKeys {
-		return nil, fmt.Errorf("group by accepts at most %d keys", maxGroupKeys)
-	}
-	seen := make(map[string]bool, len(groupBy))
 	expressions := make([]string, 0, len(groupBy))
 	for _, key := range groupBy {
 		expression, ok := alertGroupKeys[key]
 		if !ok {
+			// Unreachable while this map covers alerts.GroupKeys, which
+			// TestAlertGroupKeysCoverVocabulary enforces.
 			return nil, fmt.Errorf("cannot group by %q", key)
 		}
-		if seen[key] {
-			return nil, fmt.Errorf("duplicate group key %q", key)
-		}
-		seen[key] = true
 		expressions = append(expressions, expression)
 	}
 	return expressions, nil

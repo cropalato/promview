@@ -71,6 +71,46 @@ type Query struct {
 	GroupCursor *GroupCursor
 }
 
+// GroupKeys is the vocabulary a caller may group by, shared by the HTTP layer
+// and the store so a request is rejected before it reaches SQL. It is closed
+// rather than any label because each key becomes a GROUP BY expression, and an
+// unbounded-cardinality label produces one group per alert.
+var GroupKeys = []string{"alertname", "source", "team", "severity", "instance"}
+
+// MaxGroupKeys bounds how finely a caller can slice the result; past a few keys
+// grouping stops collapsing anything and only costs an aggregation.
+const MaxGroupKeys = 3
+
+// ValidateGroupBy reports whether these keys can be grouped on.
+func ValidateGroupBy(groupBy []string) error {
+	if len(groupBy) == 0 {
+		return errors.New("group by requires at least one key")
+	}
+	if len(groupBy) > MaxGroupKeys {
+		return fmt.Errorf("group by accepts at most %d keys", MaxGroupKeys)
+	}
+	seen := make(map[string]bool, len(groupBy))
+	for _, key := range groupBy {
+		if !IsGroupKey(key) {
+			return fmt.Errorf("cannot group by %q", key)
+		}
+		if seen[key] {
+			return fmt.Errorf("duplicate group key %q", key)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+func IsGroupKey(name string) bool {
+	for _, key := range GroupKeys {
+		if key == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Group is one collapsed row: every alert sharing the same values for the
 // grouping keys, summarised. Counts are computed under the same filters and
 // read restrictions as the alerts themselves, so a group never reports members

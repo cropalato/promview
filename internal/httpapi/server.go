@@ -30,6 +30,7 @@ type Store interface {
 	Ingest(context.Context, []alertmanager.IncomingAlert) error
 	AuthenticateSource(context.Context, string, string) (bool, error)
 	ListAlerts(context.Context, auth.Principal, alerts.Query) (alerts.ListResult, error)
+	GroupAlerts(context.Context, auth.Principal, alerts.Query) (alerts.GroupResult, error)
 	GetAlertDetail(context.Context, auth.Principal, int64) (alerts.Detail, error)
 	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
 	StreamEvents(context.Context, auth.Principal, int64, int) (alerts.StreamBatch, error)
@@ -196,6 +197,10 @@ func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "principal is unavailable")
 		return
 	}
+	if len(query.GroupBy) > 0 {
+		api.listAlertGroups(w, r, principal, query)
+		return
+	}
 	result, err := api.store.ListAlerts(r.Context(), principal, query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query alerts")
@@ -220,6 +225,47 @@ func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 		"severityCounts": result.SeverityCounts,
 		"streamCursor":   result.StreamCursor,
 		"total":          result.Total,
+	})
+}
+
+// listAlertGroups answers the grouped shape of GET /api/v1/alerts. Expanding a
+// group needs no endpoint of its own: the console re-queries this same handler
+// with an equality matcher on the group's key, which keeps cursoring, sorting
+// and read restrictions identical between a group's members and the flat list.
+func (api *API) listAlertGroups(w http.ResponseWriter, r *http.Request, principal auth.Principal, query alerts.Query) {
+	result, err := api.store.GroupAlerts(r.Context(), principal, query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to group alerts")
+		return
+	}
+	groups := make([]alertGroupResponse, 0, len(result.Groups))
+	for _, group := range result.Groups {
+		groups = append(groups, alertGroupResponse{
+			Key:              group.Key,
+			Total:            group.Total,
+			Acknowledged:     group.Acknowledged,
+			SeverityCounts:   group.SeverityCounts,
+			WorstSeverity:    group.WorstSeverity,
+			LatestLastSeen:   group.LatestLastSeen,
+			EarliestStartsAt: group.EarliestStartsAt,
+			SampleAlertID:    strconv.FormatInt(group.SampleAlertID, 10),
+		})
+	}
+	nextCursor := ""
+	if result.NextCursor != nil {
+		nextCursor, err = encodeGroupCursor(*result.NextCursor)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode cursor")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"groups":         groups,
+		"nextCursor":     nextCursor,
+		"severityCounts": result.SeverityCounts,
+		"streamCursor":   result.StreamCursor,
+		"total":          result.TotalAlerts,
+		"totalGroups":    result.TotalGroups,
 	})
 }
 
@@ -393,6 +439,20 @@ type alertActions struct {
 	CanAcknowledge bool `json:"canAcknowledge"`
 }
 
+// alertGroupResponse is one collapsed row. SampleAlertID is a string like every
+// other id the API emits, so the console never has to care that ids are numeric
+// on the server.
+type alertGroupResponse struct {
+	Key              map[string]string `json:"key"`
+	Total            int64             `json:"total"`
+	Acknowledged     int64             `json:"acknowledged"`
+	SeverityCounts   map[string]int64  `json:"severityCounts"`
+	WorstSeverity    string            `json:"worstSeverity"`
+	LatestLastSeen   time.Time         `json:"latestLastSeen"`
+	EarliestStartsAt time.Time         `json:"earliestStartsAt"`
+	SampleAlertID    string            `json:"sampleAlertId"`
+}
+
 func newAlertResponse(alert alerts.Alert) alertResponse {
 	severity := alert.Labels["severity"]
 	if severity == "" {
@@ -467,6 +527,14 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 	if query.Order != "asc" && query.Order != "desc" {
 		return alerts.Query{}, errors.New("order must be asc or desc")
 	}
+	if raw := strings.TrimSpace(values.Get("groupBy")); raw != "" {
+		for _, key := range strings.Split(raw, ",") {
+			query.GroupBy = append(query.GroupBy, strings.TrimSpace(key))
+		}
+		if err := alerts.ValidateGroupBy(query.GroupBy); err != nil {
+			return alerts.Query{}, err
+		}
+	}
 	for _, raw := range values["match"] {
 		matcher, err := parseLabelMatcher(raw)
 		if err != nil {
@@ -475,6 +543,17 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		query.Matches = append(query.Matches, matcher)
 	}
 	if raw := values.Get("cursor"); raw != "" {
+		if len(query.GroupBy) > 0 {
+			cursor, err := decodeGroupCursor(raw)
+			if err != nil {
+				return alerts.Query{}, errors.New("cursor is invalid")
+			}
+			if cursor.Query != query.CursorIdentity() || len(cursor.Key) != len(query.GroupBy) {
+				return alerts.Query{}, errors.New("cursor does not match query")
+			}
+			query.GroupCursor = &cursor
+			return query, nil
+		}
 		cursor, err := decodeCursor(raw)
 		if err != nil {
 			return alerts.Query{}, errors.New("cursor is invalid")
@@ -488,6 +567,26 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		query.Cursor = &cursor
 	}
 	return query, nil
+}
+
+func encodeGroupCursor(cursor alerts.GroupCursor) (string, error) {
+	data, err := json.Marshal(cursor)
+	if err != nil {
+		return "", fmt.Errorf("marshal group cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeGroupCursor(value string) (alerts.GroupCursor, error) {
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return alerts.GroupCursor{}, fmt.Errorf("decode group cursor: %w", err)
+	}
+	var cursor alerts.GroupCursor
+	if err := json.Unmarshal(data, &cursor); err != nil {
+		return alerts.GroupCursor{}, fmt.Errorf("decode group cursor: %w", err)
+	}
+	return cursor, nil
 }
 
 func parseLabelMatcher(raw string) (alerts.LabelMatcher, error) {
