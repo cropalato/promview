@@ -220,3 +220,23 @@ export function RadarIcon({ className }: IconProps): JSX.Element {
     </svg>
   );
 }
+
+/**
+ * Disclosure chevron for an expandable group row. It points right when closed
+ * and rotates down when open, which the stylesheet handles so the rotation can
+ * respect prefers-reduced-motion.
+ */
+export function ChevronIcon({ className }: IconProps): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" {...a11y(className)}>
+      <path
+        d="m9 5 7 7-7 7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

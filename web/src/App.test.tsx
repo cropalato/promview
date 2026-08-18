@@ -48,6 +48,29 @@ function apiAlert(overrides: Record<string, unknown> = {}): Record<string, unkno
   };
 }
 
+function groupsPage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    groups: [
+      {
+        key: { alertname: 'Cardinality', source: 'yul' },
+        total: 52,
+        acknowledged: 0,
+        severityCounts: { critical: 1, warning: 51 },
+        worstSeverity: 'critical',
+        latestLastSeen: '2026-08-18T12:00:00Z',
+        earliestStartsAt: '2026-08-18T11:00:00Z',
+        sampleAlertId: '42',
+      },
+    ],
+    nextCursor: '',
+    severityCounts: { critical: 1, warning: 51 },
+    total: 52,
+    totalGroups: 1,
+    streamCursor: 7,
+    ...overrides,
+  };
+}
+
 function alertsPage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     alerts: [],
@@ -77,6 +100,10 @@ function mockOidcApi(me: Response, page: unknown = alertsPage()): void {
     const target = String(url);
     if (target === '/api/v1/me') {
       return Promise.resolve(me);
+    }
+    if (target === '/api/v1/preferences') {
+      // No stored layout for this user, so the console keeps its local one.
+      return Promise.resolve(new Response('{}', { status: 404 }));
     }
     if (target === '/api/v1/auth/logout') {
       return Promise.resolve(new Response(null, { status: 204 }));
@@ -173,6 +200,28 @@ beforeEach(() => {
   FakeNotification.reset();
   // Notification preference/ledger persist in localStorage; start clean.
   window.localStorage.clear();
+  // Most tests here exercise the flat list, so they opt out of grouping
+  // explicitly. The default itself is pinned by its own test below, which
+  // clears this first.
+  window.localStorage.setItem(
+    'promview.preferences',
+    JSON.stringify({
+      columns: [
+        { id: 'severity' },
+        { id: 'state' },
+        { id: 'alert' },
+        { id: 'summary' },
+        { id: 'team' },
+        { id: 'instance' },
+        { id: 'source' },
+        { id: 'age' },
+        { id: 'assignee' },
+        { id: 'notes' },
+      ],
+      density: 'normal',
+      grouping: { enabled: false, keys: ['alertname', 'source'] },
+    }),
+  );
   // Tests navigate via pushState; always start from the list route.
   window.history.replaceState(null, '', '/');
 });
@@ -311,6 +360,9 @@ describe('App', () => {
           ? Promise.reject(new TypeError('fetch failed'))
           : Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
       }
+      if (target === '/api/v1/preferences') {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
       if (target.startsWith('/api/v1/alerts')) {
         return Promise.resolve(jsonResponse(alertsPage()));
       }
@@ -403,6 +455,9 @@ describe('App', () => {
       if (target === '/api/v1/me') {
         return Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
       }
+      if (target === '/api/v1/preferences') {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
       if (target.startsWith('/api/v1/alerts')) {
         alertFetches += 1;
         return Promise.resolve(
@@ -467,7 +522,7 @@ describe('App', () => {
       JSON.stringify({
         columns: [{ id: 'severity' }, { id: 'alert' }, { id: 'label:prometheus_cluster' }],
         density: 'compact',
-        grouping: { enabled: true, keys: ['alertname', 'source'] },
+        grouping: { enabled: false, keys: ['alertname', 'source'] },
       }),
     );
     mockApi(
@@ -486,6 +541,119 @@ describe('App', () => {
     expect(screen.getByText('yul')).toBeInTheDocument();
     // Density is applied to the shell so the table can scale with it.
     expect(document.querySelector('[data-density="compact"]')).not.toBeNull();
+  });
+
+  it('collapses a fan-out into one group and expands it into members', async () => {
+    window.localStorage.setItem(
+      'promview.preferences',
+      JSON.stringify({
+        columns: [{ id: 'severity' }, { id: 'alert' }, { id: 'instance' }, { id: 'age' }],
+        density: 'normal',
+        grouping: { enabled: true, keys: ['alertname', 'source'] },
+      }),
+    );
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('groupBy=')) {
+        return Promise.resolve(jsonResponse(groupsPage()));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        // The members request is the ordinary alerts query plus matchers on the
+        // group's key, which is what makes expanding reuse one code path.
+        return Promise.resolve(
+          jsonResponse(
+            alertsPage({
+              alerts: [
+                apiAlert({ id: '1', labels: { alertname: 'Cardinality', instance: 'a' } }),
+                apiAlert({ id: '2', labels: { alertname: 'Cardinality', instance: 'b' } }),
+              ],
+              total: 52,
+              nextCursor: 'more',
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    render(<App />);
+
+    const groupRow = await screen.findByRole('row', { name: /Cardinality · yul/ });
+    expect(within(groupRow).getByText('52')).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: /firing/ })).not.toBeInTheDocument();
+
+    fireEvent.click(groupRow);
+
+    expect(await screen.findByText('a')).toBeInTheDocument();
+    expect(screen.getByText('b')).toBeInTheDocument();
+    const memberRequests = alertCalls().filter((url) => !url.includes('groupBy='));
+    expect(memberRequests.some((url) => url.includes('match=alertname%3DCardinality'))).toBe(true);
+    expect(memberRequests.some((url) => url.includes('source=yul'))).toBe(true);
+
+    // Collapsing puts the console back to one row.
+    fireEvent.click(screen.getByRole('row', { name: /Cardinality · yul/ }));
+    expect(screen.queryByText('a')).not.toBeInTheDocument();
+  });
+
+  it('switches between grouped and flat from the view menu, and remembers it', async () => {
+    // No stored layout: this is the out-of-the-box console.
+    window.localStorage.clear();
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('groupBy=')) {
+        return Promise.resolve(jsonResponse(groupsPage()));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(
+          jsonResponse(
+            alertsPage({ alerts: [apiAlert()], total: 1, severityCounts: { critical: 1 } }),
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    render(<App />);
+
+    // Grouping is on by default: the fan-out it collapses is what makes a busy
+    // console unreadable.
+    expect(await screen.findByRole('treegrid')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /group alerts/i }));
+
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    expect(screen.queryByRole('treegrid')).not.toBeInTheDocument();
+    // The choice is written through to preferences so it survives a reload.
+    const stored = JSON.parse(window.localStorage.getItem('promview.preferences') ?? '{}');
+    expect(stored.grouping.enabled).toBe(false);
+  });
+
+  it('adds a column bound to a label from the view menu', async () => {
+    mockApi(
+      alertsPage({
+        alerts: [apiAlert({ labels: { alertname: 'HighErrorRate', prometheus_cluster: 'yul' } })],
+        total: 1,
+      }),
+    );
+    window.localStorage.setItem(
+      'promview.preferences',
+      JSON.stringify({
+        columns: [{ id: 'severity' }, { id: 'alert' }],
+        density: 'normal',
+        grouping: { enabled: false, keys: ['alertname', 'source'] },
+      }),
+    );
+    render(<App />);
+
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    fireEvent.change(screen.getByLabelText('Label name'), {
+      target: { value: 'prometheus_cluster' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+
+    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent?.trim());
+    expect(headers).toEqual(['Severity', 'Alert', 'prometheus_cluster']);
+    expect(screen.getByText('yul')).toBeInTheDocument();
   });
 
   it('switches the empty state when a filter is applied and cleared', async () => {

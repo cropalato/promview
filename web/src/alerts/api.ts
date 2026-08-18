@@ -1,4 +1,5 @@
 import { normalizeSeverity, severityLabelFor } from './severity';
+import type { Severity } from './severity';
 import type { AlertState, AlertSummary } from './types';
 
 /**
@@ -87,6 +88,12 @@ export interface AlertsQuery {
   sort?: AlertSortField;
   /** Sort direction applied together with `sort`. */
   order?: AlertSortOrder;
+  /**
+   * Label keys to collapse the result by. With any key set, the endpoint
+   * returns groups instead of alerts; a group is expanded by asking for its
+   * members with the ordinary query plus a matcher on the group's key.
+   */
+  groupBy?: readonly string[];
 }
 
 /** One validated page from the alerts API, mapped into UI rows. */
@@ -102,6 +109,35 @@ export interface AlertsPage {
    * Monotonic cursor for the live event stream (`GET /api/v1/stream`). Every
    * snapshot carries the position the stream should resume from.
    */
+  streamCursor: number;
+}
+
+/** One collapsed row: the alerts sharing a key combination, summarised. */
+export interface AlertGroupSummary {
+  /** Label values that define the group, keyed by the grouping label. */
+  key: Record<string, string>;
+  /** Members matching the current filters and the reader's own access. */
+  total: number;
+  acknowledged: number;
+  severityCounts: Record<string, number>;
+  worstSeverity: Severity;
+  /** Preserves the server's severity text when it falls outside the buckets. */
+  worstSeverityLabel?: string;
+  latestLastSeen: string;
+  earliestStartsAt: string;
+  /** Newest member; a one-member group opens this alert directly. */
+  sampleAlertId: string;
+}
+
+/** One validated page of groups. */
+export interface AlertGroupsPage {
+  groups: AlertGroupSummary[];
+  nextCursor: string;
+  severityCounts: Record<string, number>;
+  /** Matching alerts, counted across every group, not just this page. */
+  total: number;
+  /** Matching groups, which is what the page count refers to. */
+  totalGroups: number;
   streamCursor: number;
 }
 
@@ -140,6 +176,9 @@ export function buildAlertsUrl(query: AlertsQuery = {}): string {
       params.set('order', query.sort === 'age' ? flipped : query.order);
     }
   }
+  if (query.groupBy !== undefined && query.groupBy.length > 0) {
+    params.set('groupBy', query.groupBy.join(','));
+  }
   const suffix = params.toString();
   return suffix === '' ? ALERTS_URL : `${ALERTS_URL}?${suffix}`;
 }
@@ -174,6 +213,66 @@ export async function fetchAlerts(
   }
 
   return parseAlertsResponse(body);
+}
+
+/**
+ * Fetches and validates one page of groups. Grouping is a shape of the same
+ * endpoint, so filters, credentials and error handling are identical.
+ */
+export async function fetchAlertGroups(
+  query: AlertsQuery,
+  fetchImpl: FetchLike = (url) => fetch(url),
+): Promise<AlertGroupsPage> {
+  let response: Response;
+  try {
+    response = await fetchImpl(buildAlertsUrl(query));
+  } catch (cause) {
+    throw new AlertsApiError('Unable to reach the Promview API', { cause });
+  }
+  if (!response.ok) {
+    throw new AlertsApiError(`Alerts request failed (HTTP ${response.status})`, {
+      status: response.status,
+    });
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (cause) {
+    throw new AlertsApiError('Alerts response was not valid JSON', { cause });
+  }
+  return parseAlertGroupsResponse(body);
+}
+
+export function parseAlertGroupsResponse(body: unknown): AlertGroupsPage {
+  const record = asRecord(body, 'Alerts response');
+  if (!Array.isArray(record.groups)) {
+    throw new AlertsApiError('Alerts response was malformed: groups must be a list');
+  }
+  return {
+    groups: record.groups.map((group, index) => parseAlertGroup(group, index)),
+    nextCursor: typeof record.nextCursor === 'string' ? record.nextCursor : '',
+    severityCounts: numberRecord(record.severityCounts, 'severityCounts'),
+    total: requiredNumber(record.total, 'total'),
+    totalGroups: requiredNumber(record.totalGroups, 'totalGroups'),
+    streamCursor: requiredNumber(record.streamCursor, 'streamCursor'),
+  };
+}
+
+function parseAlertGroup(value: unknown, index: number): AlertGroupSummary {
+  const raw = asRecord(value, `groups[${index}]`);
+  const severityRaw = requiredString(raw.worstSeverity, `groups[${index}].worstSeverity`);
+  const severity = normalizeSeverity(severityRaw);
+  return {
+    key: stringRecord(raw.key, `groups[${index}].key`),
+    total: requiredNumber(raw.total, `groups[${index}].total`),
+    acknowledged: requiredNumber(raw.acknowledged, `groups[${index}].acknowledged`),
+    severityCounts: numberRecord(raw.severityCounts, `groups[${index}].severityCounts`),
+    worstSeverity: severity,
+    worstSeverityLabel: severityLabelFor(severityRaw, severity),
+    latestLastSeen: requiredString(raw.latestLastSeen, `groups[${index}].latestLastSeen`),
+    earliestStartsAt: requiredString(raw.earliestStartsAt, `groups[${index}].earliestStartsAt`),
+    sampleAlertId: requiredString(raw.sampleAlertId, `groups[${index}].sampleAlertId`),
+  };
 }
 
 export function parseAlertsResponse(body: unknown): AlertsPage {
