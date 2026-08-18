@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AlertStreamNotificationEvent, AlertStreamRemovedEvent } from '../alerts/stream';
 import { NOTIFICATION_PREFERENCE_KEY } from '../notifications/store';
@@ -39,6 +39,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount before the stubs go away; a hook still mounted when fetch
+  // disappears throws against whichever test runs next.
+  cleanup();
   vi.unstubAllGlobals();
 });
 
