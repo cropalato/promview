@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadBootstrapSource(t *testing.T) {
 	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
@@ -66,5 +69,55 @@ func TestLoadRejectsLDAPMode(t *testing.T) {
 	t.Setenv("PROMVIEW_AUTH_MODE", "ldap")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() error = nil, want error")
+	}
+}
+
+func TestLoadAlertExpiryDefaults(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The default has to stay above Alertmanager's own 4h repeat_interval
+	// default, otherwise a live alert expires between repeat notifications and
+	// flaps back on the next one.
+	if cfg.AlertStaleAfter != 12*time.Hour {
+		t.Fatalf("stale after = %v, want 12h", cfg.AlertStaleAfter)
+	}
+	if cfg.AlertExpiryInterval != time.Minute {
+		t.Fatalf("expiry interval = %v, want 1m", cfg.AlertExpiryInterval)
+	}
+}
+
+func TestLoadAlertExpiryOverrides(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_ALERT_STALE_AFTER", "0")
+	t.Setenv("PROMVIEW_ALERT_EXPIRY_INTERVAL", "30s")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AlertStaleAfter != 0 {
+		t.Fatalf("stale after = %v, want 0 (expiry disabled)", cfg.AlertStaleAfter)
+	}
+	if cfg.AlertExpiryInterval != 30*time.Second {
+		t.Fatalf("expiry interval = %v, want 30s", cfg.AlertExpiryInterval)
+	}
+}
+
+func TestLoadRejectsInvalidAlertExpiry(t *testing.T) {
+	for _, test := range []struct{ key, value string }{
+		{key: "PROMVIEW_ALERT_STALE_AFTER", value: "-1h"},
+		{key: "PROMVIEW_ALERT_STALE_AFTER", value: "soon"},
+		{key: "PROMVIEW_ALERT_EXPIRY_INTERVAL", value: "0"},
+		{key: "PROMVIEW_ALERT_EXPIRY_INTERVAL", value: "-1m"},
+	} {
+		t.Run(test.key+"="+test.value, func(t *testing.T) {
+			t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+			t.Setenv(test.key, test.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() error = nil, want error for %s=%s", test.key, test.value)
+			}
+		})
 	}
 }

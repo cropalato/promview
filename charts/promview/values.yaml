@@ -59,6 +59,13 @@ roleBindings: []
 #   selectors:
 #     - team=platform
 
+# Alerts whose source stops reporting them without a resolved notification are
+# marked expired after this window. It must exceed the source Alertmanager's
+# repeat_interval; "0" disables expiry. Per-source overrides live in the database.
+alertExpiry:
+  staleAfter: 12h
+  interval: 1m
+
 migration:
   enabled: true
   backoffLimit: 3

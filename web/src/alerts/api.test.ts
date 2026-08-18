@@ -254,6 +254,11 @@ describe('parseAlertsResponse', () => {
     );
   });
 
+  it('maps the expired status, which the console concludes rather than the source reporting it', () => {
+    const parsed = parseAlertsResponse(apiResponse({ alerts: [apiAlert({ status: 'expired' })] }));
+    expect(parsed.alerts[0]?.state).toBe('expired');
+  });
+
   it('rejects malformed alert rows', () => {
     expect(() => parseAlertsResponse(apiResponse({ alerts: [null] }))).toThrowError(/malformed/i);
     expect(() => parseAlertsResponse(apiResponse({ alerts: [apiAlert({ id: 42 })] }))).toThrowError(

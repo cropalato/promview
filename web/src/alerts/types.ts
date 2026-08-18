@@ -6,7 +6,11 @@ import type { Severity } from './severity';
  * project plan, so fields the query API does not expose yet (assignee,
  * notes) stay optional and render as placeholders.
  */
-export type AlertState = 'firing' | 'resolved';
+/**
+ * `expired` is the console's own conclusion, not the source's: the source went
+ * quiet for longer than its window, which is a weaker claim than `resolved`.
+ */
+export type AlertState = 'firing' | 'resolved' | 'expired';
 
 export interface AlertSummary {
   id: string;

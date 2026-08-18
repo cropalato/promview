@@ -10,6 +10,15 @@ import (
 
 var ErrNotFound = errors.New("alert not found")
 
+// Source status values. Firing and resolved are reported by the source itself;
+// expired is the console's own conclusion after the source went quiet for longer
+// than its configured window, which is not the same claim as resolved.
+const (
+	StatusFiring   = "firing"
+	StatusResolved = "resolved"
+	StatusExpired  = "expired"
+)
+
 type Alert struct {
 	ID             int64
 	SourceSlug     string

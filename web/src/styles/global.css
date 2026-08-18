@@ -810,6 +810,13 @@ kbd {
   color: var(--text-faint);
 }
 
+/* Expired is quieter than firing but not as settled as resolved: the source went
+   quiet rather than reporting a resolution, so it reads as unresolved-unknown. */
+.state-expired {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
 .state-acknowledged {
   color: var(--ok);
   border-color: color-mix(in srgb, var(--ok) 45%, var(--border-strong));

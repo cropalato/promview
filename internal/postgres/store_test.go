@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -73,8 +74,15 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 8 {
-		t.Fatalf("migration count = %d, want 8", migrationCount)
+	// Counted from the directory rather than hardcoded: the ledger must record
+	// every migration exactly once, and that claim should not need editing each
+	// time one is added.
+	upMigrations, err := filepath.Glob("../../migrations/*.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrationCount != len(upMigrations) {
+		t.Fatalf("migration count = %d, want %d", migrationCount, len(upMigrations))
 	}
 	if _, err := pool.Exec(ctx, "TRUNCATE oidc_login_transactions, sessions, role_binding_matchers, role_bindings, auth_identity_groups, auth_identities, users, stream_events, alert_history, alerts RESTART IDENTITY"); err != nil {
 		t.Fatal(err)

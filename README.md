@@ -110,6 +110,32 @@ curl 'http://localhost:8080/api/v1/me'
 
 Open mode returns an anonymous global viewer and keeps ingestion authenticated. OIDC is the only interactive authentication mode; provider tokens remain on the server.
 
+## Alert Expiry
+
+Alertmanager suppresses resolved notifications for silenced alerts, so an alert that
+clears inside a maintenance window is never announced and would otherwise stay firing
+forever. A background sweep marks alerts whose source went quiet as `expired`, which is
+a weaker claim than `resolved`: the source stopped reporting, it never said the alert
+was over. History records `alert.expired`; the alert stream carries `alert.resolved`,
+since consumers only need to know it left the firing view.
+
+```sh
+export PROMVIEW_ALERT_STALE_AFTER=12h   # default; 0 disables expiry entirely
+export PROMVIEW_ALERT_EXPIRY_INTERVAL=1m
+```
+
+The window must exceed the source Alertmanager's `repeat_interval`, or a live alert
+expires between repeat notifications and flaps back on the next one. The default of 12h
+is three times Alertmanager's own 4h default. Sources with a different `repeat_interval`
+set their own window, which wins over the server default:
+
+```sh
+promview source set --slug primary --name Primary --token "$TOKEN" --stale-after 6h
+```
+
+An individual alert can shorten its own window with a numeric `timeout` label (in
+seconds) on the rule, matching how Alerta reads the same label.
+
 ## OIDC Authentication
 
 For an Okta-specific walkthrough, see [`docs/okta-oidc.md`](docs/okta-oidc.md).

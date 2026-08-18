@@ -440,8 +440,10 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 	}
 
 	status := values.Get("status")
-	if status != "" && status != "firing" && status != "resolved" {
-		return alerts.Query{}, errors.New("status must be firing or resolved")
+	switch status {
+	case "", alerts.StatusFiring, alerts.StatusResolved, alerts.StatusExpired:
+	default:
+		return alerts.Query{}, errors.New("status must be firing, resolved, or expired")
 	}
 
 	query := alerts.Query{

@@ -53,14 +53,15 @@ func (store *Store) SetSource(ctx context.Context, source sources.Source, rawTok
 		return err
 	}
 	_, err := store.pool.Exec(ctx, `
-		INSERT INTO alert_sources (slug, name, token_hash, enabled)
-		VALUES ($1, $2, $3, true)
+		INSERT INTO alert_sources (slug, name, token_hash, enabled, stale_after)
+		VALUES ($1, $2, $3, true, $4)
 		ON CONFLICT (slug) DO UPDATE SET
 			name = EXCLUDED.name,
 			token_hash = EXCLUDED.token_hash,
 			enabled = true,
+			stale_after = COALESCE(EXCLUDED.stale_after, alert_sources.stale_after),
 			updated_at = now()
-	`, source.Slug, source.Name, sources.HashToken(rawToken))
+	`, source.Slug, source.Name, sources.HashToken(rawToken), staleAfterInterval(source.StaleAfter))
 	if err != nil {
 		return fmt.Errorf("set alert source %s: %w", source.Slug, err)
 	}
