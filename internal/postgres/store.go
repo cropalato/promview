@@ -28,10 +28,16 @@ type alertSort struct {
 	cursorType string
 }
 
+// severityRank orders severities for sorting and for picking a group's worst
+// member. Anything outside the three known buckets ranks below info, matching
+// how the console renders unknown severities.
+const severityRank = "CASE COALESCE(alert.labels->>'severity', 'warning') " +
+	"WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 WHEN 'info' THEN 1 ELSE 0 END"
+
 var alertSorts = map[string]alertSort{
 	"lastSeen":  {expression: "alert.last_seen", cursorType: "timestamptz"},
 	"startsAt":  {expression: "alert.starts_at", cursorType: "timestamptz"},
-	"severity":  {expression: "CASE COALESCE(alert.labels->>'severity', 'warning') WHEN 'critical' THEN 3 WHEN 'warning' THEN 2 WHEN 'info' THEN 1 ELSE 0 END", cursorType: "integer"},
+	"severity":  {expression: severityRank, cursorType: "integer"},
 	"alertname": {expression: "COALESCE(alert.labels->>'alertname', '')", cursorType: "text"},
 	"summary":   {expression: "COALESCE(alert.annotations->>'summary', '')", cursorType: "text"},
 	"status":    {expression: "alert.source_status", cursorType: "text"},
@@ -582,42 +588,15 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 	if !ok || (query.Order != "asc" && query.Order != "desc") {
 		return alerts.ListResult{}, errors.New("invalid alert sort")
 	}
-	streamAccess, streamArgs := readAccessCondition(principal, "event.labels", nil)
-	previousAccess, streamArgs := readAccessCondition(principal, "event.previous_labels", streamArgs)
-	var streamCursor int64
-	if err := store.pool.QueryRow(ctx, `
-		SELECT COALESCE(max(event.id), 0)
-		FROM stream_events AS event
-		WHERE (`+streamAccess+") OR (event.previous_labels IS NOT NULL AND ("+previousAccess+"))", streamArgs...).Scan(&streamCursor); err != nil {
-		return alerts.ListResult{}, fmt.Errorf("read stream cursor: %w", err)
+	streamCursor, err := store.readStreamCursor(ctx, principal)
+	if err != nil {
+		return alerts.ListResult{}, err
 	}
 	where, args := alertFilters(principal, query, "alert")
-	countSQL := `
-		SELECT COALESCE(alert.labels->>'severity', 'warning'), count(*)
-		FROM alerts AS alert` + where + `
-		GROUP BY COALESCE(alert.labels->>'severity', 'warning')`
-
-	rows, err := store.pool.Query(ctx, countSQL, args...)
+	counts, total, err := store.readSeverityCounts(ctx, where, args)
 	if err != nil {
-		return alerts.ListResult{}, fmt.Errorf("count alerts: %w", err)
+		return alerts.ListResult{}, err
 	}
-	counts := make(map[string]int64)
-	var total int64
-	for rows.Next() {
-		var severity string
-		var count int64
-		if err := rows.Scan(&severity, &count); err != nil {
-			rows.Close()
-			return alerts.ListResult{}, fmt.Errorf("scan alert count: %w", err)
-		}
-		counts[severity] = count
-		total += count
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return alerts.ListResult{}, fmt.Errorf("iterate alert counts: %w", err)
-	}
-	rows.Close()
 
 	listWhere := where
 	listArgs := append([]any(nil), args...)
@@ -638,7 +617,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 		ORDER BY `+sort.expression+" "+strings.ToUpper(query.Order)+`, alert.id `+strings.ToUpper(query.Order)+`
 		LIMIT $%d`, len(listArgs))
 
-	rows, err = store.pool.Query(ctx, listSQL, listArgs...)
+	rows, err := store.pool.Query(ctx, listSQL, listArgs...)
 	if err != nil {
 		return alerts.ListResult{}, fmt.Errorf("list alerts: %w", err)
 	}

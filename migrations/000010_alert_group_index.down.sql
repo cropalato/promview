@@ -1,0 +1,1 @@
+DROP INDEX alerts_alertname_source_idx;
