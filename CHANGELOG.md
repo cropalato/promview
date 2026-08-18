@@ -6,6 +6,27 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.6] - 2026-08-18
+
+### Features
+
+- **alerts:** expire alerts whose source stops reporting them without a resolved notification, using a per-source window that must exceed that Alertmanager's repeat interval, with an optional per-alert `timeout` label. Expired is a state of its own: the source went quiet, which is a weaker claim than resolved.
+- **alerts:** summarise alerts into groups in the store, ordered by worst severity then recency, with counts computed under the caller's own read restrictions so a group never reports members the caller cannot open.
+- **api:** serve grouped alerts from `GET /api/v1/alerts` via `groupBy`; without it the response is unchanged. Expanding a group is the ordinary alerts query with a matcher, so cursors, sorting and access rules are identical inside a group.
+- **console:** collapse alert fan-out into expandable groups, so one rule firing once per offending series no longer buries the rest of the page. A group of one renders as a plain row.
+- **console:** store column, density and grouping preferences per user so a layout follows an operator between machines; deployments without a signed-in user keep them in the browser instead.
+- **console:** bind a table column to any alert label, which surfaces a dimension the built-in columns do not cover without overloading a label that already means something else.
+- **helm:** configure role bindings from chart values.
+
+### Fixed
+
+- **web:** unmount components before removing global test stubs, which was surfacing failures against unrelated tests.
+- **ci:** initialize the migration ledger after checks and finalize the migration checker state.
+
+### Build System
+
+- **database:** add migrations for alert expiry, alert grouping lookups, and user preferences.
+
 ## [0.1.0-alpha.5] - 2026-08-17
 
 ### Features
