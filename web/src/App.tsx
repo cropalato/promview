@@ -14,6 +14,8 @@ import { OIDC_LOGIN_URL } from './auth/session';
 import type { NavigateTo } from './auth/session';
 import { AlertDetailDrawer } from './components/AlertDetailDrawer';
 import { AlertTable } from './components/AlertTable';
+import { AlertGroupTable } from './components/AlertGroupTable';
+import { ViewMenu } from './components/ViewMenu';
 import { resolveColumns } from './alerts/columns';
 import { FilterBar } from './components/FilterBar';
 import { SeverityStrip } from './components/SeverityStrip';
@@ -26,6 +28,8 @@ import { useAlertNotifications } from './hooks/useAlertNotifications';
 import { useAlertRoute } from './hooks/useAlertRoute';
 import { useAlerts } from './hooks/useAlerts';
 import { usePreferences } from './hooks/usePreferences';
+import { useAlertGroups } from './hooks/useAlertGroups';
+import { useGroupChildren } from './hooks/useGroupChildren';
 import { useAlertStream } from './hooks/useAlertStream';
 import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import { useSession } from './hooks/useSession';
@@ -139,8 +143,32 @@ export default function App({ navigate }: AppProps = {}) {
 
   // Layout preferences follow the operator; they are only fetched once the
   // console is unlocked, since an unauthenticated request would just 401.
-  const { preferences } = usePreferences(consoleUnlocked, authMode === 'oidc');
+  const { preferences, update: updatePreferences } = usePreferences(
+    consoleUnlocked,
+    authMode === 'oidc',
+  );
   const columns = resolveColumns(preferences.columns.map((column) => column.id));
+  const grouped = preferences.grouping.enabled;
+
+  // The grouped and flat views are the same query in two shapes; only one is
+  // enabled at a time so the console never pays for both.
+  const groupsQuery = useMemo(
+    () => ({ ...alertsQuery, groupBy: preferences.grouping.keys }),
+    [alertsQuery, preferences.grouping.keys],
+  );
+  const {
+    state: groupsState,
+    loadMore: loadMoreGroups,
+    refresh: refreshGroups,
+  } = useAlertGroups(consoleUnlocked && grouped, groupsQuery, { onUnauthorized: expireSession });
+  const {
+    children: groupChildren,
+    expand: expandGroup,
+    collapse: collapseGroup,
+    loadMore: loadMoreChildren,
+    reset: resetGroupChildren,
+  } = useGroupChildren(alertsQuery, { onUnauthorized: expireSession });
+
   const { selectedAlertId, openAlert, closeAlert } = useAlertRoute();
   const effectiveSelectedAlertId = consoleUnlocked ? selectedAlertId : null;
   const {
@@ -163,10 +191,24 @@ export default function App({ navigate }: AppProps = {}) {
   const handleAlertEvent = useCallback(
     (event: AlertStreamEvent) => {
       scheduleLiveRefresh();
+      if (grouped) {
+        // Group counts are computed server-side, so a change inside a group is
+        // invisible until the groups are re-read; expanded members are dropped
+        // rather than left showing a stale snapshot of the group.
+        refreshGroups();
+        resetGroupChildren();
+      }
       refreshDetailIfSelected(event.alertId);
       handleNotificationEvent(event);
     },
-    [scheduleLiveRefresh, refreshDetailIfSelected, handleNotificationEvent],
+    [
+      scheduleLiveRefresh,
+      grouped,
+      refreshGroups,
+      resetGroupChildren,
+      refreshDetailIfSelected,
+      handleNotificationEvent,
+    ],
   );
   const streamStatus = useAlertStream({
     cursor:
@@ -175,6 +217,17 @@ export default function App({ navigate }: AppProps = {}) {
   });
 
   const loadedAlerts = alertsState.status === 'ready' ? alertsState.data.alerts : NO_ALERTS;
+  // Label keys seen in the loaded alerts, offered when adding a label column so
+  // an operator does not have to remember exact spellings.
+  const labelSuggestions = useMemo(() => {
+    const names = new Set<string>();
+    for (const alert of loadedAlerts) {
+      for (const name of Object.keys(alert.labels)) {
+        names.add(name);
+      }
+    }
+    return [...names].sort();
+  }, [loadedAlerts]);
 
   const config = configState.status === 'ready' ? configState.config : undefined;
   const filterActive = appliedMatchers.length > 0;
@@ -316,37 +369,70 @@ export default function App({ navigate }: AppProps = {}) {
               </section>
             ) : (
               <>
-                <FilterBar
-                  value={filterDraft}
-                  shown={loadedAlerts.length}
-                  total={alertsState.data.total}
-                  error={filterError}
-                  onChange={changeFilter}
-                  onApply={applyFilter}
-                />
+                <div className="console-controls">
+                  <FilterBar
+                    value={filterDraft}
+                    shown={loadedAlerts.length}
+                    total={alertsState.data.total}
+                    error={filterError}
+                    onChange={changeFilter}
+                    onApply={applyFilter}
+                  />
+                  <ViewMenu
+                    preferences={preferences}
+                    onChange={updatePreferences}
+                    labelSuggestions={labelSuggestions}
+                  />
+                </div>
                 <SeverityStrip
                   counts={alertsState.data.severityCounts}
                   total={alertsState.data.total}
                 />
-                <AlertTable
-                  alerts={loadedAlerts}
-                  columns={columns}
-                  filterActive={filterActive}
-                  filterQuery={appliedFilterText}
-                  selectedId={effectiveSelectedAlertId}
-                  onSelect={(alert) => openAlert(alert.id)}
-                  onClearFilter={clearFilter}
-                  sort={sort}
-                  onSortChange={setSort}
-                  pagination={{
-                    loaded: alertsState.data.alerts.length,
-                    total: alertsState.data.total,
-                    hasMore: alertsState.data.nextCursor !== '',
-                    loadingMore: alertsState.loadingMore,
-                    error: alertsState.moreError,
-                    onLoadMore: loadMore,
-                  }}
-                />
+                {grouped && groupsState.status === 'ready' ? (
+                  <AlertGroupTable
+                    groups={groupsState.data.groups}
+                    children={groupChildren}
+                    columns={columns}
+                    filterActive={filterActive}
+                    filterQuery={appliedFilterText}
+                    selectedId={effectiveSelectedAlertId}
+                    onClearFilter={clearFilter}
+                    onExpand={expandGroup}
+                    onCollapse={collapseGroup}
+                    onLoadMoreChildren={loadMoreChildren}
+                    onSelect={(alert) => openAlert(alert.id)}
+                    pagination={{
+                      loaded: groupsState.data.groups.length,
+                      total: groupsState.data.totalGroups,
+                      hasMore: groupsState.data.nextCursor !== '',
+                      loadingMore: groupsState.loadingMore,
+                      error: groupsState.moreError,
+                      onLoadMore: loadMoreGroups,
+                    }}
+                  />
+                ) : grouped ? (
+                  <p className="alerts-panel-copy">Loading groups…</p>
+                ) : (
+                  <AlertTable
+                    alerts={loadedAlerts}
+                    columns={columns}
+                    filterActive={filterActive}
+                    filterQuery={appliedFilterText}
+                    selectedId={effectiveSelectedAlertId}
+                    onSelect={(alert) => openAlert(alert.id)}
+                    onClearFilter={clearFilter}
+                    sort={sort}
+                    onSortChange={setSort}
+                    pagination={{
+                      loaded: alertsState.data.alerts.length,
+                      total: alertsState.data.total,
+                      hasMore: alertsState.data.nextCursor !== '',
+                      loadingMore: alertsState.loadingMore,
+                      error: alertsState.moreError,
+                      onLoadMore: loadMore,
+                    }}
+                  />
+                )}
               </>
             )}
           </>
