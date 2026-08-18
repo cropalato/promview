@@ -742,11 +742,14 @@ describe('App', () => {
   });
 
   it('shows a loading state inside the configured shell', async () => {
-    let resolveAlerts: (response: Response) => void = () => {};
+    // Collect every pending alerts request rather than keeping only the last
+    // resolver: the console can ask for more than one shape of the endpoint,
+    // and stranding the one it is actually waiting on leaves it loading.
+    const pendingAlerts: Array<(response: Response) => void> = [];
     fetchMock().mockImplementation((url: string) => {
       if (String(url).startsWith('/api/v1/alerts')) {
         return new Promise<Response>((resolve) => {
-          resolveAlerts = resolve;
+          pendingAlerts.push(resolve);
         });
       }
       return Promise.resolve(jsonResponse(OPEN_CONFIG));
@@ -758,7 +761,14 @@ describe('App', () => {
     expect(screen.getByText('Syncing')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Alerts' })).toBeInTheDocument();
 
-    resolveAlerts(jsonResponse(alertsPage()));
+    // The loading panel also shows while the config request is in flight, so
+    // reaching it does not prove an alerts request exists yet. Waiting for the
+    // request is what makes resolving it deterministic; without this the
+    // resolve can land before the request and the console loads forever.
+    await waitFor(() => expect(alertCalls()).not.toHaveLength(0));
+    for (const resolve of pendingAlerts) {
+      resolve(jsonResponse(alertsPage()));
+    }
     expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
     // The stream opens against the snapshot cursor and the bar goes live.
     expect(await screen.findByText('Connected')).toBeInTheDocument();
