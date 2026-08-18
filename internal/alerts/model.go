@@ -65,6 +65,46 @@ type Query struct {
 	Matches  []LabelMatcher
 	Sort     string
 	Order    string
+	// GroupBy collapses the result into one row per distinct combination of
+	// these label keys. Empty lists alerts individually.
+	GroupBy     []string
+	GroupCursor *GroupCursor
+}
+
+// Group is one collapsed row: every alert sharing the same values for the
+// grouping keys, summarised. Counts are computed under the same filters and
+// read restrictions as the alerts themselves, so a group never reports members
+// the reader cannot open.
+type Group struct {
+	Key              map[string]string
+	Total            int64
+	Acknowledged     int64
+	SeverityCounts   map[string]int64
+	WorstSeverity    string
+	LatestLastSeen   time.Time
+	EarliestStartsAt time.Time
+	// SampleAlertID is the most recently seen member. A group of one is
+	// rendered as a plain row, and this is the alert it opens.
+	SampleAlertID int64
+}
+
+// GroupCursor pages through groups. Groups are ordered by worst severity then
+// recency, both descending, so the cursor carries those two values plus the key
+// itself to break ties.
+type GroupCursor struct {
+	SeverityRank   int       `json:"severityRank"`
+	LatestLastSeen time.Time `json:"latestLastSeen"`
+	Key            []string  `json:"key"`
+	Query          string    `json:"query"`
+}
+
+type GroupResult struct {
+	Groups         []Group
+	NextCursor     *GroupCursor
+	TotalGroups    int64
+	TotalAlerts    int64
+	SeverityCounts map[string]int64
+	StreamCursor   int64
 }
 
 const (
@@ -80,7 +120,8 @@ func (query Query) CursorIdentity() string {
 		Severity string         `json:"severity"`
 		Team     string         `json:"team"`
 		Matches  []LabelMatcher `json:"matches"`
-	}{query.Source, query.Status, query.Severity, query.Team, query.Matches})
+		GroupBy  []string       `json:"groupBy"`
+	}{query.Source, query.Status, query.Severity, query.Team, query.Matches, query.GroupBy})
 	if err != nil {
 		panic(fmt.Sprintf("marshal cursor identity: %v", err))
 	}
