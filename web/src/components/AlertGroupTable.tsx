@@ -16,14 +16,13 @@ import type { AlertPagination } from './AlertTable';
  * The grouped view of the alert table.
  *
  * A group row summarises every alert sharing a key combination; expanding it
- * loads the members and renders them with the operator's own columns. Two
- * group-only leading columns keep the control and aggregate summary separate
- * from those columns, so a group key remains under the same heading in every
- * saved layout. A group of one has nothing to collapse into, so it renders
- * with no chevron and its activation opens the single member's detail directly
- * — and since its aggregates are just that member's own values, the row shows
- * those values in the operator's columns whenever the member is already
- * loaded.
+ * loads the members and renders them with the operator's own columns. One
+ * fixed group-control column holds the tree affordance and aggregates; every
+ * selected operator column follows it in its saved order. A group of one has
+ * nothing to collapse into, so it renders with no chevron and its activation
+ * opens the single member's detail directly — and since its aggregates are
+ * just that member's own values, the row shows those values in the operator's
+ * columns whenever the member is already loaded.
  *
  * Marked up as a treegrid rather than a plain table: the hierarchy is the
  * point, and without aria-expanded and aria-level a screen reader hears a flat
@@ -55,7 +54,7 @@ export interface AlertGroupTableProps {
   /**
    * Resolves an alert id to its already-loaded row. A one-member group uses
    * it to fill its columns from the member itself; when the member is not
-   * loaded (or no resolver is given) the row keeps the aggregate summary.
+   * loaded (or no resolver is given) the control cell keeps group aggregates.
    */
   memberFor?: (alertId: string) => AlertSummary | undefined;
   onExpand: (key: Record<string, string>) => void;
@@ -66,7 +65,7 @@ export interface AlertGroupTableProps {
   onOpenAlert?: (alertId: string) => void;
 }
 
-const GROUP_METADATA_COLUMNS = 2;
+const GROUP_CONTROL_COLUMNS = 1;
 
 /** The normal alert column that displays each built-in grouping key. */
 const GROUP_KEY_COLUMNS: Readonly<Record<string, string>> = {
@@ -98,9 +97,9 @@ export function AlertGroupTable({
   onSelect,
   onOpenAlert,
 }: AlertGroupTableProps) {
-  // Group metadata has its own two cells, so every operator column keeps the
-  // same table position in a grouped or flat view, including custom orders.
-  const gridWidth = columns.length + GROUP_METADATA_COLUMNS;
+  // The group-control cell precedes every operator column, preserving their
+  // saved order and their one-to-one position across every grouped row type.
+  const gridWidth = columns.length + GROUP_CONTROL_COLUMNS;
   const resizable = onColumnResize !== undefined && onColumnResizeReset !== undefined;
 
   return (
@@ -110,7 +109,6 @@ export function AlertGroupTable({
           <caption>Alert groups ({groups.length})</caption>
           <colgroup>
             <col className="group-control-column" />
-            <col className="group-summary-column" />
             {columns.map((column) => {
               const width = columnWidth(column, columnWidths[column.id]);
               return (
@@ -125,7 +123,6 @@ export function AlertGroupTable({
           <thead>
             <tr>
               <th scope="col">Alert group</th>
-              <th scope="col">Group summary</th>
               {columns.map((column) => (
                 <ColumnHeader
                   key={column.id}
@@ -251,10 +248,8 @@ function GroupRows({
             </span>
             {expandable ? <span className="group-count">{group.total}</span> : null}
           </span>
-        </th>
-        {member === undefined ? (
-          <td className="cell-mono group-summary">
-            <span className="group-summary-values">
+          {member === undefined ? (
+            <span className="group-aggregate-values cell-mono">
               <GroupSeverityMix counts={group.severityCounts} />
               <span>{formatAge(group.earliestStartsAt)}</span>
               <span
@@ -268,10 +263,8 @@ function GroupRows({
                 {group.acknowledged > 0 ? `${group.acknowledged}/${group.total}` : '—'}
               </span>
             </span>
-          </td>
-        ) : (
-          <td className="group-summary-spacer" />
-        )}
+          ) : null}
+        </th>
         {member !== undefined ? (
           // One member: the row is that alert, so it renders exactly like a
           // child row and lines up with the columns one for one.
@@ -328,20 +321,19 @@ function ChildRows({
           }}
         >
           <td className="child-group-cell" />
-          <td className="child-summary-spacer" />
           <AlertCells alert={alert} columns={columns} />
         </tr>
       ))}
       {loaded.loading ? (
         <tr className="child-row child-status" aria-level={2}>
-          <td colSpan={columns.length + GROUP_METADATA_COLUMNS} className="child-indent">
+          <td colSpan={columns.length + GROUP_CONTROL_COLUMNS} className="child-indent">
             Loading members…
           </td>
         </tr>
       ) : null}
       {loaded.error !== null ? (
         <tr className="child-row child-status" aria-level={2}>
-          <td colSpan={columns.length + GROUP_METADATA_COLUMNS} className="child-indent">
+          <td colSpan={columns.length + GROUP_CONTROL_COLUMNS} className="child-indent">
             <span role="alert">Could not load members: {loaded.error.message}</span>
             <button type="button" className="button" onClick={() => onLoadMoreChildren(group.key)}>
               Retry
@@ -351,7 +343,7 @@ function ChildRows({
       ) : null}
       {!loaded.loading && loaded.nextCursor !== '' ? (
         <tr className="child-row child-status" aria-level={2}>
-          <td colSpan={columns.length + GROUP_METADATA_COLUMNS} className="child-indent">
+          <td colSpan={columns.length + GROUP_CONTROL_COLUMNS} className="child-indent">
             <button type="button" className="button" onClick={() => onLoadMoreChildren(group.key)}>
               Load {remaining > 0 ? `${remaining} more` : 'more'}
             </button>
