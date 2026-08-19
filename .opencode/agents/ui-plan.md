@@ -1,7 +1,7 @@
 ---
 description: Plans UI/frontend work — component structure, state, styling approach — without editing files.
 mode: all
-model: moonshotai/kimi-k3
+model: openai/gpt-5.6-terra
 variant: max
 permission:
   edit: deny
