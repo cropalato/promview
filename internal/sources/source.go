@@ -30,6 +30,47 @@ type Source struct {
 	AlertmanagerURL *string
 }
 
+// Patch carries the settings that can change after a source exists. Nil fields
+// are left alone, and an empty value clears the setting. The token is
+// deliberately absent: rotating a source's credentials is a different and far
+// riskier operation than adjusting how it is read, and requiring one to do the
+// other means an operator must handle a live secret to change a URL.
+type Patch struct {
+	Name            *string
+	StaleAfter      *time.Duration
+	AlertmanagerURL *string
+}
+
+// ValidatePatch rejects a change that would leave a source unusable.
+func ValidatePatch(patch Patch) error {
+	if patch.Name == nil && patch.StaleAfter == nil && patch.AlertmanagerURL == nil {
+		return errors.New("nothing to update")
+	}
+	if patch.Name != nil && *patch.Name == "" {
+		return errors.New("source name is required")
+	}
+	if patch.StaleAfter != nil && *patch.StaleAfter < 0 {
+		return errors.New("source stale-after must not be negative")
+	}
+	if patch.AlertmanagerURL != nil {
+		return validateAlertmanagerURL(*patch.AlertmanagerURL)
+	}
+	return nil
+}
+
+// validateAlertmanagerURL accepts an empty value, which clears the setting and
+// leaves the source to expiry alone.
+func validateAlertmanagerURL(value string) error {
+	if value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return errors.New("source alertmanager URL must be an absolute http or https URL")
+	}
+	return nil
+}
+
 func Validate(source Source, rawToken string) error {
 	if !slugPattern.MatchString(source.Slug) {
 		return errors.New("source slug must contain only lowercase letters, digits, underscores, or hyphens")
@@ -43,10 +84,9 @@ func Validate(source Source, rawToken string) error {
 	if source.StaleAfter != nil && *source.StaleAfter < 0 {
 		return errors.New("source stale-after must not be negative")
 	}
-	if source.AlertmanagerURL != nil && *source.AlertmanagerURL != "" {
-		parsed, err := url.Parse(*source.AlertmanagerURL)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return errors.New("source alertmanager URL must be an absolute http or https URL")
+	if source.AlertmanagerURL != nil {
+		if err := validateAlertmanagerURL(*source.AlertmanagerURL); err != nil {
+			return err
 		}
 	}
 	return nil
