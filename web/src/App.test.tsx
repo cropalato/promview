@@ -656,6 +656,38 @@ describe('App', () => {
     expect(screen.getByText('yul')).toBeInTheDocument();
   });
 
+  it('picks a row density from the viewport when the operator has not chosen one', async () => {
+    // Auto is the default; a short viewport should tighten the rows without the
+    // operator configuring anything.
+    window.localStorage.clear();
+    Object.defineProperty(window, 'innerHeight', {
+      value: 600,
+      configurable: true,
+      writable: true,
+    });
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('groupBy=')) {
+        return Promise.resolve(jsonResponse(groupsPage()));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    render(<App />);
+
+    await screen.findByRole('treegrid');
+    expect(document.querySelector('[data-density="compact"]')).not.toBeNull();
+
+    // A stored choice wins over the measurement.
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    fireEvent.click(screen.getByRole('radio', { name: /comfortable/i }));
+    expect(document.querySelector('[data-density="comfortable"]')).not.toBeNull();
+    const stored = JSON.parse(window.localStorage.getItem('promview.preferences') ?? '{}');
+    expect(stored.density).toBe('comfortable');
+  });
+
   it('switches the empty state when a filter is applied and cleared', async () => {
     mockApi();
     render(<App />);

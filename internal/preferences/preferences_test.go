@@ -11,6 +11,21 @@ func TestDefaultIsValid(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsEveryDensityIncludingAuto(t *testing.T) {
+	for _, density := range Densities {
+		value := Default()
+		value.Density = density
+		if err := Validate(value); err != nil {
+			t.Errorf("Validate() with density %q error = %v", density, err)
+		}
+	}
+	// Auto is the default because the right row height depends on the screen in
+	// front of the operator, not on the operator.
+	if Default().Density != "auto" {
+		t.Errorf("default density = %q, want auto", Default().Density)
+	}
+}
+
 func TestValidateAcceptsLabelColumns(t *testing.T) {
 	// A label column is the whole point of the registry: surface a dimension
 	// the built-in columns do not cover without giving the label console-wide

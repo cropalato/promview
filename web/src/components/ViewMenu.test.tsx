@@ -16,6 +16,17 @@ describe('ViewMenu', () => {
     );
   });
 
+  it('shows what auto density currently resolves to', () => {
+    // Choosing auto should not leave the operator guessing which row height
+    // they are about to get.
+    render(
+      <ViewMenu preferences={defaultPreferences()} onChange={vi.fn()} resolvedDensity="compact" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    expect(screen.getByRole('radio', { name: /auto/i })).toBeChecked();
+    expect(screen.getByText(/now compact/i)).toBeInTheDocument();
+  });
+
   it('adds a label column', () => {
     const onChange = vi.fn();
     render(<ViewMenu preferences={defaultPreferences()} onChange={onChange} />);

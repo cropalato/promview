@@ -18,9 +18,19 @@ export interface ViewMenuProps {
   onChange: (next: Preferences) => void;
   /** Label keys seen in the loaded alerts, offered as column suggestions. */
   labelSuggestions?: readonly string[];
+  /**
+   * What `auto` density currently resolves to, so choosing it does not leave
+   * the operator guessing which row height they are about to get.
+   */
+  resolvedDensity?: string;
 }
 
-export function ViewMenu({ preferences, onChange, labelSuggestions = [] }: ViewMenuProps) {
+export function ViewMenu({
+  preferences,
+  onChange,
+  labelSuggestions = [],
+  resolvedDensity,
+}: ViewMenuProps) {
   const [open, setOpen] = useState(false);
   const [labelDraft, setLabelDraft] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -122,7 +132,12 @@ export function ViewMenu({ preferences, onChange, labelSuggestions = [] }: ViewM
                   checked={preferences.density === density}
                   onChange={() => onChange({ ...preferences, density })}
                 />
-                <span>{density}</span>
+                <span>
+                  {density}
+                  {density === 'auto' && resolvedDensity !== undefined ? (
+                    <span className="view-menu-note"> · now {resolvedDensity}</span>
+                  ) : null}
+                </span>
               </label>
             ))}
           </fieldset>

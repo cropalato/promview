@@ -14,9 +14,13 @@ import { DEFAULT_COLUMN_IDS } from '../alerts/columns';
 export const PREFERENCES_URL = '/api/v1/preferences';
 export const PREFERENCES_KEY = 'promview.preferences';
 
-export type Density = 'compact' | 'normal' | 'comfortable';
+/**
+ * `auto` defers the row height to the console, which resolves it from the area
+ * the table has; see preferences/density.ts.
+ */
+export type Density = 'auto' | 'compact' | 'normal' | 'comfortable';
 
-export const DENSITIES: readonly Density[] = ['compact', 'normal', 'comfortable'];
+export const DENSITIES: readonly Density[] = ['auto', 'compact', 'normal', 'comfortable'];
 
 export interface ColumnPreference {
   id: string;
@@ -37,7 +41,7 @@ export interface Preferences {
 export function defaultPreferences(): Preferences {
   return {
     columns: DEFAULT_COLUMN_IDS.map((id) => ({ id })),
-    density: 'normal',
+    density: 'auto',
     grouping: { enabled: true, keys: ['alertname', 'source'] },
   };
 }
