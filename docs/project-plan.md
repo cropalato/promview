@@ -47,6 +47,11 @@ The current implementation provides:
 - opt-in browser notifications for newly created critical alerts while the console is open
 - a Helm chart with serialized pre-install and pre-upgrade migrations for external PostgreSQL
 - migration, persistence, API, frontend, image, Compose, and Helm verification in GitHub Actions
+- expiry for alerts whose source stops reporting them, with a per-source window and a per-alert `timeout` label
+- reconciliation against each source's Alertmanager, confirming what is still firing and flagging what is silenced
+- server-side alert grouping with expandable members, counts computed under the caller's own read scope
+- per-user column, density, and grouping preferences, with a browser fallback where there is no user
+- table columns bound to arbitrary alert labels, and density resolved from the area the console has
 
 Assignment, local close, notes, bulk actions, authorization administration APIs, and stream retention remain planned work.
 
@@ -144,6 +149,7 @@ Initial tables:
 - `role_bindings`
 - `audit_events`
 - `stream_events`
+- `user_preferences`
 
 Important indexes:
 
@@ -152,6 +158,61 @@ Important indexes:
 - state, severity, `last_seen`, assignee, source, and team indexes
 - monotonic cursor index for stream events
 - time indexes for retention jobs
+- an `(labels->>'alertname', source_slug)` index, which serves expanding a group rather than the grouped aggregate itself: the aggregate touches most rows and correctly stays a hash aggregate
+
+## Alert Staleness
+
+Alertmanager does not always say when an alert ends. It suppresses resolved
+notifications for silenced alerts, so an alert that clears inside a maintenance
+window is never announced, and a delivery outage is indistinguishable from
+silence. Nothing in the webhook path moves those alerts out of `firing`. On one
+production console 42 of 50 firing criticals no longer existed in Alertmanager
+at all, which makes every count on the page fiction.
+
+Two mechanisms address this, and they make different claims:
+
+- **Expiry** is promview's own inference. An alert unreported for longer than its
+  window becomes `expired` - a weaker statement than `resolved`, because nobody
+  said it ended. The window is per source and must exceed that Alertmanager's
+  `repeat_interval`, or a live alert expires between repeat notifications and the
+  next one resurrects it. The default is 12h, three times Alertmanager's own 4h
+  default. A numeric `timeout` label on the rule shortens it for one alert.
+- **Reconciliation** reads the source Alertmanager directly. An alert it no
+  longer holds becomes `resolved`, since the source is authoritative there, and
+  one it reports as `suppressed` is flagged silenced while remaining `firing`.
+  Suppression is a flag rather than a status because such an alert is still
+  firing.
+
+Reconciliation is the precise half and expiry is the backstop: a source with no
+Alertmanager URL, or one that cannot be reached, still gets expiry.
+
+Two rules keep a healthy Alertmanager from emptying the console. An alert must be
+absent from consecutive readings before it is resolved, so a dropped request
+changes nothing. And an Alertmanager reporting no alerts at all while promview
+holds firing ones is not believed: a restarting Alertmanager looks exactly like a
+fleet going quiet, and a restart easily outlasts the consecutive-readings rule.
+Such a reading syncs suppression only.
+
+### Known gap: expired alerts are not revived
+
+Reconciliation only examines alerts stored as `firing`. An alert that expiry
+retired while the Alertmanager still holds it is therefore never brought back,
+and stays hidden from the console while genuinely firing.
+
+This is not hypothetical. Measured against production on 2026-08-19, with
+reconciliation enabled: 87 firing alerts all present in the Alertmanager and none
+suppressed, and 30 `expired` alerts all still live in the Alertmanager and all
+suppressed. They are silenced maintenance-window hosts - silenced, so no
+notifications arrive, so expiry retires them after 12h, and nothing revives them.
+
+The fix is for reconciliation to return an `expired` alert to `firing` when the
+Alertmanager still holds it. Expiry is a guess, and the source contradicting it
+is decisive. A `resolved` alert is deliberately left alone, because that status
+came from the source rather than from inference.
+
+Until then, a deployment with frequent silences should either enable
+reconciliation on every source or lengthen the expiry window, since expiry will
+keep retiring live alerts that reconciliation cannot recover.
 
 ## Authentication
 
@@ -248,6 +309,8 @@ The primary experience is one dense operational console, not a card dashboard:
 - server-side positive and negative label filters, with detail-driven label actions
 - compact severity and lifecycle summary strip
 - server-filtered alert table with sortable severity, state, alert, summary, team, instance, source, and age columns
+- alerts collapsed into expandable groups by alert name and source, so one rule firing per offending series does not bury the page; a group of one renders as a plain row
+- a view menu for grouping, density, and which columns are shown, including columns bound to arbitrary alert labels
 - keyboard navigation and multi-selection
 - resizable detail drawer on desktop
 - full-screen detail view on mobile
@@ -255,7 +318,11 @@ The primary experience is one dense operational console, not a card dashboard:
 - acknowledgement actions; other single and bulk operator actions remain planned
 - visible stale/reconnecting state
 
-Default columns are severity, lifecycle state, alert name, summary, team, instance, source, age, assignee, and note count.
+Default columns are severity, lifecycle state, alert name, summary, team, instance, last seen, source, age, assignee, and note count. Column choice, order, and density are stored per user so a layout follows an operator between machines; deployments without a signed-in user keep them in the browser.
+
+Density defaults to `auto`, resolved from the height the console has rather than a stored row height, because the same operator reads it on a laptop and on a wall display. Which optional columns survive is decided by a container query against the table panel's own width, not the window's, so the console behaves the same in a split view or dashboard tile.
+
+The lifecycle state a row shows distinguishes `firing`, `resolved`, and `expired`, and a silenced alert carries a `silenced` chip alongside `firing` rather than instead of it.
 
 Use color, shape, icon, and text together for severity. Target WCAG 2.2 AA, keyboard-only operation, reduced motion, and touch targets appropriate for mobile triage.
 
