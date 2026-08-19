@@ -6,6 +6,12 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.11] - 2026-08-19
+
+### Changed
+
+- **console:** render shared grouping values in their corresponding table columns and keep the group control focused on severity and member count.
+
 ## [0.1.0-alpha.10] - 2026-08-19
 
 ### Features

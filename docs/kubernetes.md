@@ -37,7 +37,7 @@ kubectl --namespace promview create secret generic promview-database \
 
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.10
+  --version 0.1.0-alpha.11
 ```
 
 Alert staleness is configured through chart values, which render into the application

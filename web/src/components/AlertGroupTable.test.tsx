@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AlertGroupSummary } from '../alerts/api';
+import { resolveColumns } from '../alerts/columns';
 import type { AlertSummary } from '../alerts/types';
 import type { GroupChildren } from '../hooks/useGroupChildren';
 import { AlertGroupTable } from './AlertGroupTable';
@@ -52,6 +53,31 @@ function children(overrides: Partial<GroupChildren> = {}): Record<string, GroupC
 
 const noop = () => {};
 
+function getGroupRow(key: Record<string, string> = { alertname: 'Cardinality', source: 'yul' }) {
+  const encodedKey = JSON.stringify(key);
+  const row = screen
+    .getAllByRole('row')
+    .find((candidate) => candidate.getAttribute('data-group') === encodedKey);
+  if (row === undefined) {
+    throw new Error(`Could not find group row for ${encodedKey}`);
+  }
+  return row;
+}
+
+function cellForColumn(row: HTMLElement, label: string): HTMLElement {
+  const index = screen
+    .getAllByRole('columnheader')
+    .findIndex((header) => header.textContent?.trim() === label);
+  if (index === -1) {
+    throw new Error(`Could not find ${label} column`);
+  }
+  const cell = row.children.item(index);
+  if (cell === null) {
+    throw new Error(`Could not find ${label} cell`);
+  }
+  return cell as HTMLElement;
+}
+
 describe('AlertGroupTable', () => {
   it('summarises a group without loading its members', () => {
     render(
@@ -70,6 +96,78 @@ describe('AlertGroupTable', () => {
     expect(within(row).getByText('51 warning')).toBeInTheDocument();
     // Acknowledgement coverage is what an operator scans a collapsed row for.
     expect(within(row).getByText('3/52')).toBeInTheDocument();
+  });
+
+  it('keeps controls and aggregate summary separate from the keyed columns', () => {
+    render(
+      <AlertGroupTable
+        groups={[group()]}
+        children={{}}
+        onExpand={noop}
+        onCollapse={noop}
+        onLoadMoreChildren={noop}
+      />,
+    );
+
+    const row = getGroupRow();
+    const control = row.children.item(0) as HTMLElement;
+    // The row header is just the tree control: no concatenated key label.
+    expect(control).toHaveTextContent('Critical');
+    expect(control).toHaveTextContent('52');
+    expect(control).not.toHaveTextContent('Cardinality');
+    expect(control).not.toHaveTextContent('yul');
+
+    // Group-level aggregates have their own cell rather than borrowing an
+    // operator column; each group key is underneath its own normal heading.
+    expect(cellForColumn(row, 'Group summary')).toHaveTextContent('51 warning');
+    expect(cellForColumn(row, 'Group summary')).toHaveTextContent('3/52');
+    expect(cellForColumn(row, 'Alert')).toHaveTextContent('Cardinality');
+    expect(cellForColumn(row, 'Source')).toHaveTextContent('yul');
+    expect(cellForColumn(row, 'Severity')).toBeEmptyDOMElement();
+  });
+
+  it('aligns all common group keys, including matching label columns', () => {
+    const key = {
+      alertname: 'Cardinality',
+      source: 'yul',
+      team: 'platform',
+      instance: 'db-1',
+      severity: 'warning',
+    };
+    render(
+      <AlertGroupTable
+        groups={[
+          group({
+            key,
+            severityCounts: { warning: 52 },
+            worstSeverity: 'warning',
+          }),
+        ]}
+        children={{}}
+        columns={resolveColumns([
+          'label:alertname',
+          'source',
+          'instance',
+          'severity',
+          'team',
+          'alert',
+          'label:source',
+        ])}
+        onExpand={noop}
+        onCollapse={noop}
+        onLoadMoreChildren={noop}
+      />,
+    );
+
+    const row = getGroupRow(key);
+    expect(row.children).toHaveLength(9);
+    expect(cellForColumn(row, 'Alert')).toHaveTextContent('Cardinality');
+    expect(cellForColumn(row, 'Source')).toHaveTextContent('yul');
+    expect(cellForColumn(row, 'Team')).toHaveTextContent('platform');
+    expect(cellForColumn(row, 'Instance')).toHaveTextContent('db-1');
+    expect(cellForColumn(row, 'Severity')).toHaveTextContent('warning');
+    expect(cellForColumn(row, 'alertname')).toHaveTextContent('Cardinality');
+    expect(cellForColumn(row, 'source')).toHaveTextContent('yul');
   });
 
   it('expands and collapses on activation', () => {
@@ -97,9 +195,7 @@ describe('AlertGroupTable', () => {
         onLoadMoreChildren={noop}
       />,
     );
-    // Member rows also mention the alert name; the group row is the one that
-    // carries the whole key.
-    const row = screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ });
+    const row = getGroupRow();
     expect(row).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(row);
     expect(onCollapse).toHaveBeenCalledWith({ alertname: 'Cardinality', source: 'yul' });
@@ -231,7 +327,7 @@ describe('AlertGroupTable', () => {
       />,
     );
 
-    const row = screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ });
+    const row = getGroupRow();
     // Summary, instance and team come from the member, not from an aggregate.
     expect(within(row).getByText('too many series')).toBeInTheDocument();
     expect(within(row).getByText('db-1')).toBeInTheDocument();
@@ -252,7 +348,7 @@ describe('AlertGroupTable', () => {
       />,
     );
 
-    const row = screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ });
+    const row = getGroupRow();
     expect(within(row).getByText('1 warning')).toBeInTheDocument();
   });
 
@@ -268,7 +364,7 @@ describe('AlertGroupTable', () => {
       />,
     );
 
-    const row = screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ });
+    const row = getGroupRow();
     expect(within(row).getByText('51 warning')).toBeInTheDocument();
     expect(within(row).queryByText('too many series')).not.toBeInTheDocument();
   });
@@ -315,10 +411,7 @@ describe('AlertGroupTable', () => {
       />,
     );
     expect(screen.getByRole('treegrid')).toBeInTheDocument();
-    expect(screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ })).toHaveAttribute(
-      'aria-level',
-      '1',
-    );
+    expect(getGroupRow()).toHaveAttribute('aria-level', '1');
     expect(screen.getAllByRole('row', { name: /firing/ })[0]).toHaveAttribute('aria-level', '2');
   });
 
@@ -337,18 +430,19 @@ describe('AlertGroupTable', () => {
       />,
     );
 
-    // Every header carries a handle, the heading column included.
+    // Every operator column carries a handle; group metadata stays fixed.
     expect(screen.getAllByRole('separator')).toHaveLength(11);
+    expect(screen.getByRole('separator', { name: 'Resize Severity column' })).toBeInTheDocument();
     expect(
-      screen.getByRole('separator', { name: 'Resize Alert group column' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('separator', { name: 'Resize Alert group column' }),
+    ).not.toBeInTheDocument();
 
-    // The heading column stands in for the first child column (severity), so
-    // the width for state lands on the second col, as in the flat table.
+    // The two group-only columns precede the operator columns, which retain
+    // their own width and order in a grouped view.
     const cols = container.querySelectorAll('colgroup col');
-    expect(cols).toHaveLength(11);
-    expect(cols[1]).toHaveStyle({ width: '96px' });
-    expect(cols[3]).toHaveStyle({ width: '300px' });
+    expect(cols).toHaveLength(13);
+    expect(cols[3]).toHaveStyle({ width: '96px' });
+    expect(cols[5]).toHaveStyle({ width: '300px' });
 
     fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize Summary column' }), {
       key: 'ArrowRight',
@@ -356,7 +450,7 @@ describe('AlertGroupTable', () => {
     expect(onColumnResize).toHaveBeenCalledWith('summary', 316);
   });
 
-  it('lets the heading column flex by default but honors a stored first-column width', () => {
+  it('keeps group metadata independent from the normal column widths', () => {
     const { container, rerender } = render(
       <AlertGroupTable
         groups={[group()]}
@@ -369,15 +463,14 @@ describe('AlertGroupTable', () => {
       />,
     );
 
-    // The heading renders far more than the severity tag the first column's
-    // basis is sized for, so by default it carries no width and shares the
-    // leftover with the long-text columns. The other based columns keep
-    // their registry defaults.
+    // Group metadata owns the first two columns. The normal Severity column
+    // still starts from its registry basis, while Alert remains flexible.
     let cols = container.querySelectorAll('colgroup col');
-    expect(cols[0]).not.toHaveAttribute('style');
-    expect(cols[1]).toHaveStyle({ width: '116px' });
+    expect(cols).toHaveLength(13);
+    expect(cols[2]).toHaveStyle({ width: '116px' });
+    expect(cols[4]).not.toHaveAttribute('style');
 
-    // A stored width for the first column (severity) still applies here.
+    // A stored normal-column width still applies without changing metadata.
     rerender(
       <AlertGroupTable
         groups={[group()]}
@@ -391,7 +484,7 @@ describe('AlertGroupTable', () => {
       />,
     );
     cols = container.querySelectorAll('colgroup col');
-    expect(cols[0]).toHaveStyle({ width: '260px' });
+    expect(cols[2]).toHaveStyle({ width: '260px' });
   });
 });
 
@@ -413,7 +506,7 @@ describe('AlertGroupTable sortable headers', () => {
     }
   });
 
-  it('renders sort buttons on the sortable columns, but never on the group heading', () => {
+  it('renders sort buttons on the normal sortable columns, but never on group metadata', () => {
     render(
       <AlertGroupTable
         groups={[group()]}
@@ -426,19 +519,20 @@ describe('AlertGroupTable sortable headers', () => {
       />,
     );
 
-    // The heading replaces the severity column, so the sortable set is the
-    // flat table's minus severity.
-    const sortable = ['State', 'Alert', 'Summary', 'Team', 'Instance', 'Source', 'Age'];
+    const sortable = ['Severity', 'State', 'Alert', 'Summary', 'Team', 'Instance', 'Source', 'Age'];
     for (const label of sortable) {
       expect(screen.getByRole('button', { name: `Sort by ${label}` })).toBeInTheDocument();
     }
-    // The heading renders the group key, not an alert field, so it gets no
-    // control; nor do the unsortable columns.
+    // Group metadata is not an alert field, so it gets no control; nor do the
+    // unsortable normal columns.
     expect(screen.queryByRole('button', { name: /alert group/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /severity/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /group summary/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /last seen/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /assignee/i })).not.toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /alert group/i })).not.toHaveAttribute(
+      'aria-sort',
+    );
+    expect(screen.getByRole('columnheader', { name: /group summary/i })).not.toHaveAttribute(
       'aria-sort',
     );
     // No column is sorted yet.
@@ -505,7 +599,7 @@ describe('AlertGroupTable sortable headers', () => {
     expect(headerOf('Team')).toHaveAttribute('aria-sort', 'descending');
   });
 
-  it('keeps the resize handle on every header alongside the sort controls', () => {
+  it('keeps the resize handle on every normal header alongside the sort controls', () => {
     render(
       <AlertGroupTable
         groups={[group()]}
@@ -520,7 +614,7 @@ describe('AlertGroupTable sortable headers', () => {
       />,
     );
 
-    // Eleven columns, eleven handles — the sort button did not displace them.
+    // Eleven normal columns, eleven handles — the sort button did not displace them.
     expect(screen.getAllByRole('separator')).toHaveLength(11);
     const summaryHeader = screen.getByRole('button', { name: 'Sort by Summary' }).closest('th');
     expect(
@@ -528,9 +622,7 @@ describe('AlertGroupTable sortable headers', () => {
         name: 'Resize Summary column',
       }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('separator', { name: 'Resize Alert group column' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Resize Severity column' })).toBeInTheDocument();
   });
 
   it('still opens a single-member group’s alert directly when sorting is wired', () => {

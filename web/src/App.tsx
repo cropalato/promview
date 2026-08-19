@@ -416,7 +416,6 @@ export default function App({ navigate }: AppProps = {}) {
                   <AlertGroupTable
                     groups={groupsState.data.groups}
                     children={groupChildren}
-                    groupKeys={preferences.grouping.keys}
                     columns={columns}
                     columnWidths={columnWidths}
                     onColumnResize={setColumnWidth}
