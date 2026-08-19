@@ -852,6 +852,11 @@ kbd {
   cursor: pointer;
 }
 
+.view-menu-note {
+  color: var(--text-faint);
+  text-transform: none;
+}
+
 .view-menu-add {
   display: flex;
   gap: 6px;
@@ -945,6 +950,32 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .group-chevron {
     transition: none;
+  }
+}
+
+/* The table panel is a container, so the columns that survive are decided by the
+   width the table actually has rather than the window's. A console in a split
+   view, a dashboard tile or a narrow window then behaves identically - the
+   viewport was only ever a proxy for the panel. */
+.table-panel {
+  container-type: inline-size;
+  container-name: alert-panel;
+}
+
+@container alert-panel (max-width: 760px) {
+  .col-optional {
+    display: none;
+  }
+
+  .alert-table {
+    min-width: 0;
+  }
+}
+
+@container alert-panel (max-width: 460px) {
+  .group-count,
+  .group-mix {
+    display: none;
   }
 }
 
@@ -1672,13 +1703,8 @@ kbd {
     padding: 12px 10px 22px;
   }
 
-  .col-optional {
-    display: none;
-  }
-
-  .alert-table {
-    min-width: 0;
-  }
+  /* Column collapsing moved to a container query on the table panel, which
+     measures the width the table has rather than the window's. */
 
   .filter-hint {
     display: none;

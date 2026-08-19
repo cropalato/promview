@@ -106,7 +106,9 @@ describe('preferences store', () => {
     });
 
     expect(parsed.columns).toEqual([{ id: 'severity' }]);
-    expect(parsed.density).toBe('normal');
+    // An unusable density falls back to the default, which now defers the
+    // choice to the console rather than fixing a row height.
+    expect(parsed.density).toBe('auto');
     expect(parsed.grouping.enabled).toBe(true);
     expect(parsed.grouping.keys).toEqual(['alertname', 'source']);
   });

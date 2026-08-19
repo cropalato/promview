@@ -28,6 +28,7 @@ import { useAlertNotifications } from './hooks/useAlertNotifications';
 import { useAlertRoute } from './hooks/useAlertRoute';
 import { useAlerts } from './hooks/useAlerts';
 import { usePreferences } from './hooks/usePreferences';
+import { useResolvedDensity } from './hooks/useResolvedDensity';
 import { useAlertGroups } from './hooks/useAlertGroups';
 import { useGroupChildren } from './hooks/useGroupChildren';
 import { useAlertStream } from './hooks/useAlertStream';
@@ -148,6 +149,9 @@ export default function App({ navigate }: AppProps = {}) {
     authMode === 'oidc',
   );
   const columns = resolveColumns(preferences.columns.map((column) => column.id));
+  // `auto` resolves against the area the console has, so the same stored
+  // preference lands differently on a laptop and a wall display.
+  const density = useResolvedDensity(preferences.density);
   const grouped = preferences.grouping.enabled;
 
   // The grouped and flat views are the same query in two shapes; only one is
@@ -257,7 +261,7 @@ export default function App({ navigate }: AppProps = {}) {
   }
 
   return (
-    <div className="app-shell" data-density={preferences.density}>
+    <div className="app-shell" data-density={density}>
       <a className="skip-link" href="#main">
         Skip to alerts
       </a>
@@ -382,6 +386,7 @@ export default function App({ navigate }: AppProps = {}) {
                     preferences={preferences}
                     onChange={updatePreferences}
                     labelSuggestions={labelSuggestions}
+                    resolvedDensity={density}
                   />
                 </div>
                 <SeverityStrip

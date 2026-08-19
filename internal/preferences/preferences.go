@@ -30,8 +30,11 @@ var FixedColumns = []string{
 const LabelColumnPrefix = "label:"
 
 // Densities are the row-height choices. A NOC wall display wants larger type; a
-// laptop wants more rows on screen.
-var Densities = []string{"compact", "normal", "comfortable"}
+// laptop wants more rows on screen. "auto" defers the choice to the console,
+// which resolves it from the area the table actually has - the same operator
+// moves between a laptop and a wall display, and the right answer differs per
+// screen rather than per person.
+var Densities = []string{"auto", "compact", "normal", "comfortable"}
 
 const (
 	maxColumns     = 24
@@ -72,7 +75,10 @@ func Default() Preferences {
 	}
 	return Preferences{
 		Columns: columns,
-		Density: "normal",
+		// Auto by default: a fixed density is right for one screen size and
+		// wrong for the next, and an operator should not have to set it per
+		// machine when the layout otherwise follows them.
+		Density: "auto",
 		// Grouping is on by default: the fan-out it collapses is what makes a
 		// busy console unreadable, and a single-member group renders as an
 		// ordinary row, so grouping costs nothing when there is nothing to
