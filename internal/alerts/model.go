@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -69,22 +70,19 @@ type Query struct {
 	Sort     string
 	Order    string
 	// GroupBy collapses the result into one row per distinct combination of
-	// these label keys. Empty lists alerts individually.
+	// these label keys, plus the special source key. Empty lists alerts individually.
 	GroupBy     []string
 	GroupCursor *GroupCursor
 }
 
-// GroupKeys is the vocabulary a caller may group by, shared by the HTTP layer
-// and the store so a request is rejected before it reaches SQL. It is closed
-// rather than any label because each key becomes a GROUP BY expression, and an
-// unbounded-cardinality label produces one group per alert.
-var GroupKeys = []string{"alertname", "source", "team", "severity", "instance"}
+var groupLabelNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // MaxGroupKeys bounds how finely a caller can slice the result; past a few keys
 // grouping stops collapsing anything and only costs an aggregation.
 const MaxGroupKeys = 3
 
-// ValidateGroupBy reports whether these keys can be grouped on.
+// ValidateGroupBy reports whether these keys can be grouped on. Source is a
+// special stored field; every other key is a canonical alert label name.
 func ValidateGroupBy(groupBy []string) error {
 	if len(groupBy) == 0 {
 		return errors.New("group by requires at least one key")
@@ -106,12 +104,7 @@ func ValidateGroupBy(groupBy []string) error {
 }
 
 func IsGroupKey(name string) bool {
-	for _, key := range GroupKeys {
-		if key == name {
-			return true
-		}
-	}
-	return false
+	return name == "source" || groupLabelNamePattern.MatchString(name)
 }
 
 // Group is one collapsed row: every alert sharing the same values for the

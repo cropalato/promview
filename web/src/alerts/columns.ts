@@ -24,6 +24,14 @@ export interface ColumnDefinition {
   label: string;
   /** Optional columns collapse first on narrow viewports. */
   optional: boolean;
+  /**
+   * Desktop starting width in px, before any manual resize. Unset means the
+   * column is flexible: the flexible columns divide the width the based ones
+   * leave behind, so spare width lands where the long text is instead of
+   * padding the short columns. A width the operator stored always wins over
+   * the basis, and narrow panels ignore both (they size to content).
+   */
+  basis?: number;
   /** Set when the alerts endpoint can sort by this column. */
   sortField?: AlertSortField;
   cell: (alert: AlertSummary) => ColumnCell;
@@ -44,6 +52,9 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
     id: 'severity',
     label: 'Severity',
     optional: false,
+    // Worst content is the "Critical" tag; the header plus its sort icon is
+    // the wider of the two.
+    basis: 116,
     sortField: 'severity',
     cell: (alert) => ({ text: alert.severityLabel ?? SEVERITY_LABELS[alert.severity] }),
   },
@@ -51,6 +62,9 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
     id: 'state',
     label: 'State',
     optional: false,
+    // The "suppressed" chip is the widest single chip; a silenced alert adds
+    // a second one, which the operator can widen the column for.
+    basis: 116,
     sortField: 'state',
     cell: (alert) => ({ text: alert.state }),
   },
@@ -72,6 +86,7 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
     id: 'team',
     label: 'Team',
     optional: true,
+    basis: 88,
     sortField: 'team',
     cell: (alert) => ({ text: present(alert.team), className: 'cell-mono' }),
   },
@@ -88,6 +103,7 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
     optional: true,
     // How long the source has been quiet is what expiry acts on, so an operator
     // questioning an expired alert can see the evidence rather than infer it.
+    basis: 108,
     cell: (alert) => ({
       text: alert.lastSeen === '' ? EMPTY : formatAge(alert.lastSeen),
       className: 'cell-mono',
@@ -97,6 +113,7 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
     id: 'source',
     label: 'Source',
     optional: false,
+    basis: 100,
     sortField: 'source',
     cell: (alert) => ({ text: alert.source, className: 'cell-mono' }),
   },
@@ -104,6 +121,7 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
     id: 'age',
     label: 'Age',
     optional: false,
+    basis: 76,
     sortField: 'age',
     cell: (alert) => ({ text: formatAge(alert.startsAt), className: 'cell-mono' }),
   },
@@ -111,12 +129,14 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
     id: 'assignee',
     label: 'Assignee',
     optional: true,
+    basis: 100,
     cell: (alert) => ({ text: present(alert.assignee), className: 'cell-mono' }),
   },
   {
     id: 'notes',
     label: 'Notes',
     optional: true,
+    basis: 76,
     cell: (alert) => ({
       text: alert.notes > 0 ? String(alert.notes) : EMPTY,
       className: 'cell-mono',
@@ -171,6 +191,19 @@ export function resolveColumns(ids: readonly string[]): ColumnDefinition[] {
     }
   }
   return resolved.length > 0 ? resolved : [...FIXED_COLUMNS];
+}
+
+/**
+ * The width a column starts at on a wide panel: the operator's stored width
+ * when one exists, else the registry basis. Flexible columns (no basis, no
+ * stored width) return undefined and divide the width the sized columns
+ * leave behind. Narrow panels ignore all of this and size to content.
+ */
+export function columnWidth(
+  column: ColumnDefinition,
+  stored: number | undefined,
+): number | undefined {
+  return stored ?? column.basis;
 }
 
 /** Next sort when a header is activated: inactive starts ascending, active toggles. */

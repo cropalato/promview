@@ -6,6 +6,18 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.10] - 2026-08-19
+
+### Features
+
+- **console:** allow users to customize alert grouping keys while preserving the default `alertname,source` grouping, and persist grouping and column-width preferences locally.
+- **console:** add accessible resizable table columns, including keyboard resizing and reset, and use available desktop space for long alert fields.
+
+### Fixed
+
+- **console:** open details directly from single-alert groups, preserve expanded groups during live refreshes, and show single-member group columns from the underlying alert.
+- **console:** restrict grouped summaries and expanded children to firing alerts so grouped counts match the severity strip and flat alert view.
+
 ## [0.1.0-alpha.9] - 2026-08-19
 
 ### Features

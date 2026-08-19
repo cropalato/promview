@@ -113,6 +113,29 @@ describe('preferences store', () => {
     expect(parsed.grouping.keys).toEqual(['alertname', 'source']);
   });
 
+  it('keeps only the grouping keys the API can group by', () => {
+    // A layout written by another version, or edited by hand, must not turn
+    // every grouped request into a 400; the usable keys survive instead.
+    const parsed = parsePreferences({
+      grouping: { enabled: true, keys: ['team', 'prometheus_cluster', 'team'] },
+    });
+    expect(parsed.grouping.keys).toEqual(['team']);
+  });
+
+  it('falls back to the default grouping when a stored list has nothing usable', () => {
+    const parsed = parsePreferences({
+      grouping: { enabled: true, keys: ['nonsense'] },
+    });
+    expect(parsed.grouping.keys).toEqual(['alertname', 'source']);
+  });
+
+  it('caps stored grouping keys at the API limit', () => {
+    const parsed = parsePreferences({
+      grouping: { enabled: true, keys: ['alertname', 'source', 'team', 'severity'] },
+    });
+    expect(parsed.grouping.keys).toEqual(['alertname', 'source', 'team']);
+  });
+
   it('survives unreadable storage', () => {
     const throwing = {
       getItem() {

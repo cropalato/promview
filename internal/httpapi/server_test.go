@@ -607,11 +607,27 @@ func TestListAlertGroups(t *testing.T) {
 	}
 }
 
+func TestListAlertGroupsAcceptsCustomLabel(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=prometheus_cluster,source&status=firing", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if got := store.query.GroupBy; len(got) != 2 || got[0] != "prometheus_cluster" || got[1] != "source" {
+		t.Fatalf("parsed groupBy = %v, want [prometheus_cluster source]", got)
+	}
+	if store.query.Status != alerts.StatusFiring {
+		t.Errorf("status = %q, want firing", store.query.Status)
+	}
+}
+
 func TestListAlertGroupsRejectsUnusableRequests(t *testing.T) {
 	store := &fakeStore{}
 	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
 	for _, test := range []struct{ name, target string }{
-		{name: "unknown key", target: "/api/v1/alerts?groupBy=nonsense"},
+		{name: "malformed label", target: "/api/v1/alerts?groupBy=not-a-label"},
 		{name: "injection attempt", target: "/api/v1/alerts?groupBy=alertname%3B+DROP+TABLE+alerts"},
 		{name: "duplicate key", target: "/api/v1/alerts?groupBy=alertname,alertname"},
 		{name: "too many keys", target: "/api/v1/alerts?groupBy=alertname,source,team,severity"},
@@ -779,7 +795,7 @@ func TestPutPreferencesRejectsUnusableLayouts(t *testing.T) {
 		{name: "unknown field", payload: `{"columns":[{"id":"severity"}],"density":"normal","surprise":true}`},
 		{name: "unknown column", payload: `{"columns":[{"id":"nonsense"}],"density":"normal"}`},
 		{name: "unknown density", payload: `{"columns":[{"id":"severity"}],"density":"tiny"}`},
-		{name: "grouping by an unknown key", payload: `{"columns":[{"id":"severity"}],"density":"normal","grouping":{"enabled":true,"keys":["nonsense"]}}`},
+		{name: "grouping by a malformed label", payload: `{"columns":[{"id":"severity"}],"density":"normal","grouping":{"enabled":true,"keys":["not-a-label"]}}`},
 		{name: "empty layout", payload: `{"columns":[],"density":"normal"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
