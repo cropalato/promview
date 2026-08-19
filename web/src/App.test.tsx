@@ -577,9 +577,7 @@ describe('App', () => {
     });
     render(<App />);
 
-    const groupRow = await screen.findByRole('row', {
-      name: /alertname=Cardinality · source=yul/,
-    });
+    const groupRow = await screen.findByRole('row', { name: /Cardinality/ });
     expect(within(groupRow).getByText('52')).toBeInTheDocument();
     expect(screen.queryByRole('row', { name: /firing/ })).not.toBeInTheDocument();
 
@@ -592,7 +590,7 @@ describe('App', () => {
     expect(memberRequests.some((url) => url.includes('source=yul'))).toBe(true);
 
     // Collapsing puts the console back to one row.
-    fireEvent.click(screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ }));
+    fireEvent.click(groupRow);
     expect(screen.queryByText('a')).not.toBeInTheDocument();
   });
 
@@ -627,9 +625,7 @@ describe('App', () => {
     });
     render(<App />);
 
-    const groupRow = await screen.findByRole('row', {
-      name: /alertname=Cardinality · source=yul/,
-    });
+    const groupRow = await screen.findByRole('row', { name: /Cardinality/ });
     fireEvent.click(groupRow);
     expect(await screen.findByText('a')).toBeInTheDocument();
     expect(await screen.findByText('Connected')).toBeInTheDocument();
@@ -646,10 +642,7 @@ describe('App', () => {
       ).toBeGreaterThan(1),
     );
     expect(screen.queryByText(/loading groups/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    );
+    expect(groupRow).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('a')).toBeInTheDocument();
     expect(screen.getByText('b')).toBeInTheDocument();
   });

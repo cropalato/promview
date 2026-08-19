@@ -993,9 +993,9 @@ kbd {
   line-height: 1.4;
 }
 
-/* Grouped view. The group row is the scannable line: severity, name, member
-   count. Children are indented one step and rendered in the operator's own
-   columns, so expanding changes depth rather than vocabulary. */
+/* Grouped view. The group control stays compact (severity plus member count),
+   while group keys remain in the matching operator columns. Children reserve
+   the two group-only cells, so their alert values share those same columns. */
 .group-row {
   cursor: pointer;
 }
@@ -1009,6 +1009,14 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.alert-group-table .group-control-column {
+  width: 176px;
+}
+
+.alert-group-table .group-summary-column {
+  width: 244px;
 }
 
 .group-chevron,
@@ -1025,17 +1033,6 @@ kbd {
 
 .group-chevron.is-open {
   transform: rotate(90deg);
-}
-
-.group-name {
-  font-family: var(--font-mono);
-  /* The heading cell clips when the column runs out of width; the name is
-   * the part that gives way, with an ellipsis, so the tag and the count stay
-   * visible. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
 }
 
 .group-heading .sev-tag,
@@ -1056,6 +1053,13 @@ kbd {
   display: inline-flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.group-summary-values {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .group-mix-part {
