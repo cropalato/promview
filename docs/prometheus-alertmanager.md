@@ -40,6 +40,19 @@ docker compose run --rm app source set \
 
 Running the command again with the same slug rotates the source token. Promview stores only the SHA-256 token hash.
 
+To change a source's settings later without touching its token, use `source update`:
+
+```sh
+docker compose run --rm app source update \
+  --slug production \
+  --alertmanager-url http://alertmanager:9093
+```
+
+The URL lets Promview read this Alertmanager's `/api/v2/alerts` and confirm what is
+still firing, which is the only way it learns that a silenced alert ended: Alertmanager
+sends no resolved notification for an alert that clears inside a silence. The API is
+used read-only and unauthenticated. Without a URL, the source relies on expiry alone.
+
 Store the original token in the secret manager used by Alertmanager. Do not commit it to either repository or place it directly in `alertmanager.yml`.
 
 ## Configure Prometheus

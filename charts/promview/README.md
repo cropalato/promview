@@ -27,7 +27,7 @@ Install from the OCI registry after a release is published:
 ```sh
 helm install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.5
+  --version 0.1.0-alpha.9
 ```
 
 Install a local checkout:
@@ -89,7 +89,7 @@ Apply it with:
 ```sh
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.5 \
+  --version 0.1.0-alpha.9 \
   --values oidc-values.yaml
 ```
 
@@ -180,11 +180,28 @@ make verify-helm
 | `oidc.existingSecret` | empty | Secret containing the OIDC client secret |
 | `bootstrapSource.enabled` | `false` | Initialize one Alertmanager source |
 | `roleBindings` | `[]` | OIDC group role bindings applied after install and upgrade |
+| `alertExpiry.staleAfter` | `12h` | How long an alert may go unreported before it expires; `0` disables expiry |
+| `alertExpiry.interval` | `1m` | How often the expiry sweep runs |
+| `reconcile.interval` | `1m` | How often each source's Alertmanager is read; `0` disables reconciliation |
+| `reconcile.timeout` | `10s` | Timeout for one Alertmanager request |
 | `migration.enabled` | `true` | Run migrations before install and upgrade |
 | `ingress.enabled` | `false` | Create an Ingress |
 | `podDisruptionBudget.enabled` | `false` | Create a PodDisruptionBudget |
 | `helmTest.enabled` | `true` | Create the Helm health test pod |
 
 See `values.yaml` for scheduling, probes, security contexts, resources, extra environment variables, and volume extension points.
+
+`alertExpiry.staleAfter` must exceed the source Alertmanager's `repeat_interval`, or a
+live alert expires between repeat notifications and the next one resurrects it. It is a
+server-wide default; a source with a different `repeat_interval` sets its own window with
+`promview source update --slug <slug> --stale-after <duration>`.
+
+Reconciliation does nothing until a source carries an Alertmanager URL, which is not a
+chart value:
+
+```sh
+kubectl --namespace promview exec deploy/promview -- \
+  promview source update --slug <slug> --alertmanager-url http://alertmanager:9093
+```
 
 `extraVolumes` and `extraVolumeMounts` apply to both the Deployment and migration Job. Use them to mount a private PostgreSQL CA certificate, then reference that path from the connection URL stored in the database Secret.
