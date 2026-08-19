@@ -253,8 +253,43 @@ func runAccessCommand(ctx context.Context, store accessStore, args []string) err
 	}
 }
 
+// runSourceUpdate changes an existing source's settings without its token.
+// Requiring credentials to adjust something like an Alertmanager URL would mean
+// handling a live secret to make an unrelated change, and rewriting the token
+// by accident breaks the source's deliveries.
+func runSourceUpdate(ctx context.Context, store sourceSetter, args []string) error {
+	flags := flag.NewFlagSet("promview source update", flag.ContinueOnError)
+	slug := flags.String("slug", "", "slug of the source to update")
+	name := flags.String("name", "", "source display name")
+	staleAfter := flags.String("stale-after", "", "how long an alert may go unreported before it expires; must exceed this source's repeat_interval (0 disables expiry)")
+	alertmanagerURL := flags.String("alertmanager-url", "", "base URL of this source's Alertmanager, read to confirm what is still firing (empty clears it)")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *slug == "" {
+		return errors.New("usage: promview source update --slug <slug> [--name <name>] [--stale-after <duration>] [--alertmanager-url <url>]")
+	}
+
+	var patch sources.Patch
+	if isFlagSet(flags, "name") {
+		patch.Name = name
+	}
+	if isFlagSet(flags, "alertmanager-url") {
+		patch.AlertmanagerURL = alertmanagerURL
+	}
+	if isFlagSet(flags, "stale-after") {
+		window, err := time.ParseDuration(*staleAfter)
+		if err != nil {
+			return fmt.Errorf("parse --stale-after: %w", err)
+		}
+		patch.StaleAfter = &window
+	}
+	return store.UpdateSource(ctx, *slug, patch)
+}
+
 type sourceSetter interface {
 	SetSource(context.Context, sources.Source, string) error
+	UpdateSource(context.Context, string, sources.Patch) error
 }
 
 // isFlagSet reports whether a flag was given on the command line, which is what
@@ -270,7 +305,13 @@ func isFlagSet(flags *flag.FlagSet, name string) bool {
 }
 
 func runSourceCommand(ctx context.Context, store sourceSetter, args []string) error {
-	if len(args) == 0 || args[0] != "set" {
+	if len(args) == 0 {
+		return errors.New("usage: promview source [set|update]")
+	}
+	if args[0] == "update" {
+		return runSourceUpdate(ctx, store, args)
+	}
+	if args[0] != "set" {
 		return errors.New("usage: promview source set --slug <slug> --name <name> --token <token> [--stale-after <duration>] [--alertmanager-url <url>]")
 	}
 	flags := flag.NewFlagSet("promview source set", flag.ContinueOnError)

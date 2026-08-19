@@ -75,6 +75,30 @@ func (store *Store) SetSource(ctx context.Context, source sources.Source, rawTok
 	return nil
 }
 
+// UpdateSource changes how an existing source is read without touching its
+// credentials, so adding an Alertmanager URL never risks the token the source
+// authenticates its deliveries with.
+func (store *Store) UpdateSource(ctx context.Context, slug string, patch sources.Patch) error {
+	if err := sources.ValidatePatch(patch); err != nil {
+		return err
+	}
+	tag, err := store.pool.Exec(ctx, `
+		UPDATE alert_sources SET
+			name = COALESCE($2, name),
+			stale_after = COALESCE($3, stale_after),
+			alertmanager_url = COALESCE($4, alertmanager_url),
+			updated_at = now()
+		WHERE slug = $1
+	`, slug, patch.Name, staleAfterInterval(patch.StaleAfter), patch.AlertmanagerURL)
+	if err != nil {
+		return fmt.Errorf("update alert source %s: %w", slug, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("alert source %s does not exist", slug)
+	}
+	return nil
+}
+
 func (store *Store) BootstrapSource(ctx context.Context, source sources.Source, rawToken string) error {
 	if err := sources.Validate(source, rawToken); err != nil {
 		return err

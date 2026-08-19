@@ -158,6 +158,10 @@ holds with what still exists: an alert the Alertmanager no longer lists is resol
 and one it reports as `suppressed` is flagged silenced while remaining firing.
 
 ```sh
+# On an existing source, without handling its token:
+promview source update --slug primary --alertmanager-url http://alertmanager.monitoring:9093
+
+# Or when first creating the source:
 promview source set --slug primary --name Primary --token "$TOKEN" \
   --alertmanager-url http://alertmanager.monitoring:9093
 
