@@ -179,6 +179,20 @@
           "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$"
         }
       }
+    },
+    "reconcile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interval": {
+          "type": "string",
+          "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$|^0$"
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$"
+        }
+      }
     }
   }
 }

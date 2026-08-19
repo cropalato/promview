@@ -1020,6 +1020,14 @@ kbd {
   color: var(--text-faint);
 }
 
+/* Silenced is not a lifecycle state: it accompanies one, so it reads as an
+   annotation on the row rather than a replacement for its status. */
+.state-suppressed {
+  margin-left: 6px;
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border-strong));
+}
+
 /* Expired is quieter than firing but not as settled as resolved: the source went
    quiet rather than reporting a resolution, so it reads as unresolved-unknown. */
 .state-expired {

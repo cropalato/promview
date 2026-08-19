@@ -20,21 +20,24 @@ const (
 )
 
 type Alert struct {
-	ID             int64
-	SourceSlug     string
-	Fingerprint    string
-	SourceStatus   string
-	Labels         map[string]string
-	Annotations    map[string]string
-	StartsAt       time.Time
-	EndsAt         *time.Time
-	GeneratorURL   string
-	ExternalURL    string
-	FirstSeen      time.Time
-	LastSeen       time.Time
-	RepeatCount    int64
-	Occurrence     int
-	Acknowledged   bool
+	ID           int64
+	SourceSlug   string
+	Fingerprint  string
+	SourceStatus string
+	Labels       map[string]string
+	Annotations  map[string]string
+	StartsAt     time.Time
+	EndsAt       *time.Time
+	GeneratorURL string
+	ExternalURL  string
+	FirstSeen    time.Time
+	LastSeen     time.Time
+	RepeatCount  int64
+	Occurrence   int
+	Acknowledged bool
+	// Suppressed means a silence or inhibition is holding the alert back at the
+	// source. It is separate from status because such an alert is still firing.
+	Suppressed     bool
 	AcknowledgedAt *time.Time
 	AcknowledgedBy string
 	RawData        json.RawMessage

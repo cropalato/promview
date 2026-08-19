@@ -66,6 +66,13 @@ alertExpiry:
   staleAfter: 12h
   interval: 1m
 
+# Reading each source's Alertmanager confirms what is still firing, which is the
+# only way to learn that a silenced alert ended. Sources carry their own URL in
+# the database; "0" disables the loop entirely.
+reconcile:
+  interval: 1m
+  timeout: 10s
+
 migration:
   enabled: true
   backoffLimit: 3

@@ -13,7 +13,7 @@ test:
 	go test ./cmd/... ./internal/...
 
 test-postgres:
-	go test ./internal/postgres -run 'TestStoreIngestAndList|TestStoreExpireStaleAlerts|TestStoreGroupAlerts'
+	go test ./internal/postgres -run 'TestStoreIngestAndList|TestStoreExpireStaleAlerts|TestStoreGroupAlerts|TestStorePreferences|TestStoreReconcileSource'
 
 build:
 	mkdir -p build

@@ -478,6 +478,10 @@ type alertResponse struct {
 	FirstSeen    time.Time         `json:"firstSeen"`
 	LastSeen     time.Time         `json:"lastSeen"`
 	RepeatCount  int64             `json:"repeatCount"`
+	// Suppressed is on the summary rather than only the detail: an operator
+	// scanning the list needs to see that an alert is inside a maintenance
+	// window without opening it.
+	Suppressed bool `json:"suppressed"`
 }
 
 type alertDetailResponse struct {
@@ -528,6 +532,7 @@ func newAlertResponse(alert alerts.Alert) alertResponse {
 		FirstSeen:    alert.FirstSeen,
 		LastSeen:     alert.LastSeen,
 		RepeatCount:  alert.RepeatCount,
+		Suppressed:   alert.Suppressed,
 	}
 }
 

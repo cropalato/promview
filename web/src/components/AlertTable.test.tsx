@@ -16,6 +16,8 @@ const firingAlert: AlertSummary = {
   startsAt: new Date(Date.now() - 5 * 60_000).toISOString(),
   notes: 2,
   labels: { alertname: 'HighErrorRate', team: 'core', prometheus_cluster: 'yul' },
+  suppressed: false,
+  lastSeen: new Date().toISOString(),
 };
 
 function pagination(overrides: Partial<AlertPagination> = {}): AlertPagination {
@@ -30,6 +32,21 @@ function pagination(overrides: Partial<AlertPagination> = {}): AlertPagination {
   };
 }
 
+describe('lifecycle chips', () => {
+  it('marks a silenced alert without hiding that it is still firing', () => {
+    render(<AlertTable alerts={[{ ...firingAlert, suppressed: true }]} />);
+    // Both chips: the alert is firing AND held back at the source.
+    expect(screen.getByText('firing')).toBeInTheDocument();
+    expect(screen.getByText('silenced')).toBeInTheDocument();
+  });
+
+  it('renders the expired state, which the console concluded itself', () => {
+    render(<AlertTable alerts={[{ ...firingAlert, state: 'expired' }]} />);
+    expect(screen.getByText('expired')).toBeInTheDocument();
+    expect(screen.queryByText('silenced')).not.toBeInTheDocument();
+  });
+});
+
 describe('AlertTable', () => {
   it('renders the default operational columns', () => {
     render(<AlertTable alerts={[]} />);
@@ -42,6 +59,7 @@ describe('AlertTable', () => {
       'Summary',
       'Team',
       'Instance',
+      'Last seen',
       'Source',
       'Age',
       'Assignee',

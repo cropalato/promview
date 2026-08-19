@@ -313,6 +313,8 @@ function parseAlert(value: unknown, index: number): AlertSummary {
     startsAt: requiredString(raw.startsAt, `alerts[${index}].startsAt`),
     notes: 0,
     labels,
+    suppressed: raw.suppressed === true,
+    lastSeen: typeof raw.lastSeen === 'string' ? raw.lastSeen : '',
   };
 }
 

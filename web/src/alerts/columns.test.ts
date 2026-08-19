@@ -14,6 +14,8 @@ const alert: AlertSummary = {
   startsAt: new Date().toISOString(),
   notes: 0,
   labels: { alertname: 'Cardinality', prometheus_cluster: 'yul', name: 'windows_service_status' },
+  suppressed: false,
+  lastSeen: new Date().toISOString(),
 };
 
 describe('column registry', () => {
@@ -56,5 +58,17 @@ describe('column registry', () => {
     // Sorting by an arbitrary label would be a sequential scan, so a label
     // column carries no sort until an index exists for it.
     expect(labelColumn('label:name')?.sortField).toBeUndefined();
+  });
+});
+
+describe('lifecycle columns', () => {
+  it('shows how long the source has been quiet', () => {
+    const column = FIXED_COLUMNS.find((entry) => entry.id === 'lastSeen');
+    expect(column?.label).toBe('Last seen');
+    // An operator questioning an expired alert should see the evidence.
+    expect(
+      column?.cell({ ...alert, lastSeen: new Date(Date.now() - 3 * 3600_000).toISOString() }).text,
+    ).toMatch(/h$/);
+    expect(column?.cell({ ...alert, lastSeen: '' }).text).toBe('—');
   });
 });

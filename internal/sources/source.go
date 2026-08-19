@@ -3,6 +3,7 @@ package sources
 import (
 	"crypto/sha256"
 	"errors"
+	"net/url"
 	"regexp"
 	"time"
 )
@@ -22,6 +23,11 @@ type Source struct {
 	// value alone and falls back to the server default; zero disables expiry for
 	// this source.
 	StaleAfter *time.Duration
+	// AlertmanagerURL is the base URL of the Alertmanager this source delivers
+	// from, read to reconcile what promview holds against what still exists.
+	// Nil leaves the stored value alone; an empty string disables reconciliation
+	// for the source.
+	AlertmanagerURL *string
 }
 
 func Validate(source Source, rawToken string) error {
@@ -36,6 +42,12 @@ func Validate(source Source, rawToken string) error {
 	}
 	if source.StaleAfter != nil && *source.StaleAfter < 0 {
 		return errors.New("source stale-after must not be negative")
+	}
+	if source.AlertmanagerURL != nil && *source.AlertmanagerURL != "" {
+		parsed, err := url.Parse(*source.AlertmanagerURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return errors.New("source alertmanager URL must be an absolute http or https URL")
+		}
 	}
 	return nil
 }
