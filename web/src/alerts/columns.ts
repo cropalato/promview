@@ -83,6 +83,17 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
     cell: (alert) => ({ text: present(alert.instance), className: 'cell-mono' }),
   },
   {
+    id: 'lastSeen',
+    label: 'Last seen',
+    optional: true,
+    // How long the source has been quiet is what expiry acts on, so an operator
+    // questioning an expired alert can see the evidence rather than infer it.
+    cell: (alert) => ({
+      text: alert.lastSeen === '' ? EMPTY : formatAge(alert.lastSeen),
+      className: 'cell-mono',
+    }),
+  },
+  {
     id: 'source',
     label: 'Source',
     optional: false,

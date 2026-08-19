@@ -146,6 +146,8 @@ describe('fetchAlerts', () => {
             instance: 'api-1:9090',
             severity: 'critical',
           },
+          suppressed: false,
+          lastSeen: '2026-08-14T11:00:00Z',
         },
       ],
       nextCursor: 'cursor-2',

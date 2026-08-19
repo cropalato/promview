@@ -34,6 +34,11 @@ type Config struct {
 	AlertStaleAfter time.Duration
 	// AlertExpiryInterval is how often the expiry sweep runs.
 	AlertExpiryInterval time.Duration
+	// ReconcileInterval is how often each source's Alertmanager is read to
+	// confirm what is still firing. Zero disables reconciliation.
+	ReconcileInterval time.Duration
+	// ReconcileTimeout bounds one Alertmanager request.
+	ReconcileTimeout time.Duration
 }
 
 func Load() (Config, error) {
@@ -61,6 +66,8 @@ func Load() (Config, error) {
 		// expiry never fights a repeat notification.
 		AlertStaleAfter:     12 * time.Hour,
 		AlertExpiryInterval: time.Minute,
+		ReconcileInterval:   time.Minute,
+		ReconcileTimeout:    10 * time.Second,
 	}
 	if raw := os.Getenv("PROMVIEW_OIDC_COOKIE_SECURE"); raw != "" {
 		secure, err := strconv.ParseBool(raw)
@@ -83,6 +90,21 @@ func Load() (Config, error) {
 			return Config{}, errors.New("PROMVIEW_ALERT_EXPIRY_INTERVAL must be a positive duration such as 1m")
 		}
 		cfg.AlertExpiryInterval = interval
+	}
+
+	if raw := os.Getenv("PROMVIEW_RECONCILE_INTERVAL"); raw != "" {
+		interval, err := time.ParseDuration(raw)
+		if err != nil || interval < 0 {
+			return Config{}, errors.New("PROMVIEW_RECONCILE_INTERVAL must be a non-negative duration such as 1m")
+		}
+		cfg.ReconcileInterval = interval
+	}
+	if raw := os.Getenv("PROMVIEW_RECONCILE_TIMEOUT"); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil || timeout <= 0 {
+			return Config{}, errors.New("PROMVIEW_RECONCILE_TIMEOUT must be a positive duration such as 10s")
+		}
+		cfg.ReconcileTimeout = timeout
 	}
 
 	if cfg.DatabaseURL == "" {

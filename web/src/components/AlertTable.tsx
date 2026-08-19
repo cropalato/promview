@@ -231,6 +231,9 @@ function AlertCell({ alert, column }: { alert: AlertSummary; column: ColumnDefin
     return (
       <td className={className === '' ? undefined : className}>
         <span className={`state-chip state-${alert.state}`}>{alert.state}</span>
+        {/* Silenced sits beside the state rather than replacing it: the alert
+            is still firing, it is just being held back at the source. */}
+        {alert.suppressed ? <span className="state-chip state-suppressed">silenced</span> : null}
       </td>
     );
   }

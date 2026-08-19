@@ -150,6 +150,31 @@ promview source set --slug primary --name Primary --token "$TOKEN" --stale-after
 An individual alert can shorten its own window with a numeric `timeout` label (in
 seconds) on the rule, matching how Alerta reads the same label.
 
+## Alertmanager Reconciliation
+
+Expiry infers an ending from silence; reconciliation confirms one. Given a source's
+Alertmanager URL, promview reads `GET /api/v2/alerts` on a loop and aligns what it
+holds with what still exists: an alert the Alertmanager no longer lists is resolved,
+and one it reports as `suppressed` is flagged silenced while remaining firing.
+
+```sh
+promview source set --slug primary --name Primary --token "$TOKEN" \
+  --alertmanager-url http://alertmanager.monitoring:9093
+
+export PROMVIEW_RECONCILE_INTERVAL=1m   # 0 disables reconciliation
+export PROMVIEW_RECONCILE_TIMEOUT=10s
+```
+
+The API is read-only and used unauthenticated, so a source behind authentication is
+not supported yet. A source without a URL is left to expiry alone.
+
+Two rules keep a healthy Alertmanager from emptying the console. An alert must be
+absent from two consecutive readings before it is resolved, so a dropped request
+changes nothing. And an Alertmanager reporting *no* alerts at all while promview holds
+firing ones is treated as untrustworthy — a restarting Alertmanager looks exactly like
+a fleet that went silent — so that reading only syncs suppression and leaves endings
+to a reading that shows something.
+
 ## OIDC Authentication
 
 For an Okta-specific walkthrough, see [`docs/okta-oidc.md`](docs/okta-oidc.md).

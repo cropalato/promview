@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/cropalato/promview/internal/alertmanager"
 	"github.com/cropalato/promview/internal/auth"
 	"github.com/cropalato/promview/internal/config"
 	"github.com/cropalato/promview/internal/httpapi"
@@ -115,6 +116,12 @@ func run() error {
 		runExpirySweeps(ctx, store, cfg.AlertStaleAfter, cfg.AlertExpiryInterval)
 	}()
 
+	reconcileDone := make(chan struct{})
+	go func() {
+		defer close(reconcileDone)
+		runReconciliation(ctx, store, alertmanager.NewClient(cfg.ReconcileTimeout), cfg.ReconcileInterval)
+	}()
+
 	select {
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -126,6 +133,7 @@ func run() error {
 		defer cancel()
 		err := server.Shutdown(shutdownCtx)
 		<-sweepDone
+		<-reconcileDone
 		return err
 	}
 }
@@ -249,19 +257,35 @@ type sourceSetter interface {
 	SetSource(context.Context, sources.Source, string) error
 }
 
+// isFlagSet reports whether a flag was given on the command line, which is what
+// separates "clear this value" from "leave it alone" for optional settings.
+func isFlagSet(flags *flag.FlagSet, name string) bool {
+	found := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
 func runSourceCommand(ctx context.Context, store sourceSetter, args []string) error {
 	if len(args) == 0 || args[0] != "set" {
-		return errors.New("usage: promview source set --slug <slug> --name <name> --token <token> [--stale-after <duration>]")
+		return errors.New("usage: promview source set --slug <slug> --name <name> --token <token> [--stale-after <duration>] [--alertmanager-url <url>]")
 	}
 	flags := flag.NewFlagSet("promview source set", flag.ContinueOnError)
 	slug := flags.String("slug", "", "stable source slug")
 	name := flags.String("name", "", "source display name")
 	token := flags.String("token", "", "source bearer token")
 	staleAfter := flags.String("stale-after", "", "how long an alert may go unreported before it expires; must exceed this source's repeat_interval (0 disables expiry, empty keeps the stored value)")
+	alertmanagerURL := flags.String("alertmanager-url", "", "base URL of this source's Alertmanager, read to confirm what is still firing (empty keeps the stored value)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
 	source := sources.Source{Slug: *slug, Name: *name}
+	if isFlagSet(flags, "alertmanager-url") {
+		source.AlertmanagerURL = alertmanagerURL
+	}
 	if *staleAfter != "" {
 		window, err := time.ParseDuration(*staleAfter)
 		if err != nil {

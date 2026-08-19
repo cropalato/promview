@@ -35,4 +35,8 @@ export interface AlertSummary {
    * render without the label having to be given console-wide meaning first.
    */
   labels: Record<string, string>;
+  /** A silence or inhibition is holding this alert back at the source. */
+  suppressed: boolean;
+  /** When the source last reported the alert, which is what expiry measures. */
+  lastSeen: string;
 }

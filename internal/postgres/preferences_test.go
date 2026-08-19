@@ -43,7 +43,7 @@ func TestStorePreferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadPreferences() error = %v", err)
 	}
-	if initial.Density != "normal" || len(initial.Columns) == 0 || !initial.Grouping.Enabled {
+	if initial.Density != "auto" || len(initial.Columns) == 0 || !initial.Grouping.Enabled {
 		t.Fatalf("initial preferences = %#v, want the defaults", initial)
 	}
 
@@ -91,7 +91,7 @@ func TestStorePreferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadPreferences() on a partial row error = %v", err)
 	}
-	if partial.Density != "normal" || len(partial.Columns) == 0 {
+	if partial.Density != "auto" || len(partial.Columns) == 0 {
 		t.Errorf("partial preferences = %#v, want defaults filled in", partial)
 	}
 

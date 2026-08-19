@@ -59,15 +59,16 @@ func (store *Store) SetSource(ctx context.Context, source sources.Source, rawTok
 		return err
 	}
 	_, err := store.pool.Exec(ctx, `
-		INSERT INTO alert_sources (slug, name, token_hash, enabled, stale_after)
-		VALUES ($1, $2, $3, true, $4)
+		INSERT INTO alert_sources (slug, name, token_hash, enabled, stale_after, alertmanager_url)
+		VALUES ($1, $2, $3, true, $4, COALESCE($5, ''))
 		ON CONFLICT (slug) DO UPDATE SET
 			name = EXCLUDED.name,
 			token_hash = EXCLUDED.token_hash,
 			enabled = true,
 			stale_after = COALESCE(EXCLUDED.stale_after, alert_sources.stale_after),
+			alertmanager_url = COALESCE($5, alert_sources.alertmanager_url),
 			updated_at = now()
-	`, source.Slug, source.Name, sources.HashToken(rawToken), staleAfterInterval(source.StaleAfter))
+	`, source.Slug, source.Name, sources.HashToken(rawToken), staleAfterInterval(source.StaleAfter), source.AlertmanagerURL)
 	if err != nil {
 		return fmt.Errorf("set alert source %s: %w", source.Slug, err)
 	}
@@ -612,7 +613,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 	listSQL := `
 		SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen, alert.repeat_count,
-		       alert.occurrence, alert.acknowledged, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
+		       alert.occurrence, alert.acknowledged, alert.suppressed, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
 		FROM alerts AS alert` + listWhere + fmt.Sprintf(`
 		ORDER BY `+sort.expression+" "+strings.ToUpper(query.Order)+`, alert.id `+strings.ToUpper(query.Order)+`
 		LIMIT $%d`, len(listArgs))
@@ -632,7 +633,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 			&item.ID, &item.SourceSlug, &item.Fingerprint, &item.SourceStatus,
 			&labelsJSON, &annotationsJSON, &item.StartsAt, &item.EndsAt,
 			&item.GeneratorURL, &item.ExternalURL, &item.FirstSeen, &item.LastSeen, &item.RepeatCount,
-			&item.Occurrence, &item.Acknowledged, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
+			&item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
 		); err != nil {
 			return alerts.ListResult{}, fmt.Errorf("scan alert: %w", err)
 		}
@@ -679,14 +680,14 @@ func (store *Store) GetAlertDetail(ctx context.Context, principal auth.Principal
 	err := store.pool.QueryRow(ctx, `
 		SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen,
-		       alert.repeat_count, alert.occurrence, alert.acknowledged, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
+		       alert.repeat_count, alert.occurrence, alert.acknowledged, alert.suppressed, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
 		FROM alerts AS alert
 		WHERE alert.id = $1 AND (`+access+`)
 	`, args...).Scan(
 		&item.ID, &item.SourceSlug, &item.Fingerprint, &item.SourceStatus,
 		&labelsJSON, &annotationsJSON, &item.StartsAt, &item.EndsAt,
 		&item.GeneratorURL, &item.ExternalURL, &item.FirstSeen, &item.LastSeen,
-		&item.RepeatCount, &item.Occurrence, &item.Acknowledged, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
+		&item.RepeatCount, &item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return alerts.Detail{}, alerts.ErrNotFound

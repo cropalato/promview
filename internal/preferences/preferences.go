@@ -21,7 +21,7 @@ import (
 // already uses.
 var FixedColumns = []string{
 	"severity", "state", "alert", "summary", "team",
-	"instance", "source", "age", "assignee", "notes",
+	"instance", "lastSeen", "source", "age", "assignee", "notes",
 }
 
 // LabelColumnPrefix marks a column bound to an arbitrary alert label, which is

@@ -32,6 +32,8 @@ function member(id: string, instance: string): AlertSummary {
     startsAt: new Date().toISOString(),
     notes: 0,
     labels: { alertname: 'Cardinality', instance },
+    suppressed: false,
+    lastSeen: new Date().toISOString(),
   };
 }
 
