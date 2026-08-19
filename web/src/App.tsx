@@ -32,6 +32,7 @@ import { useResolvedDensity } from './hooks/useResolvedDensity';
 import { useAlertGroups } from './hooks/useAlertGroups';
 import { useGroupChildren } from './hooks/useGroupChildren';
 import { useAlertStream } from './hooks/useAlertStream';
+import { useColumnWidths } from './hooks/useColumnWidths';
 import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import { useSession } from './hooks/useSession';
 
@@ -149,6 +150,9 @@ export default function App({ navigate }: AppProps = {}) {
     authMode === 'oidc',
   );
   const columns = resolveColumns(preferences.columns.map((column) => column.id));
+  // Resized widths live in the browser and follow the column, not the view:
+  // the flat and grouped tables share them by column id.
+  const { widths: columnWidths, setColumnWidth, resetColumnWidth } = useColumnWidths();
   // `auto` resolves against the area the console has, so the same stored
   // preference lands differently on a laptop and a wall display.
   const density = useResolvedDensity(preferences.density);
@@ -170,8 +174,11 @@ export default function App({ navigate }: AppProps = {}) {
     expand: expandGroup,
     collapse: collapseGroup,
     loadMore: loadMoreChildren,
-    reset: resetGroupChildren,
-  } = useGroupChildren(alertsQuery, { onUnauthorized: expireSession });
+    refresh: refreshGroupChildren,
+  } = useGroupChildren(alertsQuery, {
+    groupBy: preferences.grouping.keys,
+    onUnauthorized: expireSession,
+  });
 
   const { selectedAlertId, openAlert, closeAlert } = useAlertRoute();
   const effectiveSelectedAlertId = consoleUnlocked ? selectedAlertId : null;
@@ -197,10 +204,11 @@ export default function App({ navigate }: AppProps = {}) {
       scheduleLiveRefresh();
       if (grouped) {
         // Group counts are computed server-side, so a change inside a group is
-        // invisible until the groups are re-read; expanded members are dropped
-        // rather than left showing a stale snapshot of the group.
+        // invisible until the groups are re-read. Both re-reads are quiet: the
+        // refreshed rows swap in place and expanded groups stay open with
+        // their members refreshed, rather than collapsing to a loading panel.
         refreshGroups();
-        resetGroupChildren();
+        refreshGroupChildren();
       }
       refreshDetailIfSelected(event.alertId);
       handleNotificationEvent(event);
@@ -209,7 +217,7 @@ export default function App({ navigate }: AppProps = {}) {
       scheduleLiveRefresh,
       grouped,
       refreshGroups,
-      resetGroupChildren,
+      refreshGroupChildren,
       refreshDetailIfSelected,
       handleNotificationEvent,
     ],
@@ -221,6 +229,17 @@ export default function App({ navigate }: AppProps = {}) {
   });
 
   const loadedAlerts = alertsState.status === 'ready' ? alertsState.data.alerts : NO_ALERTS;
+  // The flat list and the grouped view read the same query, so a one-member
+  // group's only alert is usually already loaded here; the group table fills
+  // that row's columns from it instead of showing a one-sample aggregate.
+  const alertsById = useMemo(() => {
+    const byId = new Map<string, AlertSummary>();
+    for (const alert of loadedAlerts) {
+      byId.set(alert.id, alert);
+    }
+    return byId;
+  }, [loadedAlerts]);
+  const loadedAlertById = useCallback((id: string) => alertsById.get(id), [alertsById]);
   // Label keys seen in the loaded alerts, offered when adding a label column so
   // an operator does not have to remember exact spellings.
   const labelSuggestions = useMemo(() => {
@@ -397,15 +416,23 @@ export default function App({ navigate }: AppProps = {}) {
                   <AlertGroupTable
                     groups={groupsState.data.groups}
                     children={groupChildren}
+                    groupKeys={preferences.grouping.keys}
                     columns={columns}
+                    columnWidths={columnWidths}
+                    onColumnResize={setColumnWidth}
+                    onColumnResizeReset={resetColumnWidth}
                     filterActive={filterActive}
                     filterQuery={appliedFilterText}
                     selectedId={effectiveSelectedAlertId}
+                    sort={sort}
+                    onSortChange={setSort}
+                    memberFor={loadedAlertById}
                     onClearFilter={clearFilter}
                     onExpand={expandGroup}
                     onCollapse={collapseGroup}
                     onLoadMoreChildren={loadMoreChildren}
                     onSelect={(alert) => openAlert(alert.id)}
+                    onOpenAlert={openAlert}
                     pagination={{
                       loaded: groupsState.data.groups.length,
                       total: groupsState.data.totalGroups,
@@ -421,6 +448,9 @@ export default function App({ navigate }: AppProps = {}) {
                   <AlertTable
                     alerts={loadedAlerts}
                     columns={columns}
+                    columnWidths={columnWidths}
+                    onColumnResize={setColumnWidth}
+                    onColumnResizeReset={resetColumnWidth}
                     filterActive={filterActive}
                     filterQuery={appliedFilterText}
                     selectedId={effectiveSelectedAlertId}

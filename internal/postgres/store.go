@@ -999,7 +999,9 @@ func alertFilters(principal auth.Principal, query alerts.Query, alias string) (s
 			conditions = append(conditions, fmt.Sprintf("(NOT (%s ? $%d) OR %s->>$%d <> $%d)", alias+".labels", namePosition, alias+".labels", namePosition, valuePosition))
 			continue
 		}
-		conditions = append(conditions, fmt.Sprintf("(%s ? $%d AND %s->>$%d = $%d)", alias+".labels", namePosition, alias+".labels", namePosition, valuePosition))
+		// Group keys represent absent labels as empty strings. Matching the same
+		// way lets expanding an empty-label group retrieve every member exactly.
+		conditions = append(conditions, fmt.Sprintf("COALESCE(%s->>$%d, '') = $%d", alias+".labels", namePosition, valuePosition))
 	}
 	if len(conditions) == 0 {
 		return "", args

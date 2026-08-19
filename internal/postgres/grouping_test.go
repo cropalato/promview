@@ -18,8 +18,6 @@ func TestGroupKeyExpressionsRejectsUnusableKeys(t *testing.T) {
 	if _, err := groupKeyExpressions(nil); err == nil {
 		t.Error("groupKeyExpressions(nil) error = nil, want error")
 	}
-	// An arbitrary label would be an unindexed GROUP BY with unbounded
-	// cardinality, so the vocabulary is closed.
 	if _, err := groupKeyExpressions([]string{"labels->>'x'; DROP TABLE alerts"}); err == nil {
 		t.Error("groupKeyExpressions(injection) error = nil, want error")
 	}
@@ -32,6 +30,10 @@ func TestGroupKeyExpressionsRejectsUnusableKeys(t *testing.T) {
 	got, err := groupKeyExpressions([]string{"alertname", "source"})
 	if err != nil || len(got) != 2 {
 		t.Fatalf("groupKeyExpressions(alertname, source) = %v, %v", got, err)
+	}
+	got, err = groupKeyExpressions([]string{"prometheus_cluster", "source"})
+	if err != nil || len(got) != 2 || got[0] != "COALESCE(alert.labels->>'prometheus_cluster', '')" || got[1] != "alert.source_slug" {
+		t.Fatalf("groupKeyExpressions(custom label, source) = %v, %v", got, err)
 	}
 }
 
@@ -73,6 +75,7 @@ func TestStoreGroupAlerts(t *testing.T) {
 		groupedAlert("dsm", "card-5", "Cardinality", "warning", "platform", base.Add(time.Minute)),
 		groupedAlert("yul", "lonely-1", "Lonely", "warning", "payments", base),
 	}
+	batch[1].Status = "resolved"
 	if err := store.Ingest(ctx, batch); err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +182,17 @@ func TestStoreGroupAlerts(t *testing.T) {
 	if filtered.TotalAlerts != 3 || filtered.TotalGroups != 2 {
 		t.Fatalf("filtered result = %d alerts in %d groups, want 3 in 2", filtered.TotalAlerts, filtered.TotalGroups)
 	}
+	firing, err := store.GroupAlerts(ctx, anonymous, alerts.Query{
+		Limit:   10,
+		GroupBy: []string{"prometheus_cluster", "source"},
+		Status:  alerts.StatusFiring,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firing.TotalAlerts != 5 || firing.TotalGroups != 2 || firing.Groups[0].Key["prometheus_cluster"] != "main" {
+		t.Fatalf("firing custom-label groups = %#v, want five firing alerts in two main/source groups", firing)
+	}
 
 	// Keyset pagination must not repeat or skip a group.
 	seen := map[string]bool{}
@@ -213,8 +227,8 @@ func TestStoreGroupAlerts(t *testing.T) {
 		t.Error("GroupAlerts() with a foreign cursor error = nil, want error")
 	}
 
-	if _, err := store.GroupAlerts(ctx, anonymous, alerts.Query{Limit: 10, GroupBy: []string{"nonsense"}}); err == nil {
-		t.Error("GroupAlerts() with an unknown key error = nil, want error")
+	if _, err := store.GroupAlerts(ctx, anonymous, alerts.Query{Limit: 10, GroupBy: []string{"not-a-label"}}); err == nil {
+		t.Error("GroupAlerts() with a malformed key error = nil, want error")
 	}
 	if _, err := store.GroupAlerts(ctx, anonymous, alerts.Query{Limit: 0, GroupBy: []string{"alertname"}}); err == nil {
 		t.Error("GroupAlerts() with a zero limit error = nil, want error")
@@ -227,29 +241,14 @@ func groupedAlert(sourceSlug, fingerprint, alertname, severity, team string, las
 		Fingerprint: fingerprint,
 		Status:      "firing",
 		Labels: map[string]string{
-			"alertname": alertname,
-			"severity":  severity,
-			"team":      team,
-			"instance":  fingerprint,
+			"alertname":          alertname,
+			"severity":           severity,
+			"team":               team,
+			"instance":           fingerprint,
+			"prometheus_cluster": "main",
 		},
 		Annotations: map[string]string{"summary": fingerprint},
 		StartsAt:    lastSeen.Add(-time.Minute),
 		ReceivedAt:  lastSeen,
-	}
-}
-
-func TestAlertGroupKeysCoverVocabulary(t *testing.T) {
-	// The HTTP layer validates against alerts.GroupKeys and this map turns those
-	// keys into SQL; a key in one and not the other is a request that validates
-	// and then fails in the store.
-	for _, key := range alerts.GroupKeys {
-		if _, ok := alertGroupKeys[key]; !ok {
-			t.Errorf("alertGroupKeys is missing %q", key)
-		}
-	}
-	for key := range alertGroupKeys {
-		if !alerts.IsGroupKey(key) {
-			t.Errorf("alertGroupKeys has %q, which is not in the shared vocabulary", key)
-		}
 	}
 }

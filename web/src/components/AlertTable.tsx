@@ -1,9 +1,10 @@
 import type { KeyboardEvent } from 'react';
 import type { AlertSort } from '../alerts/api';
-import { FIXED_COLUMNS, nextSort } from '../alerts/columns';
+import { FIXED_COLUMNS, columnWidth, nextSort } from '../alerts/columns';
 import type { ColumnDefinition } from '../alerts/columns';
 import { SEVERITY_LABELS } from '../alerts/severity';
 import type { AlertSummary } from '../alerts/types';
+import { ColumnResizeHandle } from './ColumnResizeHandle';
 import { EmptyState } from './EmptyState';
 import { SeverityIcon, SortIcon } from './icons';
 
@@ -38,6 +39,14 @@ interface AlertTableProps {
   onSortChange?: (sort: AlertSort) => void;
   /** Columns to render, in order. Defaults to the console's built-in set. */
   columns?: readonly ColumnDefinition[];
+  /** Resized widths keyed by column id; a column without an entry keeps its
+   *  registry default: a basis width, or a share of the leftover width when
+   *  it is flexible. */
+  columnWidths?: Readonly<Record<string, number>>;
+  /** A resize handle reports the operator's drag or keypress here. */
+  onColumnResize?: (columnId: string, width: number) => void;
+  /** Drops a column's stored width, returning it to its default sizing. */
+  onColumnResizeReset?: (columnId: string) => void;
 }
 
 /** Dense alert table. Renders real rows when given data; otherwise the
@@ -56,12 +65,28 @@ export function AlertTable({
   sort = null,
   onSortChange,
   columns = FIXED_COLUMNS,
+  columnWidths = {},
+  onColumnResize,
+  onColumnResizeReset,
 }: AlertTableProps) {
+  const resizable = onColumnResize !== undefined && onColumnResizeReset !== undefined;
   return (
     <div className="table-panel">
       <div className="table-scroll">
         <table className="alert-table">
           <caption>Active alerts ({alerts.length})</caption>
+          <colgroup>
+            {columns.map((column) => {
+              const width = columnWidth(column, columnWidths[column.id]);
+              return (
+                <col
+                  key={column.id}
+                  className={column.optional ? 'col-optional' : undefined}
+                  style={width !== undefined ? { width: `${width}px` } : undefined}
+                />
+              );
+            })}
+          </colgroup>
           <thead>
             <tr>
               {columns.map((column) => (
@@ -70,6 +95,9 @@ export function AlertTable({
                   column={column}
                   sort={sort}
                   onSortChange={onSortChange}
+                  width={columnWidths[column.id]}
+                  onResize={resizable ? onColumnResize : undefined}
+                  onResizeReset={resizable ? onColumnResizeReset : undefined}
                 />
               ))}
             </tr>
@@ -107,22 +135,40 @@ export function AlertTable({
 /**
  * One column header. Sortable columns render a button following the APG
  * sortable-table pattern: the sorted column's `<th>` carries `aria-sort`,
- * and the button name describes the action.
+ * and the button name describes the action. Shared with the grouped table so
+ * both views offer the same sort controls and resize handles.
  */
-function ColumnHeader({
+export function ColumnHeader({
   column,
   sort,
   onSortChange,
+  width,
+  onResize,
+  onResizeReset,
 }: {
   column: ColumnDefinition;
   sort: AlertSort | null;
   onSortChange?: (sort: AlertSort) => void;
+  width?: number;
+  onResize?: (columnId: string, width: number) => void;
+  onResizeReset?: (columnId: string) => void;
 }) {
   const sortField = column.sortField;
+  const resizable = onResize !== undefined && onResizeReset !== undefined;
+  const handle = resizable ? (
+    <ColumnResizeHandle
+      columnId={column.id}
+      columnLabel={column.label}
+      width={width}
+      onResize={onResize}
+      onReset={onResizeReset}
+    />
+  ) : null;
   if (sortField === undefined || onSortChange === undefined) {
     return (
       <th scope="col" className={column.optional ? 'col-optional' : undefined}>
         {column.label}
+        {handle}
       </th>
     );
   }
@@ -143,6 +189,7 @@ function ColumnHeader({
         <span>{column.label}</span>
         <SortIcon className="th-sort-icon" />
       </button>
+      {handle}
     </th>
   );
 }

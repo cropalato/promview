@@ -253,3 +253,63 @@ describe('AlertTable', () => {
     expect(onSortChange).toHaveBeenCalledWith({ field: 'team', order: 'asc' });
   });
 });
+
+describe('AlertTable column resizing', () => {
+  const resizeProps = {
+    onColumnResize: vi.fn(),
+    onColumnResizeReset: vi.fn(),
+  };
+
+  it('renders no resize handles without resize callbacks', () => {
+    render(<AlertTable alerts={[]} />);
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  });
+
+  it('renders a labelled handle on every column', () => {
+    render(<AlertTable alerts={[]} {...resizeProps} />);
+    expect(screen.getAllByRole('separator')).toHaveLength(11);
+    expect(screen.getByRole('separator', { name: 'Resize Summary column' })).toBeInTheDocument();
+  });
+
+  it('starts short columns at their basis and leaves the long-text columns flexible', () => {
+    const { container } = render(<AlertTable alerts={[]} {...resizeProps} />);
+    const cols = container.querySelectorAll('colgroup col');
+    expect(cols).toHaveLength(11);
+    // Severity and age hold a basis sized to their content…
+    expect(cols[0]).toHaveStyle({ width: '116px' });
+    expect(cols[8]).toHaveStyle({ width: '76px' });
+    // …while alert, summary and instance carry no width of their own, so the
+    // fixed layout hands them the width the based columns leave behind.
+    expect(cols[2]).not.toHaveAttribute('style');
+    expect(cols[3]).not.toHaveAttribute('style');
+    expect(cols[5]).not.toHaveAttribute('style');
+  });
+
+  it('applies stored widths through the colgroup, keyed by column id', () => {
+    const { container } = render(
+      <AlertTable alerts={[]} columnWidths={{ summary: 300, team: 120 }} {...resizeProps} />,
+    );
+    const cols = container.querySelectorAll('colgroup col');
+    expect(cols).toHaveLength(11);
+    // A stored width gives a flexible column a fixed size…
+    expect(cols[3]).toHaveStyle({ width: '300px' });
+    // …and wins over a based column's default.
+    expect(cols[4]).toHaveStyle({ width: '120px' });
+    // Untouched columns keep their defaults.
+    expect(cols[0]).toHaveStyle({ width: '116px' });
+    expect(cols[2]).not.toHaveAttribute('style');
+    // Optional columns keep their marker class on the col so a narrow panel
+    // hides them even when the table is fixed-layout.
+    expect(cols[3]).toHaveClass('col-optional');
+    expect(cols[0]).not.toHaveClass('col-optional');
+  });
+
+  it('forwards handle gestures to the resize callbacks', () => {
+    render(<AlertTable alerts={[]} columnWidths={{ summary: 300 }} {...resizeProps} />);
+    const handle = screen.getByRole('separator', { name: 'Resize Summary column' });
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(resizeProps.onColumnResize).toHaveBeenCalledWith('summary', 316);
+    fireEvent.keyDown(handle, { key: 'Home' });
+    expect(resizeProps.onColumnResizeReset).toHaveBeenCalledWith('summary');
+  });
+});

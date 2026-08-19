@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_COLUMN_IDS, FIXED_COLUMNS, labelColumn, resolveColumns } from './columns';
+import {
+  DEFAULT_COLUMN_IDS,
+  FIXED_COLUMNS,
+  columnWidth,
+  labelColumn,
+  resolveColumns,
+} from './columns';
 import type { AlertSummary } from './types';
 
 const alert: AlertSummary = {
@@ -58,6 +64,33 @@ describe('column registry', () => {
     // Sorting by an arbitrary label would be a sequential scan, so a label
     // column carries no sort until an index exists for it.
     expect(labelColumn('label:name')?.sortField).toBeUndefined();
+  });
+});
+
+describe('column sizing', () => {
+  it('bases the short columns and leaves the long-text ones flexible', () => {
+    const based = ['severity', 'state', 'team', 'lastSeen', 'source', 'age', 'assignee', 'notes'];
+    const flexible = ['alert', 'summary', 'instance'];
+    for (const column of FIXED_COLUMNS) {
+      if (based.includes(column.id)) {
+        expect(column.basis, column.id).toBeGreaterThanOrEqual(64);
+      } else {
+        expect(flexible, column.id).toContain(column.id);
+        expect(column.basis, column.id).toBeUndefined();
+      }
+    }
+  });
+
+  it('keeps label columns flexible: their content length is unknowable', () => {
+    expect(labelColumn('label:name')?.basis).toBeUndefined();
+  });
+
+  it('starts at the basis, defers to a stored width, and flexes without either', () => {
+    const severity = FIXED_COLUMNS.find((column) => column.id === 'severity');
+    const summary = FIXED_COLUMNS.find((column) => column.id === 'summary');
+    expect(columnWidth(severity!, undefined)).toBe(severity!.basis);
+    expect(columnWidth(severity!, 240)).toBe(240);
+    expect(columnWidth(summary!, undefined)).toBeUndefined();
   });
 });
 

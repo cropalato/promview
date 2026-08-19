@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ALERTS_PAGE_SIZE, fetchAlerts, isAlertsUnauthorized } from '../alerts/api';
 import type { AlertsQuery } from '../alerts/api';
 import type { AlertSummary } from '../alerts/types';
@@ -8,12 +8,20 @@ import type { AlertSummary } from '../alerts/types';
  *
  * A group's members are the ordinary alerts query with one matcher per grouping
  * key, so expanding reuses the same endpoint, cursor and access rules as the
- * flat list — there is no second way to read an alert.
+ * flat list — there is no second way to read an alert. Members are firing
+ * alerts, like the flat list: a group drawn from firing alerts must not open
+ * into a wider set than the view it belongs to.
  *
  * Collapsing discards what was loaded rather than caching it. Re-expanding
  * costs one request and always shows current data, which matters more here than
  * saving a fetch: a console that shows stale members inside a group is worse
- * than one that pauses briefly.
+ * than one that pauses briefly. Changing the grouping keys discards everything
+ * too — an expanded group's matchers name the old keys, so keeping it would pin
+ * stale members under headings that mean something else now.
+ *
+ * Live stream events go through `refresh` rather than a reset: every expanded
+ * group re-reads its first page in the background and swaps the members in
+ * place, so a refresh never collapses rows the operator opened.
  */
 
 export interface GroupChildren {
@@ -48,15 +56,25 @@ export function groupId(key: Record<string, string>): string {
   return JSON.stringify(key);
 }
 
+export interface UseGroupChildrenOptions {
+  onUnauthorized?: () => void;
+  /**
+   * The grouping the expanded groups belong to. When it changes every
+   * expansion is discarded: a group's member matchers name the old keys, so
+   * nothing loaded under the previous grouping can answer the new one.
+   */
+  groupBy?: readonly string[];
+}
+
 export function useGroupChildren(
   query: AlertsQuery,
-  options: { onUnauthorized?: () => void } = {},
+  options: UseGroupChildrenOptions = {},
 ): {
   children: Record<string, GroupChildren>;
   expand: (key: Record<string, string>) => void;
   collapse: (key: Record<string, string>) => void;
   loadMore: (key: Record<string, string>) => void;
-  reset: () => void;
+  refresh: () => void;
 } {
   const [children, setChildren] = useState<Record<string, GroupChildren>>({});
   const { onUnauthorized } = options;
@@ -64,12 +82,30 @@ export function useGroupChildren(
   unauthorizedRef.current = onUnauthorized;
   const queryRef = useRef(query);
   queryRef.current = query;
+  // `refresh` iterates the expanded groups without capturing state.
+  const childrenRef = useRef(children);
+  useEffect(() => {
+    childrenRef.current = children;
+  }, [children]);
 
-  const request = useCallback((key: Record<string, string>, cursor: string) => {
+  // A new grouping empties the expansions; the fresh groups fetch (the keys
+  // ride the groups query) repopulates the headings these belonged to.
+  const groupByKey = JSON.stringify(options.groupBy ?? []);
+  const groupByRef = useRef(groupByKey);
+  useEffect(() => {
+    if (groupByRef.current === groupByKey) {
+      return;
+    }
+    groupByRef.current = groupByKey;
+    setChildren({});
+  }, [groupByKey]);
+
+  const request = useCallback((key: Record<string, string>, cursor: string, background = false) => {
     const id = groupId(key);
     const base = queryRef.current;
     void fetchAlerts({
       ...base,
+      status: 'firing',
       ...groupQuery(key),
       match: [...(base.match ?? []), ...groupMatchers(key)],
       limit: ALERTS_PAGE_SIZE,
@@ -105,6 +141,11 @@ export function useGroupChildren(
           const existing = current[id];
           if (existing === undefined) {
             return current;
+          }
+          if (background) {
+            // A background refresh failure keeps the members already shown;
+            // the next stream event retries.
+            return { ...current, [id]: { ...existing, loading: false } };
           }
           return { ...current, [id]: { ...existing, loading: false, error: error as Error } };
         });
@@ -147,7 +188,13 @@ export function useGroupChildren(
     [request],
   );
 
-  const reset = useCallback(() => setChildren({}), []);
+  // Quiet re-read of every expanded group's first page: the members swap in
+  // when the responses land, so a live refresh never collapses an open group.
+  const refresh = useCallback(() => {
+    for (const id of Object.keys(childrenRef.current)) {
+      request(JSON.parse(id) as Record<string, string>, '', true);
+    }
+  }, [request]);
 
-  return { children, expand, collapse, loadMore, reset };
+  return { children, expand, collapse, loadMore, refresh };
 }

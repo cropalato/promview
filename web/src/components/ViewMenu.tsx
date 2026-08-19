@@ -2,15 +2,18 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { FIXED_COLUMNS, LABEL_COLUMN_PREFIX } from '../alerts/columns';
 import { DENSITIES } from '../preferences/store';
 import type { Density, Preferences } from '../preferences/store';
+import { GroupingEditor } from './GroupingEditor';
 
 /**
- * The controls for how the console shows alerts: grouped or flat, how dense the
- * table is, and which columns it keeps.
+ * The controls for how the console shows alerts: grouped or flat and by which
+ * keys, how dense the table is, and which columns it keeps.
  *
  * Everything here writes straight through to preferences, which is what carries
  * the choice to the operator's other machines. A column can be bound to any
  * alert label, which is the escape hatch for a dimension the built-in columns
- * do not cover.
+ * do not cover. Grouping keys come from the API's closed vocabulary instead:
+ * each one becomes a server-side GROUP BY, so the picker in GroupingEditor is
+ * limited to what the endpoint accepts.
  */
 
 export interface ViewMenuProps {
@@ -117,8 +120,16 @@ export function ViewMenu({
                   })
                 }
               />
-              <span>Group alerts by name and source</span>
+              <span>Group alerts</span>
             </label>
+            {preferences.grouping.enabled ? (
+              <GroupingEditor
+                keys={preferences.grouping.keys}
+                onChange={(keys) =>
+                  onChange({ ...preferences, grouping: { ...preferences.grouping, keys } })
+                }
+              />
+            ) : null}
           </fieldset>
 
           <fieldset className="view-menu-group">

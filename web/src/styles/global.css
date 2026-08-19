@@ -733,6 +733,82 @@ kbd {
   vertical-align: middle;
 }
 
+/* Fixed layout with a default width per column: columns with a basis hold
+ * their ground and the flexible ones divide what is left, so spare width
+ * lands on the long text instead of padding the short columns. Cells clip
+ * with an ellipsis rather than reflowing, and a width the operator dragged
+ * always wins over the default. Narrow panels undo all of this below. */
+.alert-table {
+  table-layout: fixed;
+}
+
+.alert-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The full-width status cells are prose and controls, not data: they keep
+ * wrapping so a long error or the empty-state guidance never clips. */
+.alert-table .empty-row td,
+.alert-table .child-status td {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+/* The summary's content-sized cap would defeat both its flexible share and
+ * a deliberate drag wider. */
+.alert-table .cell-summary {
+  max-width: none;
+}
+
+/* Column resize handle: the grip sits on the header's trailing edge, with a
+ * hit area wider than the visible line so touch can reach it. */
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -7px;
+  z-index: 2;
+  width: 14px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.col-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: var(--border-strong);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.col-resize-handle:hover::after,
+.col-resize-handle:focus-visible::after,
+.col-resize-handle:active::after {
+  opacity: 1;
+}
+
+.col-resize-handle:hover::after,
+.col-resize-handle:active::after {
+  background: var(--accent);
+}
+
+.col-resize-handle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
 .alert-table tbody tr:hover {
   background: var(--panel-raise);
 }
@@ -862,9 +938,59 @@ kbd {
   gap: 6px;
 }
 
-.view-menu-add input {
+.view-menu-add input,
+.view-menu-add select {
   min-width: 0;
   flex: 1 1 auto;
+}
+
+/* Custom grouping: the ordered key list is the setting, so each row carries
+   its own reorder/remove buttons; the add row reuses the label-column row. */
+.grouping-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.grouping-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.grouping-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.grouping-keys {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.grouping-key {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.grouping-key-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.grouping-key-action {
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 /* Grouped view. The group row is the scannable line: severity, name, member
@@ -903,6 +1029,18 @@ kbd {
 
 .group-name {
   font-family: var(--font-mono);
+  /* The heading cell clips when the column runs out of width; the name is
+   * the part that gives way, with an ellipsis, so the tag and the count stay
+   * visible. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.group-heading .sev-tag,
+.group-heading .group-count {
+  flex: none;
 }
 
 .group-count {
@@ -969,6 +1107,28 @@ kbd {
 
   .alert-table {
     min-width: 0;
+  }
+
+  /* Narrow panels drop optional columns and fall back to content sizing:
+   * fixed widths dragged or defaulted on a wide screen would only force a
+   * scrollbar here, and cells wrap again instead of clipping. */
+  .alert-table {
+    table-layout: auto;
+  }
+
+  /* !important beats the inline width a resize wrote onto the col. */
+  .alert-table col {
+    width: auto !important;
+  }
+
+  .alert-table td {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .alert-table .cell-summary {
+    max-width: 320px;
   }
 }
 

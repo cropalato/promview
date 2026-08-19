@@ -577,7 +577,9 @@ describe('App', () => {
     });
     render(<App />);
 
-    const groupRow = await screen.findByRole('row', { name: /Cardinality · yul/ });
+    const groupRow = await screen.findByRole('row', {
+      name: /alertname=Cardinality · source=yul/,
+    });
     expect(within(groupRow).getByText('52')).toBeInTheDocument();
     expect(screen.queryByRole('row', { name: /firing/ })).not.toBeInTheDocument();
 
@@ -590,8 +592,66 @@ describe('App', () => {
     expect(memberRequests.some((url) => url.includes('source=yul'))).toBe(true);
 
     // Collapsing puts the console back to one row.
-    fireEvent.click(screen.getByRole('row', { name: /Cardinality · yul/ }));
+    fireEvent.click(screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ }));
     expect(screen.queryByText('a')).not.toBeInTheDocument();
+  });
+
+  it('keeps expanded groups open across a live refresh', async () => {
+    window.localStorage.setItem(
+      'promview.preferences',
+      JSON.stringify({
+        columns: [{ id: 'severity' }, { id: 'alert' }, { id: 'instance' }, { id: 'age' }],
+        density: 'normal',
+        grouping: { enabled: true, keys: ['alertname', 'source'] },
+      }),
+    );
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('groupBy=')) {
+        return Promise.resolve(jsonResponse(groupsPage()));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(
+          jsonResponse(
+            alertsPage({
+              alerts: [
+                apiAlert({ id: '1', labels: { alertname: 'Cardinality', instance: 'a' } }),
+                apiAlert({ id: '2', labels: { alertname: 'Cardinality', instance: 'b' } }),
+              ],
+              total: 2,
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    render(<App />);
+
+    const groupRow = await screen.findByRole('row', {
+      name: /alertname=Cardinality · source=yul/,
+    });
+    fireEvent.click(groupRow);
+    expect(await screen.findByText('a')).toBeInTheDocument();
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+
+    // A stream event re-reads groups and members quietly: the expanded group
+    // must not collapse or fall back to a loading panel.
+    act(() => {
+      FakeEventSource.latest().emit('alert.updated', streamEventPayload(), '8');
+    });
+
+    await waitFor(() =>
+      expect(
+        alertCalls().filter((url) => url.includes('match=alertname%3DCardinality')).length,
+      ).toBeGreaterThan(1),
+    );
+    expect(screen.queryByText(/loading groups/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('row', { name: /alertname=Cardinality · source=yul/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByText('a')).toBeInTheDocument();
+    expect(screen.getByText('b')).toBeInTheDocument();
   });
 
   it('switches between grouped and flat from the view menu, and remembers it', async () => {
@@ -1048,6 +1108,52 @@ describe('App', () => {
     expect(alertCalls()[2]).toBe(
       '/api/v1/alerts?limit=100&status=firing&match=team%3Dcore&sort=startsAt&order=desc',
     );
+  });
+
+  it('sorts the grouped view from its column headers', async () => {
+    window.localStorage.setItem(
+      'promview.preferences',
+      JSON.stringify({
+        columns: [{ id: 'severity' }, { id: 'alert' }, { id: 'instance' }, { id: 'age' }],
+        density: 'normal',
+        grouping: { enabled: true, keys: ['alertname', 'source'] },
+      }),
+    );
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('groupBy=')) {
+        return Promise.resolve(jsonResponse(groupsPage()));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    render(<App />);
+
+    expect(await screen.findByRole('treegrid')).toBeInTheDocument();
+    const groupCalls = () => alertCalls().filter((url) => url.includes('groupBy='));
+    expect(groupCalls()).toEqual([
+      '/api/v1/alerts?limit=100&status=firing&groupBy=alertname%2Csource',
+    ]);
+
+    const ageHeader = () => screen.getByRole('button', { name: 'Sort by Age' }).closest('th');
+
+    // Age ascending reads youngest-first, which the endpoint takes as
+    // startsAt descending.
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Age' }));
+    await waitFor(() => expect(groupCalls()).toHaveLength(2));
+    expect(groupCalls()[1]).toBe(
+      '/api/v1/alerts?limit=100&status=firing&sort=startsAt&order=desc&groupBy=alertname%2Csource',
+    );
+    expect(ageHeader()).toHaveAttribute('aria-sort', 'ascending');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Age' }));
+    await waitFor(() => expect(groupCalls()).toHaveLength(3));
+    expect(groupCalls()[2]).toBe(
+      '/api/v1/alerts?limit=100&status=firing&sort=startsAt&order=asc&groupBy=alertname%2Csource',
+    );
+    expect(ageHeader()).toHaveAttribute('aria-sort', 'descending');
   });
 
   it('applies and upserts matchers from the detail drawer label buttons', async () => {

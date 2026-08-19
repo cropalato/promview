@@ -37,6 +37,14 @@ func TestValidateAcceptsLabelColumns(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsCustomGroupingLabel(t *testing.T) {
+	value := Default()
+	value.Grouping.Keys = []string{"prometheus_cluster", "source"}
+	if err := Validate(value); err != nil {
+		t.Fatalf("Validate() with a custom grouping label error = %v", err)
+	}
+}
+
 func TestValidateRejectsUnusableLayouts(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -54,8 +62,8 @@ func TestValidateRejectsUnusableLayouts(t *testing.T) {
 		{name: "grouping without keys", mutate: func(p *Preferences) {
 			p.Grouping = Grouping{Enabled: true}
 		}},
-		{name: "grouping by an unknown key", mutate: func(p *Preferences) {
-			p.Grouping = Grouping{Enabled: true, Keys: []string{"nonsense"}}
+		{name: "grouping by a malformed label", mutate: func(p *Preferences) {
+			p.Grouping = Grouping{Enabled: true, Keys: []string{"not a label"}}
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -23,17 +23,6 @@ team sees group totals computed over their slice alone, never the true total of
 a group they cannot open.
 */
 
-// alertGroupKeys maps the shared vocabulary in alerts.GroupKeys to SQL. Nothing
-// outside that vocabulary reaches this map, so no caller-supplied text is ever
-// interpolated into the statement.
-var alertGroupKeys = map[string]string{
-	"alertname": "COALESCE(alert.labels->>'alertname', '')",
-	"source":    "alert.source_slug",
-	"team":      "COALESCE(alert.labels->>'team', '')",
-	"severity":  "COALESCE(alert.labels->>'severity', 'warning')",
-	"instance":  "COALESCE(alert.labels->>'instance', '')",
-}
-
 // severityBuckets are counted per group so the console can render the mix
 // without loading the members.
 var severityBuckets = []string{"critical", "warning", "info"}
@@ -201,13 +190,13 @@ func groupKeyExpressions(groupBy []string) ([]string, error) {
 	}
 	expressions := make([]string, 0, len(groupBy))
 	for _, key := range groupBy {
-		expression, ok := alertGroupKeys[key]
-		if !ok {
-			// Unreachable while this map covers alerts.GroupKeys, which
-			// TestAlertGroupKeysCoverVocabulary enforces.
-			return nil, fmt.Errorf("cannot group by %q", key)
+		if key == "source" {
+			expressions = append(expressions, "alert.source_slug")
+			continue
 		}
-		expressions = append(expressions, expression)
+		// ValidateGroupBy permits only ASCII Prometheus label identifiers, so
+		// embedding the key in this quoted literal cannot alter the SQL.
+		expressions = append(expressions, "COALESCE(alert.labels->>'"+key+"', '')")
 	}
 	return expressions, nil
 }

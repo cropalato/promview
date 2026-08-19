@@ -40,13 +40,13 @@ func TestAlertCursorValue(t *testing.T) {
 	}
 }
 
-func TestAlertFiltersBindMatchersAndIncludeAbsentNegativeLabels(t *testing.T) {
+func TestAlertFiltersBindMatchersAndMatchEmptyLabelsLikeGroups(t *testing.T) {
 	where, args := alertFilters(auth.Principal{Anonymous: true}, alerts.Query{Matches: []alerts.LabelMatcher{
 		{Name: "team", Operator: "=", Value: "platform"},
 		{Name: "instance", Operator: "!=", Value: "api-2"},
 	}}, "alert")
-	if !strings.Contains(where, "alert.labels ? $1") || !strings.Contains(where, "NOT (alert.labels ? $3)") {
-		t.Fatalf("where = %q, want positive presence and absent-label negative matching", where)
+	if !strings.Contains(where, "COALESCE(alert.labels->>$1, '') = $2") || !strings.Contains(where, "NOT (alert.labels ? $3)") {
+		t.Fatalf("where = %q, want empty-label positive and absent-label negative matching", where)
 	}
 	if len(args) != 4 || args[0] != "team" || args[1] != "platform" || args[2] != "instance" || args[3] != "api-2" {
 		t.Fatalf("args = %#v, want bound matcher names and values", args)

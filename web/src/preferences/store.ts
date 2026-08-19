@@ -1,4 +1,5 @@
 import { DEFAULT_COLUMN_IDS } from '../alerts/columns';
+import { DEFAULT_GROUP_KEYS, sanitizeGroupKeys } from '../alerts/grouping';
 
 /**
  * Console layout preferences: which columns, how dense, whether alerts arrive
@@ -42,7 +43,7 @@ export function defaultPreferences(): Preferences {
   return {
     columns: DEFAULT_COLUMN_IDS.map((id) => ({ id })),
     density: 'auto',
-    grouping: { enabled: true, keys: ['alertname', 'source'] },
+    grouping: { enabled: true, keys: [...DEFAULT_GROUP_KEYS] },
   };
 }
 
@@ -103,8 +104,11 @@ export function parsePreferences(value: unknown): Preferences {
       return defaults.grouping;
     }
     const value = raw.grouping as Record<string, unknown>;
+    // Keys outside the API's grouping vocabulary (or more than it accepts)
+    // would make every grouped request fail; a layout naming them keeps the
+    // usable prefix instead of costing the whole grouping preference.
     const keys = Array.isArray(value.keys)
-      ? value.keys.filter((key): key is string => typeof key === 'string')
+      ? sanitizeGroupKeys(value.keys, defaults.grouping.keys)
       : defaults.grouping.keys;
     return {
       enabled: typeof value.enabled === 'boolean' ? value.enabled : defaults.grouping.enabled,
