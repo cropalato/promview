@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cropalato/promview/internal/alerts"
 	"github.com/cropalato/promview/internal/auth"
@@ -28,7 +29,8 @@ a group they cannot open.
 var severityBuckets = []string{"critical", "warning", "info"}
 
 // GroupAlerts summarises alerts into one row per distinct combination of the
-// query's GroupBy keys, ordered by worst severity then recency, both descending.
+// query's GroupBy keys. Without an explicit sort it retains the console's
+// severity-then-recency ordering; explicit sorts use a group aggregate.
 func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, query alerts.Query) (alerts.GroupResult, error) {
 	keyExpressions, err := groupKeyExpressions(query.GroupBy)
 	if err != nil {
@@ -36,6 +38,19 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 	}
 	if query.Limit < 1 {
 		return alerts.GroupResult{}, errors.New("limit must be positive")
+	}
+	if query.Sort != "" {
+		if _, ok := alertSorts[query.Sort]; !ok {
+			return alerts.GroupResult{}, errors.New("sort is invalid")
+		}
+		if query.Order == "" {
+			query.Order = alerts.DefaultOrder
+		}
+		if query.Order != "asc" && query.Order != "desc" {
+			return alerts.GroupResult{}, errors.New("order must be asc or desc")
+		}
+	} else if query.Order != "" {
+		return alerts.GroupResult{}, errors.New("order requires sort")
 	}
 	if query.GroupCursor != nil && query.GroupCursor.Query != query.CursorIdentity() {
 		return alerts.GroupResult{}, errors.New("cursor does not match the current query")
@@ -64,24 +79,49 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 
 	listArgs := append([]any(nil), args...)
 	having := ""
+	ordering := []string{}
+	sortExpression := ""
+	sort := alertSort{}
 	if cursor := query.GroupCursor; cursor != nil {
 		if len(cursor.Key) != len(keyExpressions) {
 			return alerts.GroupResult{}, errors.New("cursor does not match the current grouping")
 		}
-		// Every ordering column descends, so one row comparison expresses the
-		// whole keyset: strictly "after" the last row of the previous page.
-		placeholders := make([]string, 0, len(cursor.Key)+2)
-		listArgs = append(listArgs, cursor.SeverityRank, cursor.LatestLastSeen)
-		placeholders = append(placeholders,
-			fmt.Sprintf("$%d::integer", len(listArgs)-1),
-			fmt.Sprintf("$%d::timestamptz", len(listArgs)),
-		)
-		for _, value := range cursor.Key {
-			listArgs = append(listArgs, value)
-			placeholders = append(placeholders, fmt.Sprintf("$%d::text", len(listArgs)))
+		if query.Sort == "" {
+			if cursor.Sort != "severity" || cursor.Order != "desc" || cursor.LatestLastSeen.IsZero() {
+				return alerts.GroupResult{}, errors.New("cursor does not match the current ordering")
+			}
+			placeholders := groupCursorPlaceholders(&listArgs, cursor.Key, cursor.SeverityRank, cursor.LatestLastSeen)
+			having = fmt.Sprintf(" HAVING (max(%s), max(alert.last_seen), %s) < (%s)", severityRank, strings.Join(keyExpressions, ", "), strings.Join(placeholders, ", "))
+		} else {
+			sort = alertSorts[query.Sort]
+			sortExpression = groupSortExpression(sort, query.Sort)
+			if cursor.Sort != query.Sort || cursor.Order != query.Order || !validGroupCursorValue(cursor.Value, sort.cursorType) {
+				return alerts.GroupResult{}, errors.New("cursor does not match the current ordering")
+			}
+			listArgs = append(listArgs, cursor.Value)
+			placeholders := []string{fmt.Sprintf("$%d::%s", len(listArgs), sort.cursorType)}
+			for _, value := range cursor.Key {
+				listArgs = append(listArgs, value)
+				placeholders = append(placeholders, fmt.Sprintf("$%d::text", len(listArgs)))
+			}
+			operator := ">"
+			if query.Order == "desc" {
+				operator = "<"
+			}
+			having = fmt.Sprintf(" HAVING (%s, %s) %s (%s)", sortExpression, strings.Join(keyExpressions, ", "), operator, strings.Join(placeholders, ", "))
 		}
-		having = fmt.Sprintf(" HAVING (max(%s), max(alert.last_seen), %s) < (%s)",
-			severityRank, strings.Join(keyExpressions, ", "), strings.Join(placeholders, ", "))
+	}
+	if query.Sort == "" {
+		ordering = []string{"max(" + severityRank + ") DESC", "max(alert.last_seen) DESC"}
+	} else {
+		if sortExpression == "" {
+			sort = alertSorts[query.Sort]
+			sortExpression = groupSortExpression(sort, query.Sort)
+		}
+		ordering = []string{sortExpression + " " + strings.ToUpper(query.Order)}
+	}
+	for _, expression := range keyExpressions {
+		ordering = append(ordering, expression+" "+strings.ToUpper(groupOrder(query)))
 	}
 	listArgs = append(listArgs, query.Limit+1)
 
@@ -94,15 +134,13 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 		"min(alert.starts_at)",
 		"(array_agg(alert.id ORDER BY alert.last_seen DESC, alert.id DESC))[1]",
 	)
+	if query.Sort != "" {
+		selections = append(selections, sortExpression)
+	}
 	for _, severity := range severityBuckets {
 		selections = append(selections, "count(*) FILTER (WHERE COALESCE(alert.labels->>'severity', 'warning') = '"+severity+"')")
 	}
 	selections = append(selections, "count(*) FILTER (WHERE COALESCE(alert.labels->>'severity', 'warning') NOT IN ('critical', 'warning', 'info'))")
-
-	ordering := []string{"max(" + severityRank + ") DESC", "max(alert.last_seen) DESC"}
-	for _, expression := range keyExpressions {
-		ordering = append(ordering, expression+" DESC")
-	}
 
 	rows, err := store.pool.Query(ctx, `
 		SELECT `+strings.Join(selections, ", ")+`
@@ -118,6 +156,7 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 	groups := make([]alerts.Group, 0, query.Limit+1)
 	ranks := make([]int, 0, query.Limit+1)
 	keys := make([][]string, 0, query.Limit+1)
+	values := make([]string, 0, query.Limit+1)
 	for rows.Next() {
 		keyValues := make([]string, len(keyExpressions))
 		scanTargets := make([]any, 0, len(selections))
@@ -132,6 +171,11 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 			&group.Total, &group.Acknowledged, &rank,
 			&group.LatestLastSeen, &group.EarliestStartsAt, &group.SampleAlertID,
 		)
+		var value any
+		if query.Sort != "" {
+			value = groupCursorScanTarget(sort.cursorType)
+			scanTargets = append(scanTargets, value)
+		}
 		for i := range bucketCounts {
 			scanTargets = append(scanTargets, &bucketCounts[i])
 		}
@@ -157,6 +201,9 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 		groups = append(groups, group)
 		ranks = append(ranks, rank)
 		keys = append(keys, keyValues)
+		if query.Sort != "" {
+			values = append(values, groupCursorValue(value))
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return alerts.GroupResult{}, fmt.Errorf("iterate alert groups: %w", err)
@@ -170,7 +217,12 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 			SeverityRank:   ranks[query.Limit-1],
 			LatestLastSeen: last.LatestLastSeen,
 			Key:            keys[query.Limit-1],
+			Sort:           groupSort(query),
+			Order:          groupOrder(query),
 			Query:          query.CursorIdentity(),
+		}
+		if query.Sort != "" {
+			next.Value = values[query.Limit-1]
 		}
 	}
 
@@ -207,6 +259,79 @@ func groupByPositions(count int) string {
 		positions = append(positions, strconv.Itoa(i))
 	}
 	return strings.Join(positions, ", ")
+}
+
+// Explicit group sorts use one stable value per group: the newest last-seen,
+// earliest start, worst severity, or lexicographically greatest text value.
+func groupSortExpression(sort alertSort, name string) string {
+	if name == "startsAt" {
+		return "min(" + sort.expression + ")"
+	}
+	return "max(" + sort.expression + ")"
+}
+
+func groupSort(query alerts.Query) string {
+	if query.Sort == "" {
+		return "severity"
+	}
+	return query.Sort
+}
+
+func groupOrder(query alerts.Query) string {
+	if query.Sort == "" || query.Order == "" {
+		return "desc"
+	}
+	return query.Order
+}
+
+func groupCursorPlaceholders(args *[]any, key []string, rank int, lastSeen time.Time) []string {
+	*args = append(*args, rank, lastSeen)
+	placeholders := []string{
+		fmt.Sprintf("$%d::integer", len(*args)-1),
+		fmt.Sprintf("$%d::timestamptz", len(*args)),
+	}
+	for _, value := range key {
+		*args = append(*args, value)
+		placeholders = append(placeholders, fmt.Sprintf("$%d::text", len(*args)))
+	}
+	return placeholders
+}
+
+func validGroupCursorValue(value, cursorType string) bool {
+	switch cursorType {
+	case "timestamptz":
+		_, err := time.Parse(time.RFC3339Nano, value)
+		return err == nil
+	case "integer":
+		parsed, err := strconv.Atoi(value)
+		return err == nil && parsed >= 0 && parsed <= 3
+	default:
+		return true
+	}
+}
+
+func groupCursorScanTarget(cursorType string) any {
+	switch cursorType {
+	case "timestamptz":
+		return new(time.Time)
+	case "integer":
+		return new(int)
+	default:
+		return new(string)
+	}
+}
+
+func groupCursorValue(value any) string {
+	switch value := value.(type) {
+	case *time.Time:
+		return value.UTC().Format(time.RFC3339Nano)
+	case *int:
+		return strconv.Itoa(*value)
+	case *string:
+		return *value
+	default:
+		panic("unsupported group cursor value")
+	}
 }
 
 func severityForRank(rank int) string {

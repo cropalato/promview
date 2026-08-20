@@ -575,16 +575,10 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		Sort:     values.Get("sort"),
 		Order:    values.Get("order"),
 	}
-	if query.Sort == "" {
-		query.Sort = alerts.DefaultSort
-	}
-	if !isAlertSort(query.Sort) {
+	if query.Sort != "" && !isAlertSort(query.Sort) {
 		return alerts.Query{}, errors.New("sort is invalid")
 	}
-	if query.Order == "" {
-		query.Order = alerts.DefaultOrder
-	}
-	if query.Order != "asc" && query.Order != "desc" {
+	if query.Order != "" && query.Order != "asc" && query.Order != "desc" {
 		return alerts.Query{}, errors.New("order must be asc or desc")
 	}
 	if raw := strings.TrimSpace(values.Get("groupBy")); raw != "" {
@@ -594,6 +588,18 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		if err := alerts.ValidateGroupBy(query.GroupBy); err != nil {
 			return alerts.Query{}, err
 		}
+	}
+	if len(query.GroupBy) == 0 {
+		if query.Sort == "" {
+			query.Sort = alerts.DefaultSort
+		}
+		if query.Order == "" {
+			query.Order = alerts.DefaultOrder
+		}
+	} else if query.Sort != "" && query.Order == "" {
+		query.Order = alerts.DefaultOrder
+	} else if query.Sort == "" && query.Order != "" {
+		return alerts.Query{}, errors.New("order requires sort")
 	}
 	for _, raw := range values["match"] {
 		matcher, err := parseLabelMatcher(raw)
@@ -608,7 +614,7 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 			if err != nil {
 				return alerts.Query{}, errors.New("cursor is invalid")
 			}
-			if cursor.Query != query.CursorIdentity() || len(cursor.Key) != len(query.GroupBy) {
+			if cursor.Query != query.CursorIdentity() || len(cursor.Key) != len(query.GroupBy) || !validGroupCursor(cursor, query) {
 				return alerts.Query{}, errors.New("cursor does not match query")
 			}
 			query.GroupCursor = &cursor
@@ -680,6 +686,31 @@ func isAlertSort(value string) bool {
 
 func validCursorValue(cursor alerts.Cursor) bool {
 	switch cursor.Sort {
+	case "lastSeen", "startsAt":
+		_, err := time.Parse(time.RFC3339Nano, cursor.Value)
+		return err == nil
+	case "severity":
+		value, err := strconv.Atoi(cursor.Value)
+		return err == nil && value >= 0 && value <= 3
+	default:
+		return true
+	}
+}
+
+func validGroupCursor(cursor alerts.GroupCursor, query alerts.Query) bool {
+	sort := query.Sort
+	order := query.Order
+	if sort == "" {
+		sort = "severity"
+		order = "desc"
+	}
+	if cursor.Sort != sort || cursor.Order != order {
+		return false
+	}
+	if query.Sort == "" {
+		return !cursor.LatestLastSeen.IsZero()
+	}
+	switch sort {
 	case "lastSeen", "startsAt":
 		_, err := time.Parse(time.RFC3339Nano, cursor.Value)
 		return err == nil

@@ -534,6 +534,8 @@ func TestListAlertGroups(t *testing.T) {
 		}},
 		NextCursor: &alerts.GroupCursor{
 			SeverityRank: 3, LatestLastSeen: latest, Key: []string{"Cardinality", "yul"},
+			Sort: "severity", Order: "desc",
+			Query: alerts.Query{Status: alerts.StatusFiring, GroupBy: []string{"alertname", "source"}}.CursorIdentity(),
 		},
 		TotalGroups:    18,
 		TotalAlerts:    236,
@@ -602,7 +604,7 @@ func TestListAlertGroups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeGroupCursor() error = %v", err)
 	}
-	if cursor.SeverityRank != 3 || len(cursor.Key) != 2 || cursor.Key[0] != "Cardinality" {
+	if cursor.SeverityRank != 3 || cursor.Sort != "severity" || cursor.Order != "desc" || len(cursor.Key) != 2 || cursor.Key[0] != "Cardinality" {
 		t.Errorf("decoded cursor = %#v, want the last group's ordering values", cursor)
 	}
 }
@@ -677,7 +679,8 @@ func TestListAlertGroupsAcceptsItsOwnCursor(t *testing.T) {
 	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
 	identity := alerts.Query{GroupBy: []string{"alertname"}}.CursorIdentity()
 	cursor, err := encodeGroupCursor(alerts.GroupCursor{
-		SeverityRank: 2, LatestLastSeen: time.Now().UTC(), Key: []string{"Cardinality"}, Query: identity,
+		SeverityRank: 2, LatestLastSeen: time.Now().UTC(), Key: []string{"Cardinality"},
+		Sort: "severity", Order: "desc", Query: identity,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -689,6 +692,32 @@ func TestListAlertGroupsAcceptsItsOwnCursor(t *testing.T) {
 	}
 	if store.query.GroupCursor == nil || store.query.GroupCursor.Key[0] != "Cardinality" {
 		t.Fatalf("group cursor reached the store as %#v, want the decoded cursor", store.query.GroupCursor)
+	}
+}
+
+func TestListAlertGroupsParsesExplicitSortingAndBindsCursor(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	query := alerts.Query{GroupBy: []string{"alertname"}, Sort: "team", Order: "asc"}
+	cursor, err := encodeGroupCursor(alerts.GroupCursor{
+		Key: []string{"Cardinality"}, Sort: "team", Order: "asc", Value: "platform", Query: query.CursorIdentity(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=alertname&sort=team&order=asc&cursor="+cursor, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if store.query.Sort != "team" || store.query.Order != "asc" || store.query.GroupCursor == nil || store.query.GroupCursor.Value != "platform" {
+		t.Fatalf("parsed grouped query = %#v", store.query)
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=alertname&sort=team&order=desc&cursor="+cursor, nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("sort-mismatched cursor status = %d, want %d", response.Code, http.StatusBadRequest)
 	}
 }
 

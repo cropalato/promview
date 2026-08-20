@@ -1,12 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { FIXED_COLUMNS, LABEL_COLUMN_PREFIX } from '../alerts/columns';
 import { DENSITIES } from '../preferences/store';
-import type { Density, Preferences } from '../preferences/store';
+import type { ColumnPreference, Density, Preferences } from '../preferences/store';
 import { GroupingEditor } from './GroupingEditor';
 
 /**
  * The controls for how the console shows alerts: grouped or flat and by which
- * keys, how dense the table is, and which columns it keeps.
+ * keys, how dense the table is, and which columns it keeps — and in which
+ * order.
  *
  * Everything here writes straight through to preferences, which is what carries
  * the choice to the operator's other machines. A column can be bound to any
@@ -14,7 +15,21 @@ import { GroupingEditor } from './GroupingEditor';
  * do not cover. Grouping keys come from the API's closed vocabulary instead:
  * each one becomes a server-side GROUP BY, so the picker in GroupingEditor is
  * limited to what the endpoint accepts.
+ *
+ * Column order was already what the table read; it just had no way in. The
+ * kept columns are shown as an ordered list with per-row move buttons, the
+ * same model as GroupingEditor: the order is the setting, and buttons keep it
+ * reachable from a keyboard and readable to a screen reader in a way
+ * drag-and-drop does not.
  */
+
+/** How a kept column names itself in the menu. */
+function columnLabel(id: string): string {
+  if (id.startsWith(LABEL_COLUMN_PREFIX)) {
+    return id.slice(LABEL_COLUMN_PREFIX.length);
+  }
+  return FIXED_COLUMNS.find((column) => column.id === id)?.label ?? id;
+}
 
 export interface ViewMenuProps {
   preferences: Preferences;
@@ -87,9 +102,42 @@ export function ViewMenu({
     onChange({ ...preferences, columns: [...preferences.columns, { id }] });
   };
 
-  const labelColumns = preferences.columns.filter((column) =>
-    column.id.startsWith(LABEL_COLUMN_PREFIX),
-  );
+  const fixedIds = new Set(FIXED_COLUMNS.map((column) => column.id));
+  // The kept columns the menu can name, in saved order, each carrying where it
+  // sits in the full list. Anything else — a column id a newer console saved —
+  // has no row here but keeps its stored place; see moveColumn.
+  const ordered = preferences.columns
+    .map((column, index) => ({ column, index }))
+    .filter(({ column }) =>
+      column.id.startsWith(LABEL_COLUMN_PREFIX)
+        ? column.id.length > LABEL_COLUMN_PREFIX.length
+        : fixedIds.has(column.id),
+    );
+
+  const moveColumn = (position: number, delta: -1 | 1) => {
+    const target = position + delta;
+    if (target < 0 || target >= ordered.length) {
+      return;
+    }
+    const from = ordered[position]?.index;
+    const to = ordered[target]?.index;
+    if (from === undefined || to === undefined) {
+      return;
+    }
+    // Swap the stored entries whole rather than rebuilding them from ids: a
+    // resized column keeps its width, and any field added later travels with
+    // it for free. Swapping in place also leaves entries this list does not
+    // show exactly where they were instead of dropping them.
+    const columns = [...preferences.columns];
+    const moved = columns[from] as ColumnPreference;
+    columns[from] = columns[to] as ColumnPreference;
+    columns[to] = moved;
+    onChange({ ...preferences, columns });
+  };
+
+  // Fixed columns the operator has turned off. They have no place in the order
+  // yet, so they sit below the list as the way back on; toggling one appends.
+  const hiddenFixed = FIXED_COLUMNS.filter((column) => !selected.has(column.id));
   const suggestions = labelSuggestions.filter(
     (name) => !selected.has(`${LABEL_COLUMN_PREFIX}${name}`),
   );
@@ -155,22 +203,50 @@ export function ViewMenu({
 
           <fieldset className="view-menu-group">
             <legend>Columns</legend>
-            {FIXED_COLUMNS.map((column) => (
+            <ul className="view-menu-columns" aria-label="Columns, in order">
+              {ordered.map(({ column }, position) => {
+                const label = columnLabel(column.id);
+                return (
+                  <li key={column.id} className="view-menu-column">
+                    <label className="view-menu-check">
+                      <input type="checkbox" checked onChange={() => toggleColumn(column.id)} />
+                      <span>{label}</span>
+                    </label>
+                    <span className="view-menu-column-actions">
+                      <button
+                        type="button"
+                        className="button view-menu-column-action"
+                        aria-label={`Move ${label} up`}
+                        disabled={position === 0}
+                        onClick={() => moveColumn(position, -1)}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="button view-menu-column-action"
+                        aria-label={`Move ${label} down`}
+                        disabled={position === ordered.length - 1}
+                        onClick={() => moveColumn(position, 1)}
+                      >
+                        ↓
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {hiddenFixed.map((column) => (
               <label key={column.id} className="view-menu-check">
-                <input
-                  type="checkbox"
-                  checked={selected.has(column.id)}
-                  onChange={() => toggleColumn(column.id)}
-                />
+                <input type="checkbox" checked={false} onChange={() => toggleColumn(column.id)} />
                 <span>{column.label}</span>
               </label>
             ))}
-            {labelColumns.map((column) => (
-              <label key={column.id} className="view-menu-check">
-                <input type="checkbox" checked onChange={() => toggleColumn(column.id)} />
-                <span>{column.id.slice(LABEL_COLUMN_PREFIX.length)}</span>
-              </label>
-            ))}
+            {/* Moving a column changes the table without moving focus; say
+                where the list landed. */}
+            <p className="visually-hidden" role="status">
+              Columns: {ordered.map(({ column }) => columnLabel(column.id)).join(', ')}
+            </p>
           </fieldset>
 
           <fieldset className="view-menu-group">

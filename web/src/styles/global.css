@@ -944,6 +944,36 @@ kbd {
   flex: 1 1 auto;
 }
 
+/* Kept columns: the order is the setting, so each row carries its own move
+   buttons alongside the checkbox that drops it. */
+.view-menu-columns {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.view-menu-column {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.view-menu-column-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.view-menu-column-action {
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* Custom grouping: the ordered key list is the setting, so each row carries
    its own reorder/remove buttons; the add row reuses the label-column row. */
 .grouping-editor {
