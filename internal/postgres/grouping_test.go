@@ -220,6 +220,50 @@ func TestStoreGroupAlerts(t *testing.T) {
 		t.Errorf("paged through %d groups, want 3", len(seen))
 	}
 
+	// Every supported alert sort has a deterministic aggregate for groups and
+	// uses that value plus the grouping keys as its keyset cursor.
+	for _, sort := range []string{"lastSeen", "startsAt", "severity", "alertname", "summary", "status", "team", "instance", "source"} {
+		for _, order := range []string{"asc", "desc"} {
+			t.Run(sort+"/"+order, func(t *testing.T) {
+				seen := map[string]bool{}
+				var cursor *alerts.GroupCursor
+				for page := 0; page < 5; page++ {
+					paged, err := store.GroupAlerts(ctx, anonymous, alerts.Query{
+						Limit: 1, GroupBy: []string{"alertname", "source"}, Sort: sort, Order: order, GroupCursor: cursor,
+					})
+					if err != nil {
+						t.Fatalf("GroupAlerts() error = %v", err)
+					}
+					if len(paged.Groups) != 1 {
+						t.Fatalf("page %d returned %d groups, want 1", page, len(paged.Groups))
+					}
+					key := paged.Groups[0].Key["alertname"] + "/" + paged.Groups[0].Key["source"]
+					if seen[key] {
+						t.Fatalf("page %d repeated group %q", page, key)
+					}
+					seen[key] = true
+					cursor = paged.NextCursor
+					if cursor == nil {
+						break
+					}
+				}
+				if len(seen) != 3 {
+					t.Errorf("paged through %d groups, want 3", len(seen))
+				}
+			})
+		}
+	}
+
+	severityAscending, err := store.GroupAlerts(ctx, anonymous, alerts.Query{
+		Limit: 10, GroupBy: []string{"alertname", "source"}, Sort: "severity", Order: "asc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if severityAscending.Groups[0].Key["source"] != "dsm" {
+		t.Errorf("severity ascending first group = %v, want the warning dsm group", severityAscending.Groups[0].Key)
+	}
+
 	// A cursor is bound to the query that produced it; reusing it under a
 	// different grouping would silently return the wrong page.
 	stale := &alerts.GroupCursor{SeverityRank: 3, LatestLastSeen: base, Key: []string{"Cardinality", "yul"}, Query: "mismatched"}

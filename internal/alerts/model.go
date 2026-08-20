@@ -124,13 +124,16 @@ type Group struct {
 	SampleAlertID int64
 }
 
-// GroupCursor pages through groups. Groups are ordered by worst severity then
-// recency, both descending, so the cursor carries those two values plus the key
-// itself to break ties.
+// GroupCursor pages through groups. Value is the deterministic aggregate used
+// for an explicitly requested sort; the legacy default uses severity and
+// recency. Sort and Order bind a cursor to its ordering.
 type GroupCursor struct {
 	SeverityRank   int       `json:"severityRank"`
 	LatestLastSeen time.Time `json:"latestLastSeen"`
 	Key            []string  `json:"key"`
+	Sort           string    `json:"sort"`
+	Order          string    `json:"order"`
+	Value          string    `json:"value"`
 	Query          string    `json:"query"`
 }
 
@@ -157,7 +160,9 @@ func (query Query) CursorIdentity() string {
 		Team     string         `json:"team"`
 		Matches  []LabelMatcher `json:"matches"`
 		GroupBy  []string       `json:"groupBy"`
-	}{query.Source, query.Status, query.Severity, query.Team, query.Matches, query.GroupBy})
+		Sort     string         `json:"sort"`
+		Order    string         `json:"order"`
+	}{query.Source, query.Status, query.Severity, query.Team, query.Matches, query.GroupBy, query.Sort, query.Order})
 	if err != nil {
 		panic(fmt.Sprintf("marshal cursor identity: %v", err))
 	}
