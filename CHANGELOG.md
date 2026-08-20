@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **console:** use the available browser width for the live alert view instead of capping the console at 1440px.
+
 ## [0.1.0-alpha.11] - 2026-08-19
 
 ### Changed

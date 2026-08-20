@@ -411,7 +411,7 @@ code {
 /* Main console column */
 .console {
   flex: 1;
-  width: min(1440px, 100%);
+  width: 100%;
   margin: 0 auto;
   padding: 18px 16px 28px;
   display: flex;
