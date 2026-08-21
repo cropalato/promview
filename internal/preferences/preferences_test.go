@@ -26,6 +26,21 @@ func TestValidateAcceptsEveryDensityIncludingAuto(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsEveryThemeIncludingSystem(t *testing.T) {
+	for _, theme := range Themes {
+		value := Default()
+		value.Theme = theme
+		if err := Validate(value); err != nil {
+			t.Errorf("Validate() with theme %q error = %v", theme, err)
+		}
+	}
+	// System is the default so an operator who never opens the picker keeps the
+	// behaviour the console had before there was one.
+	if Default().Theme != "system" {
+		t.Errorf("default theme = %q, want system", Default().Theme)
+	}
+}
+
 func TestValidateAcceptsLabelColumns(t *testing.T) {
 	// A label column is the whole point of the registry: surface a dimension
 	// the built-in columns do not cover without giving the label console-wide
@@ -59,6 +74,8 @@ func TestValidateRejectsUnusableLayouts(t *testing.T) {
 		}},
 		{name: "absurd width", mutate: func(p *Preferences) { p.Columns = []Column{{ID: "severity", Width: 5}} }},
 		{name: "unknown density", mutate: func(p *Preferences) { p.Density = "tiny" }},
+		{name: "unknown theme", mutate: func(p *Preferences) { p.Theme = "neon" }},
+		{name: "empty theme", mutate: func(p *Preferences) { p.Theme = "" }},
 		{name: "grouping without keys", mutate: func(p *Preferences) {
 			p.Grouping = Grouping{Enabled: true}
 		}},

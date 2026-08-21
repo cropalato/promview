@@ -46,11 +46,15 @@ func TestStorePreferences(t *testing.T) {
 	if initial.Density != "auto" || len(initial.Columns) == 0 || !initial.Grouping.Enabled {
 		t.Fatalf("initial preferences = %#v, want the defaults", initial)
 	}
+	if initial.Theme != "system" {
+		t.Errorf("initial theme = %q, want system", initial.Theme)
+	}
 
 	saved := preferences.Default()
 	saved.Density = "compact"
 	saved.Columns = []preferences.Column{{ID: "severity"}, {ID: "alert"}, {ID: "label:prometheus_cluster", Width: 180}}
 	saved.Grouping = preferences.Grouping{Enabled: true, Keys: []string{"alertname"}}
+	saved.Theme = "nord"
 	if err := store.WritePreferences(ctx, user, saved); err != nil {
 		t.Fatalf("WritePreferences() error = %v", err)
 	}
@@ -60,6 +64,12 @@ func TestStorePreferences(t *testing.T) {
 	}
 	if read.Density != "compact" || len(read.Columns) != 3 || read.Columns[2].Width != 180 {
 		t.Fatalf("read preferences = %#v, want the saved layout", read)
+	}
+	// The palette follows the operator between machines just as the layout
+	// does; that is the whole reason it is stored per user rather than per
+	// browser.
+	if read.Theme != "nord" {
+		t.Errorf("read theme = %q, want nord", read.Theme)
 	}
 
 	// Saving again replaces rather than accumulating.
@@ -81,6 +91,11 @@ func TestStorePreferences(t *testing.T) {
 	if err := store.WritePreferences(ctx, user, invalid); err == nil {
 		t.Error("WritePreferences() with an invalid density error = nil, want error")
 	}
+	unknownTheme := preferences.Default()
+	unknownTheme.Theme = "neon"
+	if err := store.WritePreferences(ctx, user, unknownTheme); err == nil {
+		t.Error("WritePreferences() with an unknown theme error = nil, want error")
+	}
 
 	// A row written by an older console can lack fields this one needs; the
 	// read fills them in instead of failing and leaving the table blank.
@@ -93,6 +108,11 @@ func TestStorePreferences(t *testing.T) {
 	}
 	if partial.Density != "auto" || len(partial.Columns) == 0 {
 		t.Errorf("partial preferences = %#v, want defaults filled in", partial)
+	}
+	// Every row written before the palette existed lacks the key entirely, and
+	// an empty theme would be refused by the next write.
+	if partial.Theme != "system" {
+		t.Errorf("partial theme = %q, want system", partial.Theme)
 	}
 
 	// Open mode has no user to key against; both directions say so plainly.

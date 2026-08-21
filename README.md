@@ -174,10 +174,18 @@ not supported yet. A source without a URL is left to expiry alone.
 
 Two rules keep a healthy Alertmanager from emptying the console. An alert must be
 absent from two consecutive readings before it is resolved, so a dropped request
-changes nothing. And an Alertmanager reporting *no* alerts at all while promview holds
+changes nothing. And an Alertmanager reporting _no_ alerts at all while promview holds
 firing ones is treated as untrustworthy — a restarting Alertmanager looks exactly like
 a fleet that went silent — so that reading only syncs suppression and leaves endings
 to a reading that shows something.
+
+## Console Preferences
+
+Column choice and order, row density, grouping keys, and the console palette are stored per user in `user_preferences` and served by `GET`/`PUT /api/v1/preferences`, so a layout follows an operator between machines.
+
+This requires a user to key against, which means `PROMVIEW_AUTH_MODE=oidc`. In `open` mode every reader is the same anonymous principal, the endpoint answers `404`, and the console keeps its preferences in the browser instead — the choices still work, they just do not travel.
+
+The palette defaults to `system`, which follows the operating system's light/dark setting as the console always has. The alternatives are `dark`, `light`, `nord`, `gruvbox`, `solarized-light`, `high-contrast`, and `colorblind-safe`, picked from the status bar at the bottom of the console.
 
 ## OIDC Authentication
 

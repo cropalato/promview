@@ -111,6 +111,16 @@ describe('preferences store', () => {
     expect(parsed.density).toBe('auto');
     expect(parsed.grouping.enabled).toBe(true);
     expect(parsed.grouping.keys).toEqual(['alertname', 'source']);
+    // A palette no stylesheet block matches would render the console in
+    // whatever the cascade left behind, so it falls back too.
+    expect(parsed.theme).toBe('system');
+  });
+
+  it('keeps a stored palette and defaults one that was never chosen', () => {
+    expect(parsePreferences({ theme: 'colorblind-safe' }).theme).toBe('colorblind-safe');
+    // Every payload written before the palette existed lacks the key.
+    expect(parsePreferences({ density: 'compact' }).theme).toBe('system');
+    expect(defaultPreferences().theme).toBe('system');
   });
 
   it('keeps only the grouping keys the API can group by', () => {

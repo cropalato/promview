@@ -741,6 +741,39 @@ describe('App', () => {
     expect(stored.density).toBe('comfortable');
   });
 
+  it('pins the chosen palette on the document and stores it', async () => {
+    window.localStorage.clear();
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('groupBy=')) {
+        return Promise.resolve(jsonResponse(groupsPage()));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    render(<App />);
+
+    await screen.findByRole('treegrid');
+    // System is the default, and it deliberately sets no attribute so the
+    // stylesheet's prefers-color-scheme rule stays in charge.
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+
+    fireEvent.change(screen.getByRole('combobox', { name: /theme/i }), {
+      target: { value: 'nord' },
+    });
+    expect(document.documentElement.dataset.theme).toBe('nord');
+    const stored = JSON.parse(window.localStorage.getItem('promview.preferences') ?? '{}');
+    expect(stored.theme).toBe('nord');
+
+    // Back to system releases the document again.
+    fireEvent.change(screen.getByRole('combobox', { name: /theme/i }), {
+      target: { value: 'system' },
+    });
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+  });
+
   it('switches the empty state when a filter is applied and cleared', async () => {
     mockApi();
     render(<App />);
