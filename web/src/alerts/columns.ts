@@ -147,6 +147,32 @@ export const FIXED_COLUMNS: readonly ColumnDefinition[] = [
 export const DEFAULT_COLUMN_IDS: readonly string[] = FIXED_COLUMNS.map((column) => column.id);
 
 /**
+ * The alert label a column filters on, or null when it does not filter.
+ *
+ * Only some columns name a label. Summary, age, last seen, assignee, and notes
+ * are derived or annotation fields with nothing to match against. State and
+ * source do filter, but the API spells them as their own query parameters
+ * rather than label matchers, and the console's query only sends `match=`.
+ *
+ * Where a column does name a label, the id is not always the label: the alert
+ * column shows `alertname`.
+ */
+const COLUMN_FILTER_LABELS: Readonly<Record<string, string>> = {
+  severity: 'severity',
+  alert: 'alertname',
+  team: 'team',
+  instance: 'instance',
+};
+
+export function columnFilterLabel(id: string): string | null {
+  if (id.startsWith(LABEL_COLUMN_PREFIX)) {
+    const name = id.slice(LABEL_COLUMN_PREFIX.length);
+    return name === '' ? null : name;
+  }
+  return COLUMN_FILTER_LABELS[id] ?? null;
+}
+
+/**
  * A column bound to an alert label. It carries no server-side sort: sorting by
  * an arbitrary label would be a sequential scan, so the header stays plain
  * until an index exists for it.

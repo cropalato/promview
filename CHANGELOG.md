@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Features
+
+- **console:** add a filter button to each column row in the view menu. Columns that name an alert label — severity, alert (`alertname`), team, instance, and any label column — can start a filter on that label or drop one already applied.
+
 ### Fixed
 
 - **console:** stop the status bar claiming `read-only` for every session; the top bar's role badge already reports what the operator may do.
