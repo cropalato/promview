@@ -6,9 +6,36 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.16] - 2026-08-21
+
+### Features
+
+- **console:** add a palette picker to the status bar with five new themes — Nord, Gruvbox, Solarized Light, High Contrast, and Colorblind Safe — alongside the existing dark and light ones. The choice is stored with the rest of a user's preferences, so it follows them between machines wherever there is a signed-in user; `system` remains the default and keeps following the operating system.
+
+## [0.1.0-alpha.15] - 2026-08-20
+
+### Features
+
+- **groups:** support an explicit sort order for grouped alerts, binding the group cursor to the sort key, order, and value so a page token rejects a query it was not issued for. The default ordering remains severity then recency.
+- **console:** add move-up and move-down column controls to the view menu.
+
+## [0.1.0-alpha.14] - 2026-08-20
+
 ### Fixed
 
 - **console:** use the available browser width for the live alert view instead of capping the console at 1440px.
+
+## [0.1.0-alpha.13] - 2026-08-20
+
+### Build System
+
+- **ci:** cache amd64 image builds in the release workflow.
+
+## [0.1.0-alpha.12] - 2026-08-19
+
+### Changed
+
+- **console:** collapse the group aggregate summary — severity mix, age, and acknowledgement ratio — into the group control column, removing the separate group summary column.
 
 ## [0.1.0-alpha.11] - 2026-08-19
 

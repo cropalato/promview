@@ -1,6 +1,7 @@
 // Package preferences holds the console layout choices that follow an operator
 // between machines: which columns they keep, in what order and width, how dense
-// the table is, and whether alerts arrive grouped.
+// the table is, whether alerts arrive grouped, and which palette the console
+// renders in.
 //
 // These are stored per user, which means they exist only where there is a user
 // to key on. In open mode every reader is the same anonymous principal, so the
@@ -36,6 +37,18 @@ const LabelColumnPrefix = "label:"
 // screen rather than per person.
 var Densities = []string{"auto", "compact", "normal", "comfortable"}
 
+// Themes are the palette choices. "system" is the default and keeps the
+// console following the operating system's light/dark setting, which is what
+// the console did before a palette could be picked at all. The named themes
+// pin a palette instead: an operator whose machine is set light but who works
+// a dark room should not have to change the machine to change the console.
+// Beyond taste, "high-contrast" is for wall displays and low vision, and
+// "colorblind-safe" separates the severity ramp by lightness as well as hue.
+var Themes = []string{
+	"system", "dark", "light", "nord", "gruvbox",
+	"solarized-light", "high-contrast", "colorblind-safe",
+}
+
 const (
 	maxColumns     = 24
 	minColumnWidth = 40
@@ -64,6 +77,7 @@ type Preferences struct {
 	Columns  []Column `json:"columns"`
 	Density  string   `json:"density"`
 	Grouping Grouping `json:"grouping"`
+	Theme    string   `json:"theme"`
 }
 
 // Default is what a user who has never saved anything gets, and what the
@@ -84,6 +98,9 @@ func Default() Preferences {
 		// ordinary row, so grouping costs nothing when there is nothing to
 		// collapse.
 		Grouping: Grouping{Enabled: true, Keys: []string{"alertname", "source"}},
+		// System by default: the console has always followed the OS setting,
+		// and a user who never opens the picker should see no change.
+		Theme: "system",
 	}
 }
 
@@ -112,6 +129,9 @@ func Validate(value Preferences) error {
 	if !isDensity(value.Density) {
 		return fmt.Errorf("density must be one of %s", strings.Join(Densities, ", "))
 	}
+	if !isTheme(value.Theme) {
+		return fmt.Errorf("theme must be one of %s", strings.Join(Themes, ", "))
+	}
 	if value.Grouping.Enabled {
 		if err := alerts.ValidateGroupBy(value.Grouping.Keys); err != nil {
 			return err
@@ -138,6 +158,15 @@ func validateColumnID(id string) error {
 func isDensity(value string) bool {
 	for _, density := range Densities {
 		if density == value {
+			return true
+		}
+	}
+	return false
+}
+
+func isTheme(value string) bool {
+	for _, theme := range Themes {
+		if theme == value {
 			return true
 		}
 	}

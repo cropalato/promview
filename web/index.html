@@ -6,6 +6,21 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#090c11" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#edf0f4" media="(prefers-color-scheme: light)" />
+    <script>
+      // Pin the stored palette before first paint. React mounts too late: a
+      // pinned light theme would flash the dark default first. The console
+      // always writes its preferences to localStorage even when the server is
+      // authoritative, precisely so this read can happen synchronously.
+      try {
+        var stored = JSON.parse(window.localStorage.getItem('promview.preferences') || '{}');
+        if (typeof stored.theme === 'string' && stored.theme !== 'system') {
+          document.documentElement.dataset.theme = stored.theme;
+        }
+      } catch (error) {
+        // Storage is unavailable or the payload is unreadable; the console
+        // boots in the default palette and corrects itself once mounted.
+      }
+    </script>
     <meta
       name="description"
       content="Promview — operational console for Prometheus Alertmanager alerts"

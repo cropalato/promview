@@ -1,6 +1,15 @@
 /* ----------------------------------------------------------------------------
    Promview operational console
-   Dark-first design tokens; accessible light theme via prefers-color-scheme.
+
+   Every colour in this file is declared once, here at the top, as a custom
+   property. Nothing below the token blocks names a colour directly, which is
+   what makes a palette a block of values rather than an edit across ~180
+   selectors.
+
+   :root is the dark base. A palette the operator picked is pinned with
+   [data-theme] on <html>; with no attribute set the prefers-color-scheme rule
+   below follows the operating system, which is what the console did before a
+   palette could be picked at all.
 ---------------------------------------------------------------------------- */
 
 :root {
@@ -39,13 +48,18 @@
   --info-soft: rgba(106, 169, 255, 0.14);
 
   --shadow: 0 12px 32px rgba(2, 6, 12, 0.45);
+  /* The body's dot grid. A token so a palette does not need its own media
+     query just to re-tint the background pattern. */
+  --dot: rgba(148, 162, 179, 0.07);
+
   --radius-lg: 12px;
   --radius-md: 8px;
   --radius-sm: 6px;
 }
 
+/* Follows the OS only while no palette is pinned; an explicit pick always wins. */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
     color-scheme: light;
 
     --bg: #edf0f4;
@@ -74,7 +88,241 @@
     --info-soft: rgba(27, 99, 201, 0.1);
 
     --shadow: 0 10px 28px rgba(28, 37, 48, 0.12);
+    --dot: rgba(78, 92, 108, 0.08);
   }
+}
+
+/* ----------------------------------------------------------------------------
+   Pinned palettes
+
+   Selected by the operator and stored with the rest of their preferences, so
+   the choice follows them between machines. Each block redeclares the same
+   token names as :root; --radius-* and --font-* are deliberately shared and
+   never appear here. color-scheme is set on every block so form controls,
+   scrollbars and the caret match the palette rather than the OS.
+---------------------------------------------------------------------------- */
+
+/* :root is already the dark palette; pinning it only has to stop the
+   prefers-color-scheme rule above from applying, which the attribute alone
+   does. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* The same values as the prefers-color-scheme block above, applied on request
+   rather than on the OS setting. The two conditions are independent: an
+   operator on a dark machine can want a light console. */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #edf0f4;
+  --bg-raise: #f7f9fb;
+  --panel: #ffffff;
+  --panel-raise: #f2f5f8;
+  --border: #d5dce4;
+  --border-strong: #b6c1cd;
+  --text: #1c2530;
+  --text-muted: #4e5c6c;
+  --text-faint: #7b8899;
+
+  --accent: #0b7285;
+  --accent-soft: rgba(11, 114, 133, 0.12);
+  --focus: #0969da;
+
+  --ok: #127a4c;
+  --syncing: #9a6200;
+  --down: #c92a2a;
+
+  --critical: #c92a2a;
+  --critical-soft: rgba(201, 42, 42, 0.1);
+  --warning: #9a6200;
+  --warning-soft: rgba(154, 98, 0, 0.12);
+  --info: #1b63c9;
+  --info-soft: rgba(27, 99, 201, 0.1);
+
+  --shadow: 0 10px 28px rgba(28, 37, 48, 0.12);
+  --dot: rgba(78, 92, 108, 0.08);
+}
+
+/* Nord: cool and low-contrast, for operators who sit with the console for a
+   whole shift and find the near-black default too stark. That lighter base is
+   also what forces the severity and status colours to be lightened from Nord's
+   own: #bf616a reaches only 2.1:1 as text on --panel-raise. */
+:root[data-theme='nord'] {
+  color-scheme: dark;
+
+  --bg: #2e3440;
+  --bg-raise: #333b4a;
+  --panel: #3b4252;
+  --panel-raise: #434c5e;
+  --border: #4c566a;
+  --border-strong: #5e6b82;
+  --text: #eceff4;
+  --text-muted: #b8c1d1;
+  --text-faint: #a0aabb;
+
+  --accent: #8fc4d3;
+  --accent-soft: rgba(136, 192, 208, 0.14);
+  --focus: #81a1c1;
+
+  --ok: #adc599;
+  --syncing: #ebcb8b;
+  --down: #eeaab0;
+
+  --critical: #eeaab0;
+  --critical-soft: rgba(191, 97, 106, 0.18);
+  --warning: #ebcb8b;
+  --warning-soft: rgba(235, 203, 139, 0.15);
+  --info: #9bc3c2;
+  --info-soft: rgba(143, 188, 187, 0.16);
+
+  --shadow: 0 12px 32px rgba(20, 25, 34, 0.5);
+  --dot: rgba(216, 222, 233, 0.06);
+}
+
+/* Gruvbox: warm dark, the widest tonal departure from the two cool defaults.
+   Warning is orange rather than the accent's yellow so a warning chip is never
+   mistaken for an accented control, and critical is pushed pink rather than
+   simply lightened so it stays apart from that orange once it is bright enough
+   to read as text. */
+:root[data-theme='gruvbox'] {
+  color-scheme: dark;
+
+  --bg: #1d2021;
+  --bg-raise: #282828;
+  --panel: #32302f;
+  --panel-raise: #3c3836;
+  --border: #504945;
+  --border-strong: #665c54;
+  --text: #fbf1c7;
+  --text-muted: #d5c4a1;
+  --text-faint: #a89984;
+
+  --accent: #fabd2f;
+  --accent-soft: rgba(250, 189, 47, 0.14);
+  --focus: #83a598;
+
+  --ok: #b8bb26;
+  --syncing: #fabd2f;
+  --down: #ff8a8a;
+
+  --critical: #ff8a8a;
+  --critical-soft: rgba(251, 73, 52, 0.14);
+  --warning: #fe8019;
+  --warning-soft: rgba(254, 128, 25, 0.14);
+  --info: #88a99c;
+  --info-soft: rgba(131, 165, 152, 0.16);
+
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --dot: rgba(235, 219, 178, 0.06);
+}
+
+/* Solarized Light: warm paper, easier than pure white in a bright room.
+   Solarized's own accents sit near 3:1 on base3 and are darkened here so they
+   clear 4.5:1 as text. */
+:root[data-theme='solarized-light'] {
+  color-scheme: light;
+
+  --bg: #fdf6e3;
+  --bg-raise: #fffbf0;
+  --panel: #ffffff;
+  --panel-raise: #eee8d5;
+  --border: #ddd6c1;
+  --border-strong: #93a1a1;
+  --text: #073642;
+  --text-muted: #566c73;
+  --text-faint: #6e7f83;
+
+  --accent: #1e6ca4;
+  --accent-soft: rgba(38, 139, 210, 0.12);
+  --focus: #268bd2;
+
+  --ok: #5c6a00;
+  --syncing: #846400;
+  --down: #b52822;
+
+  --critical: #b52822;
+  --critical-soft: rgba(220, 50, 47, 0.1);
+  --warning: #846400;
+  --warning-soft: rgba(181, 137, 0, 0.14);
+  --info: #196da5;
+  --info-soft: rgba(38, 139, 210, 0.1);
+
+  --shadow: 0 10px 28px rgba(7, 54, 66, 0.12);
+  --dot: rgba(88, 110, 117, 0.08);
+}
+
+/* High Contrast: a NOC wall display read from across the room, and low vision
+   at arm's length. Every foreground clears 7:1 on black, and the borders are
+   lighter than any other palette's so panel edges survive the distance. */
+:root[data-theme='high-contrast'] {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --bg-raise: #000000;
+  --panel: #0a0a0a;
+  --panel-raise: #141414;
+  --border: #5a6472;
+  --border-strong: #9aa4b2;
+  --text: #ffffff;
+  --text-muted: #e0e6ee;
+  --text-faint: #b8c0cc;
+
+  --accent: #00e5ff;
+  --accent-soft: rgba(0, 229, 255, 0.18);
+  --focus: #ffd400;
+
+  --ok: #00e676;
+  --syncing: #ffd400;
+  --down: #ff7575;
+
+  --critical: #ff8a80;
+  --critical-soft: rgba(255, 82, 82, 0.22);
+  --warning: #ffd400;
+  --warning-soft: rgba(255, 212, 0, 0.2);
+  --info: #82b1ff;
+  --info-soft: rgba(130, 177, 255, 0.2);
+
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.8);
+  --dot: rgba(255, 255, 255, 0.05);
+}
+
+/* Colorblind Safe: the Okabe-Ito qualitative palette. Severity runs vermillion
+   / yellow / blue, separated by lightness as well as hue so it survives both
+   deuteranopia and protanopia. The accent is reddish-purple rather than blue so
+   it can never be read as an info severity. Severity is already carried by
+   shape, icon and text too; this hardens a channel rather than being the only
+   one. */
+:root[data-theme='colorblind-safe'] {
+  color-scheme: dark;
+
+  --bg: #101418;
+  --bg-raise: #151a20;
+  --panel: #1a2027;
+  --panel-raise: #212933;
+  --border: #2c3540;
+  --border-strong: #404c5a;
+  --text: #eaeef3;
+  --text-muted: #9aa8b8;
+  --text-faint: #6d7c8d;
+
+  --accent: #cc79a7;
+  --accent-soft: rgba(204, 121, 167, 0.16);
+  --focus: #56b4e9;
+
+  --ok: #2fbf95;
+  --syncing: #f0e442;
+  --down: #ff7f41;
+
+  --critical: #ff7f41;
+  --critical-soft: rgba(213, 94, 0, 0.18);
+  --warning: #f0e442;
+  --warning-soft: rgba(240, 228, 66, 0.15);
+  --info: #56b4e9;
+  --info-soft: rgba(86, 180, 233, 0.15);
+
+  --shadow: 0 12px 32px rgba(2, 6, 12, 0.5);
+  --dot: rgba(154, 168, 184, 0.06);
 }
 
 /* Reset */
@@ -97,18 +345,8 @@ body {
   line-height: 1.45;
   color: var(--text);
   background:
-    radial-gradient(circle at 1px 1px, rgba(148, 162, 179, 0.07) 1px, transparent 1.6px) 0 0 / 26px
-      26px,
+    radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.6px) 0 0 / 26px 26px,
     var(--bg);
-}
-
-@media (prefers-color-scheme: light) {
-  body {
-    background:
-      radial-gradient(circle at 1px 1px, rgba(78, 92, 108, 0.08) 1px, transparent 1.6px) 0 0 / 26px
-        26px,
-      var(--bg);
-  }
 }
 
 ::selection {
@@ -898,7 +1136,7 @@ kbd {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow);
 }
 
 .view-menu-group {
@@ -1434,6 +1672,30 @@ kbd {
   height: 7px;
   border-radius: 50%;
   background: var(--text-faint);
+}
+
+/* Sized to sit inside the footer's line box: picking a palette must not make
+   the status line taller than it is without one. */
+.theme-select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-muted);
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.theme-select:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.theme-select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
 /* Alert detail drawer: right-side non-modal panel on desktop */

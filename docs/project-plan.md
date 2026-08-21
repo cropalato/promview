@@ -247,10 +247,10 @@ The shared session storage, cookie or bearer authentication, OIDC session issuan
 
 Built-in roles:
 
-| Role | Access |
-| --- | --- |
-| Viewer | Read matching alerts and history |
-| Operator | Viewer access plus acknowledge, assign, close, and notes |
+| Role          | Access                                                        |
+| ------------- | ------------------------------------------------------------- |
+| Viewer        | Read matching alerts and history                              |
+| Operator      | Viewer access plus acknowledge, assign, close, and notes      |
 | Administrator | Global access, source and policy management, and audit access |
 
 A role binding combines subject, role, and label selector. Initial selector operators are `=`, `!=`, `=~`, and `!~`.
@@ -311,6 +311,7 @@ The primary experience is one dense operational console, not a card dashboard:
 - server-filtered alert table with sortable severity, state, alert, summary, team, instance, source, and age columns
 - alerts collapsed into expandable groups by alert name and source, so one rule firing per offending series does not bury the page; a group of one renders as a plain row
 - a view menu for grouping, density, and which columns are shown, including columns bound to arbitrary alert labels
+- a palette picker in the status bar, defaulting to the operating system's light/dark setting
 - keyboard navigation and multi-selection
 - resizable detail drawer on desktop
 - full-screen detail view on mobile
@@ -318,13 +319,15 @@ The primary experience is one dense operational console, not a card dashboard:
 - acknowledgement actions; other single and bulk operator actions remain planned
 - visible stale/reconnecting state
 
-Default columns are severity, lifecycle state, alert name, summary, team, instance, last seen, source, age, assignee, and note count. Column choice, order, and density are stored per user so a layout follows an operator between machines; deployments without a signed-in user keep them in the browser.
+Default columns are severity, lifecycle state, alert name, summary, team, instance, last seen, source, age, assignee, and note count. Column choice, order, density, and palette are stored per user so a layout follows an operator between machines; deployments without a signed-in user keep them in the browser.
 
 Density defaults to `auto`, resolved from the height the console has rather than a stored row height, because the same operator reads it on a laptop and on a wall display. Which optional columns survive is decided by a container query against the table panel's own width, not the window's, so the console behaves the same in a split view or dashboard tile.
 
 The lifecycle state a row shows distinguishes `firing`, `resolved`, and `expired`, and a silenced alert carries a `silenced` chip alongside `firing` rather than instead of it.
 
 Use color, shape, icon, and text together for severity. Target WCAG 2.2 AA, keyboard-only operation, reduced motion, and touch targets appropriate for mobile triage.
+
+Every color is a custom property declared once at the top of the stylesheet, so a palette is a block of token values and nothing below it names a color directly. A palette the operator picked is pinned with `data-theme` on the document; with no attribute set, `prefers-color-scheme` follows the operating system. Beyond taste, `high-contrast` targets wall displays and low vision, and `colorblind-safe` separates the severity ramp by lightness as well as hue. Every palette holds text at 4.5:1 against each of its own surfaces, and `high-contrast` holds 7:1.
 
 ## Deployment
 

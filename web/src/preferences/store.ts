@@ -1,9 +1,11 @@
 import { DEFAULT_COLUMN_IDS } from '../alerts/columns';
 import { DEFAULT_GROUP_KEYS, sanitizeGroupKeys } from '../alerts/grouping';
+import { isTheme } from './theme';
+import type { Theme } from './theme';
 
 /**
  * Console layout preferences: which columns, how dense, whether alerts arrive
- * grouped.
+ * grouped, and which palette the console renders in.
  *
  * These live on the server so they follow an operator between machines. In open
  * mode there is no user to key them against, and the endpoint says so with a
@@ -37,6 +39,7 @@ export interface Preferences {
   columns: ColumnPreference[];
   density: Density;
   grouping: GroupingPreference;
+  theme: Theme;
 }
 
 export function defaultPreferences(): Preferences {
@@ -44,6 +47,7 @@ export function defaultPreferences(): Preferences {
     columns: DEFAULT_COLUMN_IDS.map((id) => ({ id })),
     density: 'auto',
     grouping: { enabled: true, keys: [...DEFAULT_GROUP_KEYS] },
+    theme: 'system',
   };
 }
 
@@ -120,6 +124,7 @@ export function parsePreferences(value: unknown): Preferences {
     columns: columns.length > 0 ? columns : defaults.columns,
     density: isDensity(raw.density) ? raw.density : defaults.density,
     grouping,
+    theme: isTheme(raw.theme) ? raw.theme : defaults.theme,
   };
 }
 

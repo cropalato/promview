@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AlertSort } from './alerts/api';
 import {
   FilterParseError,
@@ -29,6 +29,8 @@ import { useAlertRoute } from './hooks/useAlertRoute';
 import { useAlerts } from './hooks/useAlerts';
 import { usePreferences } from './hooks/usePreferences';
 import { useResolvedDensity } from './hooks/useResolvedDensity';
+import { applyTheme } from './preferences/theme';
+import type { Theme } from './preferences/theme';
 import { useAlertGroups } from './hooks/useAlertGroups';
 import { useGroupChildren } from './hooks/useGroupChildren';
 import { useAlertStream } from './hooks/useAlertStream';
@@ -157,6 +159,29 @@ export default function App({ navigate }: AppProps = {}) {
   // preference lands differently on a laptop and a wall display.
   const density = useResolvedDensity(preferences.density);
   const grouped = preferences.grouping.enabled;
+
+  // The palette is a document-level attribute rather than a prop: the tokens it
+  // sets are read by the whole stylesheet, including the body background and
+  // the browser's own chrome, which sit outside the app root.
+  const theme = preferences.theme;
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+  useEffect(() => {
+    // Under `system` the stylesheet follows the OS on its own; the only thing
+    // left to refresh when the OS flips is the browser chrome colour.
+    if (theme !== 'system' || typeof window === 'undefined' || !window.matchMedia) {
+      return;
+    }
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const sync = () => applyTheme('system');
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, [theme]);
+  const handleThemeChange = useCallback(
+    (next: Theme) => updatePreferences({ ...preferences, theme: next }),
+    [preferences, updatePreferences],
+  );
 
   // The grouped and flat views are the same query in two shapes; only one is
   // enabled at a time so the console never pays for both.
@@ -486,6 +511,8 @@ export default function App({ navigate }: AppProps = {}) {
       <StatusFooter
         authMode={config?.authMode}
         stream={alertsState.status === 'ready' ? streamStatus : undefined}
+        theme={theme}
+        onThemeChange={handleThemeChange}
       />
     </div>
   );

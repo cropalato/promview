@@ -40,6 +40,9 @@ func (store *Store) ReadPreferences(ctx context.Context, principal auth.Principa
 	if value.Density == "" {
 		value.Density = preferences.Default().Density
 	}
+	if value.Theme == "" {
+		value.Theme = preferences.Default().Theme
+	}
 	return value, nil
 }
 
