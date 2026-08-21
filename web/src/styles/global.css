@@ -1133,7 +1133,7 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  background: var(--surface);
+  background: var(--panel-raise);
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: var(--shadow);
