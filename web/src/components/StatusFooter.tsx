@@ -18,7 +18,13 @@ const STREAM_LABEL: Record<AlertStreamStatus, string> = {
   reconnecting: 'reconnecting',
 };
 
-/** Slim status line: deployment mode, live-stream state and the palette picker. */
+/**
+ * Slim status line: deployment mode, live-stream state and the palette picker.
+ *
+ * Deliberately says nothing about what the operator may do. The top bar already
+ * renders their highest role from the session, and a second, hardcoded claim
+ * here contradicted it for anyone above viewer.
+ */
 export function StatusFooter({ authMode, stream, theme, onThemeChange }: StatusFooterProps) {
   const themeLabelId = useId();
   return (
@@ -28,7 +34,7 @@ export function StatusFooter({ authMode, stream, theme, onThemeChange }: StatusF
         <span className="statusbar-dot" aria-hidden="true" />
         {authMode === undefined
           ? 'mode: — · stream: offline'
-          : `mode: ${authMode} · read-only · stream: ${stream === undefined ? 'offline' : STREAM_LABEL[stream]}`}
+          : `mode: ${authMode} · stream: ${stream === undefined ? 'offline' : STREAM_LABEL[stream]}`}
       </span>
       <span className="statusbar-item">
         {/* A native select: the footer is one line tall, and keyboard and
