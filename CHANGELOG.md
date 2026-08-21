@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **console:** stop the status bar claiming `read-only` for every session; the top bar's role badge already reports what the operator may do.
+
 ## [0.1.0-alpha.16] - 2026-08-21
 
 ### Features

@@ -12,6 +12,15 @@ describe('StatusFooter', () => {
     expect(screen.getByText(/stream: live/)).toBeInTheDocument();
   });
 
+  it('makes no claim about what the operator may do', () => {
+    // The top bar renders the session's highest role. A hardcoded "read-only"
+    // here was rendered for operators and administrators too, contradicting it.
+    render(
+      <StatusFooter authMode="oidc" stream="connected" theme="system" onThemeChange={() => {}} />,
+    );
+    expect(screen.queryByText(/read-only/i)).not.toBeInTheDocument();
+  });
+
   it('says the stream is offline before the first snapshot', () => {
     render(<StatusFooter authMode="open" theme="system" onThemeChange={() => {}} />);
     expect(screen.getByText(/stream: offline/)).toBeInTheDocument();
