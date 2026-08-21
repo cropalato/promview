@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.17] - 2026-08-21
+
 ### Features
 
 - **console:** add a filter button to each column row in the view menu. Columns that name an alert label — severity, alert (`alertname`), team, instance, and any label column — can start a filter on that label or drop one already applied.
