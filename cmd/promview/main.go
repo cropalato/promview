@@ -95,9 +95,12 @@ func run() error {
 			)
 		}
 	}
+	// The same client reconciliation reads with; its timeout already bounds one
+	// Alertmanager request, which is the property a silence write needs too.
+	silencer := alertmanager.NewClient(cfg.ReconcileTimeout)
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           httpapi.New(cfg, store, authenticator, authenticationHandler),
+		Handler:           httpapi.New(cfg, store, authenticator, silencer, authenticationHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -263,11 +266,12 @@ func runSourceUpdate(ctx context.Context, store sourceSetter, args []string) err
 	name := flags.String("name", "", "source display name")
 	staleAfter := flags.String("stale-after", "", "how long an alert may go unreported before it expires; must exceed this source's repeat_interval (0 disables expiry)")
 	alertmanagerURL := flags.String("alertmanager-url", "", "base URL of this source's Alertmanager, read to confirm what is still firing (empty clears it)")
+	alertmanagerToken := flags.String("alertmanager-token", "", "bearer credential for writing silences to this source's Alertmanager (empty clears it)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
 	if *slug == "" {
-		return errors.New("usage: promview source update --slug <slug> [--name <name>] [--stale-after <duration>] [--alertmanager-url <url>]")
+		return errors.New("usage: promview source update --slug <slug> [--name <name>] [--stale-after <duration>] [--alertmanager-url <url>] [--alertmanager-token <token>]")
 	}
 
 	var patch sources.Patch
@@ -276,6 +280,9 @@ func runSourceUpdate(ctx context.Context, store sourceSetter, args []string) err
 	}
 	if isFlagSet(flags, "alertmanager-url") {
 		patch.AlertmanagerURL = alertmanagerURL
+	}
+	if isFlagSet(flags, "alertmanager-token") {
+		patch.AlertmanagerToken = alertmanagerToken
 	}
 	if isFlagSet(flags, "stale-after") {
 		window, err := time.ParseDuration(*staleAfter)
@@ -312,7 +319,7 @@ func runSourceCommand(ctx context.Context, store sourceSetter, args []string) er
 		return runSourceUpdate(ctx, store, args)
 	}
 	if args[0] != "set" {
-		return errors.New("usage: promview source set --slug <slug> --name <name> --token <token> [--stale-after <duration>] [--alertmanager-url <url>]")
+		return errors.New("usage: promview source set --slug <slug> --name <name> --token <token> [--stale-after <duration>] [--alertmanager-url <url>] [--alertmanager-token <token>]")
 	}
 	flags := flag.NewFlagSet("promview source set", flag.ContinueOnError)
 	slug := flags.String("slug", "", "stable source slug")
@@ -320,12 +327,16 @@ func runSourceCommand(ctx context.Context, store sourceSetter, args []string) er
 	token := flags.String("token", "", "source bearer token")
 	staleAfter := flags.String("stale-after", "", "how long an alert may go unreported before it expires; must exceed this source's repeat_interval (0 disables expiry, empty keeps the stored value)")
 	alertmanagerURL := flags.String("alertmanager-url", "", "base URL of this source's Alertmanager, read to confirm what is still firing (empty keeps the stored value)")
+	alertmanagerToken := flags.String("alertmanager-token", "", "bearer credential for writing silences to this source's Alertmanager (empty keeps the stored value)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
 	source := sources.Source{Slug: *slug, Name: *name}
 	if isFlagSet(flags, "alertmanager-url") {
 		source.AlertmanagerURL = alertmanagerURL
+	}
+	if isFlagSet(flags, "alertmanager-token") {
+		source.AlertmanagerToken = alertmanagerToken
 	}
 	if *staleAfter != "" {
 		window, err := time.ParseDuration(*staleAfter)

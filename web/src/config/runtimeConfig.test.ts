@@ -34,6 +34,11 @@ describe('loadRuntimeConfig', () => {
     await expect(loadRuntimeConfig(fetchImpl)).resolves.toEqual({
       authMode: 'open',
       productName: 'Promview',
+      // A backend that reports no silence fields predates silencing and cannot
+      // serve it, so absent reads as off rather than as enabled.
+      silenceEnabled: false,
+      silenceDefaultSeconds: 2 * 60 * 60,
+      silenceMaxSeconds: 30 * 24 * 60 * 60,
     });
   });
 
@@ -43,6 +48,42 @@ describe('loadRuntimeConfig', () => {
     await expect(loadRuntimeConfig(fetchImpl)).resolves.toEqual({
       authMode: 'oidc',
       productName: 'Promview',
+      silenceEnabled: false,
+      silenceDefaultSeconds: 2 * 60 * 60,
+      silenceMaxSeconds: 30 * 24 * 60 * 60,
+    });
+  });
+
+  it('takes the deployment silence window from the server', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        authMode: 'oidc',
+        silenceEnabled: true,
+        silenceDefaultSeconds: 2700,
+        silenceMaxSeconds: 28800,
+      }),
+    );
+
+    await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
+      silenceEnabled: true,
+      silenceDefaultSeconds: 2700,
+      silenceMaxSeconds: 28800,
+    });
+  });
+
+  it('never offers a default window the server would refuse', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        authMode: 'oidc',
+        silenceEnabled: true,
+        silenceDefaultSeconds: 999999,
+        silenceMaxSeconds: 3600,
+      }),
+    );
+
+    await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
+      silenceDefaultSeconds: 3600,
+      silenceMaxSeconds: 3600,
     });
   });
 

@@ -10,11 +10,15 @@ import {
 import type { LabelMatcher } from './alerts/filter';
 import type { AlertStreamEvent } from './alerts/stream';
 import type { AlertSummary } from './alerts/types';
+import type { AlertGroupSummary } from './alerts/api';
 import { OIDC_LOGIN_URL } from './auth/session';
 import type { NavigateTo } from './auth/session';
 import { AlertDetailDrawer } from './components/AlertDetailDrawer';
 import { AlertTable } from './components/AlertTable';
 import { AlertGroupTable } from './components/AlertGroupTable';
+import { SilenceDialog } from './components/SilenceDialog';
+import { silenceAlert, silenceGroup } from './alerts/silence';
+import type { SilenceResponse } from './alerts/silence';
 import { ViewMenu } from './components/ViewMenu';
 import { resolveColumns } from './alerts/columns';
 import { FilterBar } from './components/FilterBar';
@@ -112,6 +116,47 @@ export default function App({ navigate }: AppProps = {}) {
     setFilterDraft(value);
     // Editing the draft retires the last apply attempt's error.
     setFilterError(null);
+  }, []);
+
+  // What the silence dialog is confirming, or null when it is closed. The
+  // resolved subject, matchers and submit function live here so the dialog
+  // itself needs no knowledge of alerts or groups.
+  const [silenceTarget, setSilenceTarget] = useState<{
+    subject: string;
+    matchers: Record<string, string>;
+    memberCount?: number;
+    submit: (durationSeconds: number, comment: string) => Promise<SilenceResponse>;
+  } | null>(null);
+  const closeSilence = useCallback(() => setSilenceTarget(null), []);
+
+  // The dialog shows the exact labels before confirming, so both entry points
+  // resolve them here rather than describing the target in prose.
+  const openAlertSilence = useCallback((alert: { id: string; labels: Record<string, string> }) => {
+    setSilenceTarget({
+      subject: alert.labels.alertname ?? `alert ${alert.id}`,
+      matchers: alert.labels,
+      memberCount: 1,
+      submit: (durationSeconds, comment) => silenceAlert(alert.id, { durationSeconds, comment }),
+    });
+  }, []);
+
+  const openGroupSilence = useCallback((group: AlertGroupSummary, groupBy: readonly string[]) => {
+    // `source` names a promview source rather than an alert label, so the
+    // server drops it from the matchers; showing it here would promise a
+    // constraint the silence does not carry.
+    const matchers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(group.key)) {
+      if (name !== 'source') {
+        matchers[name] = value;
+      }
+    }
+    setSilenceTarget({
+      subject: Object.values(group.key).join(' · '),
+      matchers,
+      memberCount: group.total,
+      submit: (durationSeconds, comment) =>
+        silenceGroup(groupBy, group.key, { durationSeconds, comment }),
+    });
   }, []);
 
   const clearFilter = useCallback(() => {
@@ -457,6 +502,13 @@ export default function App({ navigate }: AppProps = {}) {
                     onLoadMoreChildren={loadMoreChildren}
                     onSelect={(alert) => openAlert(alert.id)}
                     onOpenAlert={openAlert}
+                    onSilenceGroup={
+                      // Hidden entirely when the deployment cannot write a
+                      // silence; a control that always fails is worse than none.
+                      config?.silenceEnabled === true
+                        ? (group) => openGroupSilence(group, preferences.grouping.keys)
+                        : undefined
+                    }
                     pagination={{
                       loaded: groupsState.data.groups.length,
                       total: groupsState.data.totalGroups,
@@ -506,6 +558,26 @@ export default function App({ navigate }: AppProps = {}) {
           onRetry={retryDetail}
           onAcknowledge={acknowledgeDetail}
           onFilterLabel={applyLabelMatcher}
+          onSilence={
+            detailState.status === 'ready'
+              ? () =>
+                  openAlertSilence({
+                    id: detailState.detail.alert.id,
+                    labels: detailState.detail.alert.labels,
+                  })
+              : undefined
+          }
+        />
+      ) : null}
+      {silenceTarget !== null && config !== undefined ? (
+        <SilenceDialog
+          subject={silenceTarget.subject}
+          matchers={silenceTarget.matchers}
+          memberCount={silenceTarget.memberCount}
+          defaultSeconds={config.silenceDefaultSeconds}
+          maxSeconds={config.silenceMaxSeconds}
+          onConfirm={silenceTarget.submit}
+          onClose={closeSilence}
         />
       ) : null}
       <StatusFooter

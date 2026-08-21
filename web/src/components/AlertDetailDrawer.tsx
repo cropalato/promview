@@ -24,6 +24,8 @@ interface AlertDetailDrawerProps {
   onAcknowledge?: (acknowledged: boolean) => Promise<void>;
   /** Applies a label matcher to the console filter; enables the label buttons. */
   onFilterLabel?: (matcher: LabelMatcher) => void;
+  /** Opens the silence dialog for this alert; forwarded to the gated action. */
+  onSilence?: () => void;
 }
 
 /**
@@ -41,6 +43,7 @@ export function AlertDetailDrawer({
   onRetry,
   onAcknowledge,
   onFilterLabel,
+  onSilence,
 }: AlertDetailDrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -170,6 +173,7 @@ export function AlertDetailDrawer({
                   detail={ready.alert}
                   onAcknowledge={onAcknowledge}
                   onFilterLabel={onFilterLabel}
+                  onSilence={onSilence}
                 />
               ) : null}
               {activeTab === 'timeline' ? <AlertTimeline history={ready.history} /> : null}

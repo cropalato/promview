@@ -10,12 +10,30 @@ export type AuthMode = 'open' | 'oidc';
 export interface RuntimeConfig {
   authMode: AuthMode;
   productName: string;
+  /**
+   * Whether this deployment can write silences to an Alertmanager at all, and
+   * the window it allows. The console defaults and bounds its own duration
+   * control from these rather than hardcoding one the server would reject.
+   */
+  silenceEnabled: boolean;
+  silenceDefaultSeconds: number;
+  silenceMaxSeconds: number;
 }
 
 export const RUNTIME_CONFIG_URL = '/api/v1/config';
 
 const AUTH_MODES: readonly AuthMode[] = ['open', 'oidc'];
 const DEFAULT_PRODUCT_NAME = 'Promview';
+// Mirrors the server's own defaults, used only when an older backend does not
+// report them. Two hours, capped at thirty days.
+const DEFAULT_SILENCE_SECONDS = 2 * 60 * 60;
+const DEFAULT_SILENCE_MAX_SECONDS = 30 * 24 * 60 * 60;
+
+function positiveSeconds(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
+}
 
 export class RuntimeConfigError extends Error {
   readonly status?: number;
@@ -65,16 +83,27 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
     throw new RuntimeConfigError('Configuration response was malformed');
   }
 
-  const { authMode, productName } = body as Record<string, unknown>;
+  const { authMode, productName, silenceEnabled, silenceDefaultSeconds, silenceMaxSeconds } =
+    body as Record<string, unknown>;
   if (typeof authMode !== 'string' || !AUTH_MODES.includes(authMode as AuthMode)) {
     throw new RuntimeConfigError(`Unsupported auth mode: ${String(authMode)}`);
   }
 
+  const max = positiveSeconds(silenceMaxSeconds, DEFAULT_SILENCE_MAX_SECONDS);
   return {
     authMode: authMode as AuthMode,
     productName:
       typeof productName === 'string' && productName.trim() !== ''
         ? productName
         : DEFAULT_PRODUCT_NAME,
+    // A backend that does not report the field predates silencing and cannot
+    // serve it, so absent reads as off rather than as enabled.
+    silenceEnabled: silenceEnabled === true,
+    silenceMaxSeconds: max,
+    // Never offer a default the server would refuse.
+    silenceDefaultSeconds: Math.min(
+      positiveSeconds(silenceDefaultSeconds, DEFAULT_SILENCE_SECONDS),
+      max,
+    ),
   };
 }

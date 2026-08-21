@@ -1698,6 +1698,168 @@ kbd {
   outline-offset: 1px;
 }
 
+/* Silence confirmation: modal, unlike the detail drawer, because hiding alerts
+   on a system promview does not own is not something to do while distracted. */
+.silence-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 45%);
+}
+
+.silence-dialog {
+  width: min(460px, 100%);
+  max-height: 90dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  background: var(--panel-raise);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.silence-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.silence-copy {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.silence-matchers {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.silence-matcher {
+  display: flex;
+  gap: 6px;
+}
+
+.silence-matcher dt {
+  color: var(--text-muted);
+}
+
+.silence-matcher dt::after {
+  content: '=';
+  padding-left: 6px;
+  color: var(--text-faint);
+}
+
+.silence-matcher dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.silence-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.silence-field select,
+.silence-field input {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+
+.silence-field select:focus-visible,
+.silence-field input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.silence-note {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.silence-error {
+  margin: 0;
+  color: var(--down);
+  font-size: 12px;
+}
+
+.silence-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.button-primary {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.button-primary:hover:not(:disabled) {
+  opacity: 0.9;
+  background: var(--accent);
+}
+
+.silence-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.silence-results li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+}
+
+.silence-result-ok {
+  border-color: var(--ok);
+  color: var(--text-muted);
+}
+
+/* A failed target is called out rather than folded into a summary: half a group
+   still firing must not read as handled. */
+.silence-result-failed {
+  border-color: var(--down);
+  color: var(--down);
+}
+
+.silence-result-source {
+  color: var(--text);
+}
+
 /* Alert detail drawer: right-side non-modal panel on desktop */
 .detail-drawer {
   position: fixed;

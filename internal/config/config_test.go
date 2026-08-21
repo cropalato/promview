@@ -121,3 +121,63 @@ func TestLoadRejectsInvalidAlertExpiry(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadSilenceWindowDefaults(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two hours is the documented default; the console reads it from the config
+	// endpoint rather than hardcoding its own.
+	if cfg.SilenceDefaultDuration != 2*time.Hour {
+		t.Errorf("default silence = %s, want 2h", cfg.SilenceDefaultDuration)
+	}
+	if cfg.SilenceMaxDuration != 30*24*time.Hour {
+		t.Errorf("max silence = %s, want 720h", cfg.SilenceMaxDuration)
+	}
+}
+
+func TestLoadSilenceWindowOverrides(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_SILENCE_DEFAULT_DURATION", "45m")
+	t.Setenv("PROMVIEW_SILENCE_MAX_DURATION", "8h")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SilenceDefaultDuration != 45*time.Minute {
+		t.Errorf("default silence = %s, want 45m", cfg.SilenceDefaultDuration)
+	}
+	if cfg.SilenceMaxDuration != 8*time.Hour {
+		t.Errorf("max silence = %s, want 8h", cfg.SilenceMaxDuration)
+	}
+}
+
+func TestLoadRejectsUnusableSilenceWindows(t *testing.T) {
+	for _, test := range []struct{ name, key, value string }{
+		{"zero default", "PROMVIEW_SILENCE_DEFAULT_DURATION", "0"},
+		{"negative default", "PROMVIEW_SILENCE_DEFAULT_DURATION", "-1h"},
+		{"unparseable default", "PROMVIEW_SILENCE_DEFAULT_DURATION", "soon"},
+		{"zero maximum", "PROMVIEW_SILENCE_MAX_DURATION", "0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+			t.Setenv(test.key, test.value)
+			if _, err := Load(); err == nil {
+				t.Fatal("Load() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsADefaultSilencePastTheMaximum(t *testing.T) {
+	// A default the server would refuse on every request is a deployment that
+	// can never silence anything.
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_SILENCE_DEFAULT_DURATION", "12h")
+	t.Setenv("PROMVIEW_SILENCE_MAX_DURATION", "1h")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want error")
+	}
+}

@@ -13,6 +13,8 @@ interface AlertDetailOverviewProps {
    * this handler and the server-provided per-alert permission are present.
    */
   onAcknowledge?: (acknowledged: boolean) => Promise<void>;
+  /** Opens the silence dialog for this alert; enables the gated action. */
+  onSilence?: () => void;
   /**
    * Upserts a label matcher into the console filter and applies it. When
    * present, every label row gains include (`key="value"`) and exclude
@@ -36,6 +38,7 @@ function byKey([a]: [string, string], [b]: [string, string]): number {
 export function AlertDetailOverview({
   detail,
   onAcknowledge,
+  onSilence,
   onFilterLabel,
 }: AlertDetailOverviewProps) {
   const labels = Object.entries(detail.labels).sort(byKey);
@@ -90,10 +93,23 @@ export function AlertDetailOverview({
         </div>
       </dl>
 
-      {detail.actions.canAcknowledge && onAcknowledge !== undefined ? (
+      {(detail.actions.canAcknowledge && onAcknowledge !== undefined) ||
+      (detail.actions.canSilence && onSilence !== undefined) ? (
         <section className="detail-section" aria-label="Actions">
           <h3 className="detail-section-title">Actions</h3>
-          <AcknowledgeButton acknowledged={detail.acknowledged} onAcknowledge={onAcknowledge} />
+          {detail.actions.canAcknowledge && onAcknowledge !== undefined ? (
+            <AcknowledgeButton acknowledged={detail.acknowledged} onAcknowledge={onAcknowledge} />
+          ) : null}
+          {detail.actions.canSilence && onSilence !== undefined ? (
+            <div className="detail-action">
+              {/* Opens a confirmation rather than acting: a silence hides alerts
+                  on a system promview does not own, and the matchers are worth
+                  reading before it does. */}
+              <button type="button" className="button" onClick={onSilence}>
+                Silence alert…
+              </button>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

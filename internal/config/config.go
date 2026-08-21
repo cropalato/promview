@@ -39,6 +39,14 @@ type Config struct {
 	ReconcileInterval time.Duration
 	// ReconcileTimeout bounds one Alertmanager request.
 	ReconcileTimeout time.Duration
+	// SilenceDefaultDuration is how long a silence lasts when the operator does
+	// not say. It is a deployment choice: the right length is however long the
+	// team's usual maintenance window runs.
+	SilenceDefaultDuration time.Duration
+	// SilenceMaxDuration bounds what an operator may ask for. A silence is the
+	// one action here that hides alerts rather than surfacing them, and an
+	// unbounded one is indistinguishable from deleting the rule.
+	SilenceMaxDuration time.Duration
 }
 
 func Load() (Config, error) {
@@ -68,6 +76,12 @@ func Load() (Config, error) {
 		AlertExpiryInterval: time.Minute,
 		ReconcileInterval:   time.Minute,
 		ReconcileTimeout:    10 * time.Second,
+		// Two hours covers the maintenance window a silence is usually reaching
+		// for, and is short enough that forgetting to clear one is survivable.
+		SilenceDefaultDuration: 2 * time.Hour,
+		// Thirty days: past that an operator is not silencing an alert, they are
+		// declining to fix it, and the rule is the thing to change.
+		SilenceMaxDuration: 30 * 24 * time.Hour,
 	}
 	if raw := os.Getenv("PROMVIEW_OIDC_COOKIE_SECURE"); raw != "" {
 		secure, err := strconv.ParseBool(raw)
@@ -92,6 +106,21 @@ func Load() (Config, error) {
 		cfg.AlertExpiryInterval = interval
 	}
 
+	if raw := os.Getenv("PROMVIEW_SILENCE_DEFAULT_DURATION"); raw != "" {
+		window, err := time.ParseDuration(raw)
+		if err != nil || window <= 0 {
+			return Config{}, errors.New("PROMVIEW_SILENCE_DEFAULT_DURATION must be a positive duration such as 2h")
+		}
+		cfg.SilenceDefaultDuration = window
+	}
+	if raw := os.Getenv("PROMVIEW_SILENCE_MAX_DURATION"); raw != "" {
+		window, err := time.ParseDuration(raw)
+		if err != nil || window <= 0 {
+			return Config{}, errors.New("PROMVIEW_SILENCE_MAX_DURATION must be a positive duration such as 720h")
+		}
+		cfg.SilenceMaxDuration = window
+	}
+
 	if raw := os.Getenv("PROMVIEW_RECONCILE_INTERVAL"); raw != "" {
 		interval, err := time.ParseDuration(raw)
 		if err != nil || interval < 0 {
@@ -105,6 +134,10 @@ func Load() (Config, error) {
 			return Config{}, errors.New("PROMVIEW_RECONCILE_TIMEOUT must be a positive duration such as 10s")
 		}
 		cfg.ReconcileTimeout = timeout
+	}
+
+	if cfg.SilenceDefaultDuration > cfg.SilenceMaxDuration {
+		return Config{}, errors.New("PROMVIEW_SILENCE_DEFAULT_DURATION must not exceed PROMVIEW_SILENCE_MAX_DURATION")
 	}
 
 	if cfg.DatabaseURL == "" {

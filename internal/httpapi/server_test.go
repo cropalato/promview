@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,6 +39,10 @@ type fakeStore struct {
 	pingErr      error
 	sourceToken  string
 	principal    auth.Principal
+	silenceScope alerts.SilenceScope
+	silenceErr   error
+	groupBy      []string
+	groupKey     map[string]string
 }
 
 type fakeAuthenticator struct {
@@ -118,9 +123,58 @@ func (store *fakeStore) AcknowledgeAlert(_ context.Context, principal auth.Princ
 	return store.detail, store.detailErr
 }
 
+func (store *fakeStore) SilenceScopeForAlert(_ context.Context, principal auth.Principal, _ int64) (alerts.SilenceScope, error) {
+	store.principal = principal
+	return store.silenceScope, store.silenceErr
+}
+
+func (store *fakeStore) SilenceScopeForGroup(
+	_ context.Context,
+	principal auth.Principal,
+	groupBy []string,
+	key map[string]string,
+) (alerts.SilenceScope, error) {
+	store.principal = principal
+	store.groupBy = groupBy
+	store.groupKey = key
+	return store.silenceScope, store.silenceErr
+}
+
+// fakeSilencer records what reached each Alertmanager, and can be told to fail
+// for one of them so partial application is testable.
+type fakeSilencer struct {
+	created  map[string]alertmanager.Silence
+	tokens   map[string]string
+	failFor  string
+	nextID   int
+	failWith error
+}
+
+func newFakeSilencer() *fakeSilencer {
+	return &fakeSilencer{created: map[string]alertmanager.Silence{}, tokens: map[string]string{}}
+}
+
+func (silencer *fakeSilencer) CreateSilence(
+	_ context.Context,
+	baseURL string,
+	token string,
+	silence alertmanager.Silence,
+) (string, error) {
+	if silencer.failFor == baseURL {
+		if silencer.failWith != nil {
+			return "", silencer.failWith
+		}
+		return "", errors.New("alertmanager refused")
+	}
+	silencer.created[baseURL] = silence
+	silencer.tokens[baseURL] = token
+	silencer.nextID++
+	return fmt.Sprintf("silence-%d", silencer.nextID), nil
+}
+
 func TestIngestAlertmanager(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	body := `{"version":"4","alerts":[{"status":"firing","labels":{"alertname":"Down"},"annotations":{},"startsAt":"2026-08-14T12:00:00Z"}]}`
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/alertmanager/primary", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer secret")
@@ -140,7 +194,7 @@ func TestIngestAlertmanager(t *testing.T) {
 }
 
 func TestGetMeInOpenMode(t *testing.T) {
-	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/me", nil))
 	if response.Code != http.StatusOK {
@@ -160,6 +214,7 @@ func TestProtectedAPIRequiresAuthentication(t *testing.T) {
 		config.Config{AuthMode: "oidc"},
 		&fakeStore{},
 		fakeAuthenticator{err: auth.ErrUnauthenticated},
+		nil,
 	)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil))
@@ -173,6 +228,7 @@ func TestProtectedAPIRequiresReadRole(t *testing.T) {
 		config.Config{AuthMode: "oidc"},
 		&fakeStore{},
 		fakeAuthenticator{principal: auth.Principal{Subject: "user", Roles: []string{"unmapped"}}},
+		nil,
 	)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil))
@@ -187,7 +243,7 @@ func TestAuthenticationRoutesAreMounted(t *testing.T) {
 		called = true
 		response.WriteHeader(http.StatusNoContent)
 	})
-	handler := New(config.Config{AuthMode: "oidc"}, &fakeStore{}, fakeAuthenticator{}, authenticationHandler)
+	handler := New(config.Config{AuthMode: "oidc"}, &fakeStore{}, fakeAuthenticator{}, nil, authenticationHandler)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/login", nil))
 	if response.Code != http.StatusNoContent || !called {
@@ -207,7 +263,7 @@ func TestListAlerts(t *testing.T) {
 		SeverityCounts: map[string]int64{"critical": 1},
 		Total:          1,
 	}}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?limit=25&status=firing&team=platform", nil))
 
@@ -231,7 +287,7 @@ func TestListAlerts(t *testing.T) {
 
 func TestListAlertsParsesMatchersAndSorting(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?match=team%3Dplatform&match=instance%21%3Dapi-2&sort=severity&order=asc", nil))
 	if response.Code != http.StatusOK {
@@ -247,7 +303,7 @@ func TestListAlertsParsesMatchersAndSorting(t *testing.T) {
 }
 
 func TestListAlertsRejectsInvalidQuery(t *testing.T) {
-	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{}, nil)
 	for _, target := range []string{
 		"/api/v1/alerts?limit=0",
 		"/api/v1/alerts?status=closed",
@@ -275,7 +331,7 @@ func TestListAlertsRejectsCursorForDifferentQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?status=firing&cursor="+encoded, nil))
 	if response.Code != http.StatusBadRequest {
@@ -296,7 +352,7 @@ func TestGetAlertDetail(t *testing.T) {
 			ID: 9, Occurrence: 2, Type: "alert.reopened", SourceStatus: "firing", OccurredAt: now,
 		}},
 	}}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts/42", nil))
 	if response.Code != http.StatusOK {
@@ -319,7 +375,7 @@ func TestGetAlertDetail(t *testing.T) {
 }
 
 func TestGetAlertNotFound(t *testing.T) {
-	handler := New(config.Config{AuthMode: "open"}, &fakeStore{detailErr: alerts.ErrNotFound}, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, &fakeStore{detailErr: alerts.ErrNotFound}, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts/42", nil))
 	if response.Code != http.StatusNotFound {
@@ -328,7 +384,7 @@ func TestGetAlertNotFound(t *testing.T) {
 }
 
 func TestGetAlertRejectsInvalidID(t *testing.T) {
-	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts/nope", nil))
 	if response.Code != http.StatusBadRequest {
@@ -342,7 +398,7 @@ func TestAcknowledgeAlert(t *testing.T) {
 	}}}
 	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{
 		Subject: "operator-1", Roles: []string{"operator"},
-	}})
+	}}, nil)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/alerts/42/acknowledge", strings.NewReader(`{"acknowledged":true}`))
 	request.Header.Set("Authorization", "Bearer session-token")
 	response := httptest.NewRecorder()
@@ -381,7 +437,7 @@ func TestAcknowledgeAlertRejectsViewerAndCookieCSRF(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := &fakeStore{detail: alerts.Detail{Alert: alerts.Alert{ID: 42, Labels: map[string]string{}}}}
-			handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: test.principal})
+			handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: test.principal}, nil)
 			request := httptest.NewRequest(http.MethodPost, "https://example.test/api/v1/alerts/42/acknowledge", strings.NewReader(`{"acknowledged":false}`))
 			if test.cookie {
 				request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
@@ -421,7 +477,7 @@ func TestStreamAlertsResumesFromCursor(t *testing.T) {
 		}},
 		cancel: cancel,
 	}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream?cursor=7", nil).WithContext(ctx)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -450,7 +506,7 @@ func TestStreamAlertsRedactsScopeExit(t *testing.T) {
 		}},
 		cancel: cancel,
 	}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream?cursor=8", nil).WithContext(ctx)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -482,7 +538,7 @@ func TestStreamCursorRejectsInvalidValue(t *testing.T) {
 }
 
 func TestIngestAlertmanagerRejectsBadToken(t *testing.T) {
-	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, &fakeStore{}, auth.OpenAuthenticator{}, nil)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/alertmanager/primary", strings.NewReader(`{}`))
 	request.Header.Set("Authorization", "Bearer wrong")
 	response := httptest.NewRecorder()
@@ -495,7 +551,7 @@ func TestIngestAlertmanagerRejectsBadToken(t *testing.T) {
 }
 
 func TestReadinessFailure(t *testing.T) {
-	handler := New(config.Config{AuthMode: "open"}, &fakeStore{pingErr: errors.New("down")}, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, &fakeStore{pingErr: errors.New("down")}, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/ready", nil))
 	if response.Code != http.StatusServiceUnavailable {
@@ -508,7 +564,7 @@ func TestServesSPAIndexForClientRoute(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "index.html"), []byte("promview shell"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	handler := New(config.Config{AuthMode: "open", WebDirectory: directory}, &fakeStore{}, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open", WebDirectory: directory}, &fakeStore{}, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/alerts/example", nil))
 	if response.Code != http.StatusOK {
@@ -542,7 +598,7 @@ func TestListAlertGroups(t *testing.T) {
 		SeverityCounts: map[string]int64{"critical": 1, "warning": 235},
 		StreamCursor:   7,
 	}}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=alertname,source&status=firing", nil))
 
@@ -611,7 +667,7 @@ func TestListAlertGroups(t *testing.T) {
 
 func TestListAlertGroupsAcceptsCustomLabel(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts?groupBy=prometheus_cluster,source&status=firing", nil))
 	if response.Code != http.StatusOK {
@@ -627,7 +683,7 @@ func TestListAlertGroupsAcceptsCustomLabel(t *testing.T) {
 
 func TestListAlertGroupsRejectsUnusableRequests(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	for _, test := range []struct{ name, target string }{
 		{name: "malformed label", target: "/api/v1/alerts?groupBy=not-a-label"},
 		{name: "injection attempt", target: "/api/v1/alerts?groupBy=alertname%3B+DROP+TABLE+alerts"},
@@ -646,7 +702,7 @@ func TestListAlertGroupsRejectsUnusableRequests(t *testing.T) {
 
 func TestListAlertGroupsRejectsForeignCursors(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 
 	// A cursor from a different grouping would silently return the wrong page.
 	foreign, err := encodeGroupCursor(alerts.GroupCursor{
@@ -676,7 +732,7 @@ func TestListAlertGroupsRejectsForeignCursors(t *testing.T) {
 
 func TestListAlertGroupsAcceptsItsOwnCursor(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	identity := alerts.Query{GroupBy: []string{"alertname"}}.CursorIdentity()
 	cursor, err := encodeGroupCursor(alerts.GroupCursor{
 		SeverityRank: 2, LatestLastSeen: time.Now().UTC(), Key: []string{"Cardinality"},
@@ -697,7 +753,7 @@ func TestListAlertGroupsAcceptsItsOwnCursor(t *testing.T) {
 
 func TestListAlertGroupsParsesExplicitSortingAndBindsCursor(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	query := alerts.Query{GroupBy: []string{"alertname"}, Sort: "team", Order: "asc"}
 	cursor, err := encodeGroupCursor(alerts.GroupCursor{
 		Key: []string{"Cardinality"}, Sort: "team", Order: "asc", Value: "platform", Query: query.CursorIdentity(),
@@ -725,7 +781,7 @@ func TestListAlertsWithoutGroupingKeepsFlatShape(t *testing.T) {
 	// Existing clients send no groupBy and must keep getting exactly what they
 	// got before grouping existed.
 	store := &fakeStore{result: alerts.ListResult{Total: 1, SeverityCounts: map[string]int64{"warning": 1}}}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil))
 	if response.Code != http.StatusOK {
@@ -748,7 +804,7 @@ func TestGetPreferences(t *testing.T) {
 	stored.Density = "compact"
 	stored.Columns = []preferences.Column{{ID: "severity"}, {ID: "alert"}, {ID: "label:prometheus_cluster", Width: 180}}
 	store := &fakeStore{preferences: stored}
-	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}})
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}}, nil)
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/preferences", nil))
@@ -772,7 +828,7 @@ func TestPreferencesAreUnavailableWithoutAUser(t *testing.T) {
 	// key a layout against. The console falls back to browser storage, which it
 	// can only do if it can tell this case apart from a failure.
 	store := &fakeStore{prefErr: preferences.ErrNoSubject}
-	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{})
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/preferences", nil))
@@ -793,7 +849,7 @@ func TestPreferencesAreUnavailableWithoutAUser(t *testing.T) {
 
 func TestPutPreferences(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}})
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}}, nil)
 
 	wanted := preferences.Default()
 	wanted.Density = "comfortable"
@@ -817,7 +873,7 @@ func TestPutPreferences(t *testing.T) {
 
 func TestPutPreferencesRejectsUnusableLayouts(t *testing.T) {
 	store := &fakeStore{}
-	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}})
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}}, nil)
 
 	for _, test := range []struct{ name, payload string }{
 		{name: "not json", payload: "{"},

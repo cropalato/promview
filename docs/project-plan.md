@@ -316,7 +316,7 @@ The primary experience is one dense operational console, not a card dashboard:
 - resizable detail drawer on desktop
 - full-screen detail view on mobile
 - labels, annotations, raw payload, source links, and timeline
-- acknowledgement actions; other single and bulk operator actions remain planned
+- acknowledgement and silence actions; other single and bulk operator actions remain planned
 - visible stale/reconnecting state
 
 Default columns are severity, lifecycle state, alert name, summary, team, instance, last seen, source, age, assignee, and note count. Column choice, order, density, and palette are stored per user so a layout follows an operator between machines; deployments without a signed-in user keep them in the browser.
