@@ -9,6 +9,7 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 ### Fixed
 
 - **console:** stop the status bar claiming `read-only` for every session; the top bar's role badge already reports what the operator may do.
+- **console:** give the view menu popover a background again. It referenced `--surface`, which no theme defines, so the declaration was dropped and the menu rendered transparent over the alert table.
 
 ## [0.1.0-alpha.16] - 2026-08-21
 
