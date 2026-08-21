@@ -114,8 +114,6 @@ export default function App({ navigate }: AppProps = {}) {
     setFilterError(null);
   }, []);
 
-  const [filterFocus, setFilterFocus] = useState(0);
-
   const clearFilter = useCallback(() => {
     setFilterDraft('');
     setAppliedMatchers([]);
@@ -126,25 +124,6 @@ export default function App({ navigate }: AppProps = {}) {
   // apply immediately; the canonical expression is reflected into the input.
   const applyLabelMatcher = (matcher: LabelMatcher) => {
     const next = upsertMatcher(appliedMatchers, matcher);
-    setAppliedMatchers(next);
-    setFilterDraft(formatFilter(next));
-    setFilterError(null);
-  };
-
-  // The view menu's filter buttons name a field but never a value, so starting
-  // a filter seeds an empty matcher into the draft and hands the operator the
-  // caret. Nothing is applied until they type a value and press Enter, which
-  // keeps a half-written filter from emptying the table.
-  const startLabelFilter = (name: string) => {
-    const seeded = formatFilter([...appliedMatchers, { name, op: '=' as const, value: '' }]);
-    setFilterDraft(seeded);
-    setFilterError(null);
-    setFilterFocus((request) => request + 1);
-  };
-
-  // Removing is unambiguous, so it applies at once.
-  const clearLabelFilter = (name: string) => {
-    const next = appliedMatchers.filter((matcher) => matcher.name !== name);
     setAppliedMatchers(next);
     setFilterDraft(formatFilter(next));
     setFilterError(null);
@@ -444,7 +423,6 @@ export default function App({ navigate }: AppProps = {}) {
                     shown={loadedAlerts.length}
                     total={alertsState.data.total}
                     error={filterError}
-                    focusRequest={filterFocus}
                     onChange={changeFilter}
                     onApply={applyFilter}
                   />
@@ -453,9 +431,6 @@ export default function App({ navigate }: AppProps = {}) {
                     onChange={updatePreferences}
                     labelSuggestions={labelSuggestions}
                     resolvedDensity={density}
-                    filteredLabels={appliedMatchers.map((matcher) => matcher.name)}
-                    onFilterLabel={startLabelFilter}
-                    onClearLabelFilter={clearLabelFilter}
                   />
                 </div>
                 <SeverityStrip

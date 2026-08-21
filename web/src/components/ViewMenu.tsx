@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { FIXED_COLUMNS, LABEL_COLUMN_PREFIX, columnFilterLabel } from '../alerts/columns';
+import { FIXED_COLUMNS, LABEL_COLUMN_PREFIX } from '../alerts/columns';
 import { DENSITIES } from '../preferences/store';
 import type { ColumnPreference, Density, Preferences } from '../preferences/store';
 import { GroupingEditor } from './GroupingEditor';
@@ -41,19 +41,6 @@ export interface ViewMenuProps {
    * the operator guessing which row height they are about to get.
    */
   resolvedDensity?: string;
-  /**
-   * Label names the applied filter currently matches on. A column naming one of
-   * these shows its filter button pressed.
-   */
-  filteredLabels?: readonly string[];
-  /**
-   * Starts a filter on a label: the console seeds the filter input with an
-   * empty matcher and focuses it, since the menu knows the field but never the
-   * value. Absent in a console with no filter bar, which hides the buttons.
-   */
-  onFilterLabel?: (name: string) => void;
-  /** Drops the applied matcher on a label. */
-  onClearLabelFilter?: (name: string) => void;
 }
 
 export function ViewMenu({
@@ -61,9 +48,6 @@ export function ViewMenu({
   onChange,
   labelSuggestions = [],
   resolvedDensity,
-  filteredLabels = [],
-  onFilterLabel,
-  onClearLabelFilter,
 }: ViewMenuProps) {
   const [open, setOpen] = useState(false);
   const [labelDraft, setLabelDraft] = useState('');
@@ -117,11 +101,6 @@ export function ViewMenu({
     }
     onChange({ ...preferences, columns: [...preferences.columns, { id }] });
   };
-
-  // The buttons only exist where the console has somewhere to send them; a
-  // consumer without a filter bar gets the menu without them.
-  const canFilter = onFilterLabel !== undefined && onClearLabelFilter !== undefined;
-  const filteredSet = new Set(filteredLabels);
 
   const fixedIds = new Set(FIXED_COLUMNS.map((column) => column.id));
   // The kept columns the menu can name, in saved order, each carrying where it
@@ -227,10 +206,6 @@ export function ViewMenu({
             <ul className="view-menu-columns" aria-label="Columns, in order">
               {ordered.map(({ column }, position) => {
                 const label = columnLabel(column.id);
-                // Only some columns name a label to match on; the rest keep
-                // just their move buttons rather than a dead control.
-                const filterName = columnFilterLabel(column.id);
-                const filtered = filterName !== null && filteredSet.has(filterName);
                 return (
                   <li key={column.id} className="view-menu-column">
                     <label className="view-menu-check">
@@ -238,26 +213,6 @@ export function ViewMenu({
                       <span>{label}</span>
                     </label>
                     <span className="view-menu-column-actions">
-                      {filterName !== null && canFilter ? (
-                        <button
-                          type="button"
-                          className="button view-menu-column-action"
-                          aria-label={
-                            filtered ? `Remove the ${filterName} filter` : `Filter by ${filterName}`
-                          }
-                          aria-pressed={filtered}
-                          title={
-                            filtered ? `Remove the ${filterName} filter` : `Filter by ${filterName}`
-                          }
-                          onClick={() =>
-                            filtered
-                              ? onClearLabelFilter?.(filterName)
-                              : onFilterLabel?.(filterName)
-                          }
-                        >
-                          ⚑
-                        </button>
-                      ) : null}
                       <button
                         type="button"
                         className="button view-menu-column-action"
