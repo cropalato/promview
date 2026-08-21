@@ -6,6 +6,11 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Features
+
+- **alerts:** silence an alert or a whole group on its Alertmanager. A single alert silences on its full label set, so only that series is affected; a group silences on its grouping key, and fans out to every Alertmanager its members span, reporting the outcome per target rather than as one result. Silences require operator rights, are attributed to the signed-in user, and always expire — the window defaults to two hours (`PROMVIEW_SILENCE_DEFAULT_DURATION`) and is capped at thirty days (`PROMVIEW_SILENCE_MAX_DURATION`).
+- **sources:** add `--alertmanager-token`, an optional bearer credential used when writing silences. Reads stay unauthenticated; writes are the direction deployments usually protect.
+
 ### Removed
 
 - **console:** remove the per-column filter button added in 0.1.0-alpha.17. Seeding an empty matcher and handing over the caret was more steps than typing the filter, and the alert detail drawer's label actions already start a filter from a value the operator can see.

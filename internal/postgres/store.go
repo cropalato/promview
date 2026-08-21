@@ -59,16 +59,18 @@ func (store *Store) SetSource(ctx context.Context, source sources.Source, rawTok
 		return err
 	}
 	_, err := store.pool.Exec(ctx, `
-		INSERT INTO alert_sources (slug, name, token_hash, enabled, stale_after, alertmanager_url)
-		VALUES ($1, $2, $3, true, $4, COALESCE($5, ''))
+		INSERT INTO alert_sources (slug, name, token_hash, enabled, stale_after, alertmanager_url, alertmanager_token)
+		VALUES ($1, $2, $3, true, $4, COALESCE($5, ''), COALESCE($6, ''))
 		ON CONFLICT (slug) DO UPDATE SET
 			name = EXCLUDED.name,
 			token_hash = EXCLUDED.token_hash,
 			enabled = true,
 			stale_after = COALESCE(EXCLUDED.stale_after, alert_sources.stale_after),
 			alertmanager_url = COALESCE($5, alert_sources.alertmanager_url),
+			alertmanager_token = COALESCE($6, alert_sources.alertmanager_token),
 			updated_at = now()
-	`, source.Slug, source.Name, sources.HashToken(rawToken), staleAfterInterval(source.StaleAfter), source.AlertmanagerURL)
+	`, source.Slug, source.Name, sources.HashToken(rawToken), staleAfterInterval(source.StaleAfter),
+		source.AlertmanagerURL, source.AlertmanagerToken)
 	if err != nil {
 		return fmt.Errorf("set alert source %s: %w", source.Slug, err)
 	}
@@ -87,9 +89,10 @@ func (store *Store) UpdateSource(ctx context.Context, slug string, patch sources
 			name = COALESCE($2, name),
 			stale_after = COALESCE($3, stale_after),
 			alertmanager_url = COALESCE($4, alertmanager_url),
+			alertmanager_token = COALESCE($5, alertmanager_token),
 			updated_at = now()
 		WHERE slug = $1
-	`, slug, patch.Name, staleAfterInterval(patch.StaleAfter), patch.AlertmanagerURL)
+	`, slug, patch.Name, staleAfterInterval(patch.StaleAfter), patch.AlertmanagerURL, patch.AlertmanagerToken)
 	if err != nil {
 		return fmt.Errorf("update alert source %s: %w", slug, err)
 	}

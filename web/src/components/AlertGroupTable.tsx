@@ -63,6 +63,12 @@ export interface AlertGroupTableProps {
   onSelect?: (alert: AlertSummary) => void;
   /** Opens an alert by id; a one-member group activates straight into it. */
   onOpenAlert?: (alertId: string) => void;
+  /**
+   * Opens the silence dialog for a whole group. Absent when the operator may
+   * not silence, or the deployment has no Alertmanager to write to, and the
+   * per-row control is then not rendered at all.
+   */
+  onSilenceGroup?: (group: AlertGroupSummary) => void;
 }
 
 const GROUP_CONTROL_COLUMNS = 1;
@@ -96,6 +102,7 @@ export function AlertGroupTable({
   onLoadMoreChildren,
   onSelect,
   onOpenAlert,
+  onSilenceGroup,
 }: AlertGroupTableProps) {
   // The group-control cell precedes every operator column, preserving their
   // saved order and their one-to-one position across every grouped row type.
@@ -161,6 +168,7 @@ export function AlertGroupTable({
                   onLoadMoreChildren={onLoadMoreChildren}
                   onSelect={onSelect}
                   onOpenAlert={onOpenAlert}
+                  onSilenceGroup={onSilenceGroup}
                 />
               ))
             )}
@@ -183,6 +191,7 @@ function GroupRows({
   onLoadMoreChildren,
   onSelect,
   onOpenAlert,
+  onSilenceGroup,
 }: {
   group: AlertGroupSummary;
   columns: readonly ColumnDefinition[];
@@ -194,6 +203,7 @@ function GroupRows({
   onLoadMoreChildren: (key: Record<string, string>) => void;
   onSelect?: (alert: AlertSummary) => void;
   onOpenAlert?: (alertId: string) => void;
+  onSilenceGroup?: (group: AlertGroupSummary) => void;
 }) {
   const expandable = group.total > 1;
   // A one-member group has nothing to expand into; activating the row opens
@@ -247,6 +257,22 @@ function GroupRows({
               <span>{group.worstSeverityLabel ?? SEVERITY_LABELS[group.worstSeverity]}</span>
             </span>
             {expandable ? <span className="group-count">{group.total}</span> : null}
+            {onSilenceGroup !== undefined ? (
+              // Stops the row's own activation: silencing a group and expanding
+              // it are different intentions, and the click lands on both.
+              <button
+                type="button"
+                className="button group-silence"
+                aria-label={`Silence ${describeGroupKey(group.key)}`}
+                title="Silence this group"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSilenceGroup(group);
+                }}
+              >
+                Silence
+              </button>
+            ) : null}
           </span>
           {member === undefined ? (
             <span className="group-aggregate-values cell-mono">
@@ -407,6 +433,13 @@ function GroupKeyCells({
       </td>
     );
   });
+}
+
+/** Names a group in the words its key uses, for the silence control's label. */
+function describeGroupKey(key: Record<string, string>): string {
+  return Object.entries(key)
+    .map(([name, value]) => `${name}=${value}`)
+    .join(', ');
 }
 
 function groupKeyForColumn(columnId: string): string | undefined {

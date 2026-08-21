@@ -27,7 +27,7 @@ function detailResult(overrides: Record<string, unknown> = {}): AlertDetailResul
       acknowledged: false,
       acknowledgedBy: '',
       acknowledgedAt: null,
-      actions: { canAcknowledge: false },
+      actions: { canAcknowledge: false, canSilence: false },
       rawData: { status: 'firing' },
       ...overrides,
     },
@@ -193,7 +193,7 @@ describe('AlertDetailDrawer', () => {
         alertId="42"
         state={{
           status: 'ready',
-          detail: detailResult({ actions: { canAcknowledge: true } }),
+          detail: detailResult({ actions: { canAcknowledge: true, canSilence: true } }),
         }}
         onClose={vi.fn()}
         onRetry={vi.fn()}

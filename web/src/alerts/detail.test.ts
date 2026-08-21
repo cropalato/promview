@@ -141,7 +141,7 @@ describe('fetchAlertDetail', () => {
         acknowledged: false,
         acknowledgedBy: '',
         acknowledgedAt: null,
-        actions: { canAcknowledge: false },
+        actions: { canAcknowledge: false, canSilence: false },
         rawData: { status: 'firing', labels: { alertname: 'HighErrorRate' } },
       },
       history: [
@@ -198,7 +198,7 @@ describe('setAlertAcknowledgement', () => {
             acknowledged: true,
             acknowledgedBy: 'operator@example.com',
             acknowledgedAt: '2026-08-14T11:05:00Z',
-            actions: { canAcknowledge: true },
+            actions: { canAcknowledge: true, canSilence: true },
           }),
           history: [apiHistoryEvent({ id: 12, type: 'acknowledged' }), apiHistoryEvent()],
         }),
@@ -216,7 +216,7 @@ describe('setAlertAcknowledgement', () => {
     expect(updated.alert.acknowledged).toBe(true);
     expect(updated.alert.acknowledgedBy).toBe('operator@example.com');
     expect(updated.alert.acknowledgedAt).toBe('2026-08-14T11:05:00Z');
-    expect(updated.alert.actions).toEqual({ canAcknowledge: true });
+    expect(updated.alert.actions).toEqual({ canAcknowledge: true, canSilence: true });
     expect(updated.history.map((event) => event.type)).toEqual(['acknowledged', 'updated']);
   });
 
@@ -299,7 +299,7 @@ describe('parseAlertDetailResponse', () => {
     expect(result.alert.acknowledged).toBe(false);
     expect(result.alert.acknowledgedBy).toBe('');
     expect(result.alert.acknowledgedAt).toBeNull();
-    expect(result.alert.actions).toEqual({ canAcknowledge: false });
+    expect(result.alert.actions).toEqual({ canAcknowledge: false, canSilence: false });
   });
 
   it('maps acknowledgement state and per-alert actions', () => {
@@ -309,7 +309,7 @@ describe('parseAlertDetailResponse', () => {
           acknowledged: true,
           acknowledgedBy: 'operator@example.com',
           acknowledgedAt: '2026-08-14T11:05:00Z',
-          actions: { canAcknowledge: true },
+          actions: { canAcknowledge: true, canSilence: true },
         }),
       }),
     );
@@ -317,7 +317,7 @@ describe('parseAlertDetailResponse', () => {
     expect(result.alert.acknowledged).toBe(true);
     expect(result.alert.acknowledgedBy).toBe('operator@example.com');
     expect(result.alert.acknowledgedAt).toBe('2026-08-14T11:05:00Z');
-    expect(result.alert.actions).toEqual({ canAcknowledge: true });
+    expect(result.alert.actions).toEqual({ canAcknowledge: true, canSilence: true });
   });
 
   it('treats malformed actions envelopes as "no actions allowed"', () => {
@@ -325,7 +325,7 @@ describe('parseAlertDetailResponse', () => {
       const result = parseAlertDetailResponse(
         apiDetailResponse({ alert: apiAlertDetail({ actions }) }),
       );
-      expect(result.alert.actions).toEqual({ canAcknowledge: false });
+      expect(result.alert.actions).toEqual({ canAcknowledge: false, canSilence: false });
     }
   });
 

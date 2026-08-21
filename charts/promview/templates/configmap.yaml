@@ -11,6 +11,8 @@ data:
   PROMVIEW_ALERT_EXPIRY_INTERVAL: {{ .Values.alertExpiry.interval | quote }}
   PROMVIEW_RECONCILE_INTERVAL: {{ .Values.reconcile.interval | quote }}
   PROMVIEW_RECONCILE_TIMEOUT: {{ .Values.reconcile.timeout | quote }}
+  PROMVIEW_SILENCE_DEFAULT_DURATION: {{ .Values.silence.defaultDuration | quote }}
+  PROMVIEW_SILENCE_MAX_DURATION: {{ .Values.silence.maxDuration | quote }}
   {{- if eq .Values.auth.mode "oidc" }}
   PROMVIEW_OIDC_ISSUER_URL: {{ .Values.oidc.issuerURL | quote }}
   PROMVIEW_OIDC_CLIENT_ID: {{ .Values.oidc.clientID | quote }}

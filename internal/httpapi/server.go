@@ -34,6 +34,8 @@ type Store interface {
 	GroupAlerts(context.Context, auth.Principal, alerts.Query) (alerts.GroupResult, error)
 	GetAlertDetail(context.Context, auth.Principal, int64) (alerts.Detail, error)
 	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
+	SilenceScopeForAlert(context.Context, auth.Principal, int64) (alerts.SilenceScope, error)
+	SilenceScopeForGroup(context.Context, auth.Principal, []string, map[string]string) (alerts.SilenceScope, error)
 	StreamEvents(context.Context, auth.Principal, int64, int) (alerts.StreamBatch, error)
 	ReadPreferences(context.Context, auth.Principal) (preferences.Preferences, error)
 	WritePreferences(context.Context, auth.Principal, preferences.Preferences) error
@@ -44,10 +46,20 @@ type API struct {
 	config        config.Config
 	store         Store
 	authenticator auth.Authenticator
+	// silencer is nil in a deployment that cannot write to an Alertmanager; the
+	// silence routes then answer 501 rather than 404, so the console can tell
+	// "not built" from "not configured here".
+	silencer Silencer
 }
 
-func New(cfg config.Config, store Store, authenticator auth.Authenticator, authenticationHandlers ...http.Handler) http.Handler {
-	api := &API{config: cfg, store: store, authenticator: authenticator}
+func New(
+	cfg config.Config,
+	store Store,
+	authenticator auth.Authenticator,
+	silencer Silencer,
+	authenticationHandlers ...http.Handler,
+) http.Handler {
+	api := &API{config: cfg, store: store, authenticator: authenticator, silencer: silencer}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/config", api.getConfig)
 	mux.Handle("GET /api/v1/me", api.requireAuthentication(http.HandlerFunc(api.getMe)))
@@ -55,6 +67,8 @@ func New(cfg config.Config, store Store, authenticator auth.Authenticator, authe
 	mux.Handle("GET /api/v1/alerts/{id}", api.requireAuthentication(http.HandlerFunc(api.getAlert)))
 	mux.Handle("GET /api/v1/alerts/{id}/events", api.requireAuthentication(http.HandlerFunc(api.getAlertEvents)))
 	mux.Handle("POST /api/v1/alerts/{id}/acknowledge", api.requireAuthentication(http.HandlerFunc(api.acknowledgeAlert)))
+	mux.Handle("POST /api/v1/alerts/{id}/silence", api.requireAuthentication(http.HandlerFunc(api.silenceAlert)))
+	mux.Handle("POST /api/v1/groups/silence", api.requireAuthentication(http.HandlerFunc(api.silenceGroup)))
 	mux.Handle("GET /api/v1/stream", api.requireAuthentication(http.HandlerFunc(api.streamAlerts)))
 	mux.Handle("GET /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.getPreferences)))
 	mux.Handle("PUT /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.putPreferences)))
@@ -112,7 +126,7 @@ func (api *API) getAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"alert":   newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels)),
+		"alert":   newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
 		"history": detail.History,
 	})
 }
@@ -155,7 +169,7 @@ func (api *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"alert":   newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels)),
+		"alert":   newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
 		"history": detail.History,
 	})
 }
@@ -414,9 +428,14 @@ func requestPrincipal(r *http.Request) (auth.Principal, bool) {
 }
 
 func (api *API) getConfig(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"authMode":    api.config.AuthMode,
 		"productName": "Promview",
+		// The console needs the deployment's window to default and bound its own
+		// duration control rather than hardcoding one the server would reject.
+		"silenceDefaultSeconds": int64(api.config.SilenceDefaultDuration / time.Second),
+		"silenceMaxSeconds":     int64(api.config.SilenceMaxDuration / time.Second),
+		"silenceEnabled":        api.silencer != nil,
 	})
 }
 
@@ -496,6 +515,11 @@ type alertDetailResponse struct {
 
 type alertActions struct {
 	CanAcknowledge bool `json:"canAcknowledge"`
+	// CanSilence carries the same per-alert operator check as CanAcknowledge,
+	// and additionally whether this deployment can reach an Alertmanager at
+	// all. They are reported separately because they can differ: a deployment
+	// with no Alertmanager configured can still acknowledge.
+	CanSilence bool `json:"canSilence"`
 }
 
 // alertGroupResponse is one collapsed row. SampleAlertID is a string like every
@@ -536,14 +560,14 @@ func newAlertResponse(alert alerts.Alert) alertResponse {
 	}
 }
 
-func newAlertDetailResponse(alert alerts.Alert, canAcknowledge bool) alertDetailResponse {
+func newAlertDetailResponse(alert alerts.Alert, canOperate bool, canSilence bool) alertDetailResponse {
 	return alertDetailResponse{
 		alertResponse:  newAlertResponse(alert),
 		Occurrence:     alert.Occurrence,
 		Acknowledged:   alert.Acknowledged,
 		AcknowledgedAt: alert.AcknowledgedAt,
 		AcknowledgedBy: alert.AcknowledgedBy,
-		Actions:        alertActions{CanAcknowledge: canAcknowledge},
+		Actions:        alertActions{CanAcknowledge: canOperate, CanSilence: canOperate && canSilence},
 		RawData:        alert.RawData,
 	}
 }

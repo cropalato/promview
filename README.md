@@ -179,6 +179,25 @@ firing ones is treated as untrustworthy — a restarting Alertmanager looks exac
 a fleet that went silent — so that reading only syncs suppression and leaves endings
 to a reading that shows something.
 
+## Silences
+
+An operator can silence a single alert or a whole group from the console, which creates the silence on the source's Alertmanager.
+
+- A single alert silences on its **full label set**, so only that series stops notifying. A group silences on its **grouping key**; `source` names a Promview source rather than an alert label, so it selects which Alertmanager to write to instead of becoming a matcher.
+- A group whose members span several Alertmanagers produces one silence per Alertmanager, and the console reports the outcome for each. A partial application is reported as such (HTTP 207) rather than as success.
+- Silences are attributed to the signed-in user, so this needs `PROMVIEW_AUTH_MODE=oidc` and an operator or administrator role binding. Open mode has no user to attribute a silence to and cannot create one.
+- Every silence expires. `PROMVIEW_SILENCE_DEFAULT_DURATION` sets the window an operator gets by default (`2h`), and `PROMVIEW_SILENCE_MAX_DURATION` caps what they may ask for (`720h`).
+
+Writing a silence is the only place Promview writes to an Alertmanager. Reads are unauthenticated in the deployments this targets, but writes are commonly protected, so a source can carry a credential for them:
+
+```sh
+promview source set --slug demo --name Demo --token <ingest-token> \
+  --alertmanager-url http://alertmanager:9093 \
+  --alertmanager-token <alertmanager-token>
+```
+
+The Alertmanager token is stored as given rather than hashed, because it has to be replayed on every request. Treat `alert_sources.alertmanager_token` as a secret at rest. A source with no token sends no credential, which is the right setting for an Alertmanager that allows anonymous writes.
+
 ## Console Preferences
 
 Column choice and order, row density, grouping keys, and the console palette are stored per user in `user_preferences` and served by `GET`/`PUT /api/v1/preferences`, so a layout follows an operator between machines.

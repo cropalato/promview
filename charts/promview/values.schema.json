@@ -193,6 +193,20 @@
           "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$"
         }
       }
+    },
+    "silence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultDuration": {
+          "type": "string",
+          "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$"
+        },
+        "maxDuration": {
+          "type": "string",
+          "pattern": "^([0-9]+(ns|us|ms|s|m|h))+$"
+        }
+      }
     }
   }
 }

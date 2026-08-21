@@ -19,6 +19,8 @@ import type { AlertState } from './types';
  */
 export interface AlertActions {
   canAcknowledge: boolean;
+  /** Operator rights on this alert plus an Alertmanager to write the silence to. */
+  canSilence: boolean;
 }
 
 /** Fully validated alert detail, mapped for the drawer panels. */
@@ -258,10 +260,10 @@ function parseAlertDetail(value: unknown): AlertDetail {
 /** An absent or malformed actions envelope means "no actions allowed". */
 function parseActions(value: unknown): AlertActions {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { canAcknowledge: false };
+    return { canAcknowledge: false, canSilence: false };
   }
   const record = value as Record<string, unknown>;
-  return { canAcknowledge: record.canAcknowledge === true };
+  return { canAcknowledge: record.canAcknowledge === true, canSilence: record.canSilence === true };
 }
 
 function parseHistory(value: unknown): AlertHistoryEvent[] {

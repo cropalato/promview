@@ -25,7 +25,7 @@ function detail(overrides: Partial<AlertDetail> = {}): AlertDetail {
     acknowledged: false,
     acknowledgedBy: '',
     acknowledgedAt: null,
-    actions: { canAcknowledge: false },
+    actions: { canAcknowledge: false, canSilence: false },
     rawData: {},
     ...overrides,
   };
@@ -198,14 +198,18 @@ describe('AlertDetailOverview', () => {
     const onAcknowledge = vi.fn().mockResolvedValue(undefined);
     const { rerender } = render(
       <AlertDetailOverview
-        detail={detail({ actions: { canAcknowledge: true } })}
+        detail={detail({ actions: { canAcknowledge: true, canSilence: true } })}
         onAcknowledge={onAcknowledge}
       />,
     );
     expect(screen.getByRole('button', { name: 'Acknowledge alert' })).toBeInTheDocument();
 
     // Permission without a handler: no control.
-    rerender(<AlertDetailOverview detail={detail({ actions: { canAcknowledge: true } })} />);
+    rerender(
+      <AlertDetailOverview
+        detail={detail({ actions: { canAcknowledge: true, canSilence: true } })}
+      />,
+    );
     expect(screen.queryByRole('button', { name: /acknowledge/i })).not.toBeInTheDocument();
 
     // Handler without the permission: no control.
@@ -220,7 +224,7 @@ describe('AlertDetailOverview', () => {
         detail={detail({
           acknowledged: true,
           acknowledgedBy: 'operator@example.com',
-          actions: { canAcknowledge: true },
+          actions: { canAcknowledge: true, canSilence: true },
         })}
         onAcknowledge={onAcknowledge}
       />,

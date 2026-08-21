@@ -28,6 +28,15 @@ type Source struct {
 	// Nil leaves the stored value alone; an empty string disables reconciliation
 	// for the source.
 	AlertmanagerURL *string
+	// AlertmanagerToken authenticates writes to that Alertmanager, sent as a
+	// bearer credential when creating a silence. Reads work unauthenticated in
+	// the deployments this targets; writes are the direction that is usually
+	// protected. Nil leaves the stored value alone; an empty string clears it
+	// and sends no credential.
+	//
+	// Unlike the ingestion token this is stored as given rather than hashed: it
+	// has to be replayed to the Alertmanager, not compared against.
+	AlertmanagerToken *string
 }
 
 // Patch carries the settings that can change after a source exists. Nil fields
@@ -36,14 +45,16 @@ type Source struct {
 // riskier operation than adjusting how it is read, and requiring one to do the
 // other means an operator must handle a live secret to change a URL.
 type Patch struct {
-	Name            *string
-	StaleAfter      *time.Duration
-	AlertmanagerURL *string
+	Name              *string
+	StaleAfter        *time.Duration
+	AlertmanagerURL   *string
+	AlertmanagerToken *string
 }
 
 // ValidatePatch rejects a change that would leave a source unusable.
 func ValidatePatch(patch Patch) error {
-	if patch.Name == nil && patch.StaleAfter == nil && patch.AlertmanagerURL == nil {
+	if patch.Name == nil && patch.StaleAfter == nil && patch.AlertmanagerURL == nil &&
+		patch.AlertmanagerToken == nil {
 		return errors.New("nothing to update")
 	}
 	if patch.Name != nil && *patch.Name == "" {

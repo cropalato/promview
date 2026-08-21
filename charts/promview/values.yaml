@@ -73,6 +73,14 @@ reconcile:
   interval: 1m
   timeout: 10s
 
+# Silencing an alert or group writes to the source's Alertmanager. Every silence
+# expires: defaultDuration is what an operator gets without choosing, and
+# maxDuration caps what they may ask for. Per-source Alertmanager credentials
+# live in the database, not here.
+silence:
+  defaultDuration: 2h
+  maxDuration: 720h
+
 migration:
   enabled: true
   backoffLimit: 3
