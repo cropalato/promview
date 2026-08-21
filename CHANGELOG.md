@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Removed
+
+- **console:** remove the per-column filter button added in 0.1.0-alpha.17. Seeding an empty matcher and handing over the caret was more steps than typing the filter, and the alert detail drawer's label actions already start a filter from a value the operator can see.
+
 ## [0.1.0-alpha.17] - 2026-08-21
 
 ### Features

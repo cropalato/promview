@@ -1212,15 +1212,6 @@ kbd {
   line-height: 1.4;
 }
 
-/* A column whose label the applied filter matches on. Pressed is carried by
-   aria-pressed, so the accent is confirming state the button already reports
-   rather than being the only signal. */
-.view-menu-column-action[aria-pressed='true'] {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
 /* Custom grouping: the ordered key list is the setting, so each row carries
    its own reorder/remove buttons; the add row reuses the label-column row. */
 .grouping-editor {

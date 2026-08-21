@@ -774,39 +774,6 @@ describe('App', () => {
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   });
 
-  it('seeds a filter from the view menu and hands over the caret', async () => {
-    window.localStorage.clear();
-    fetchMock().mockImplementation((url: string) => {
-      const target = String(url);
-      if (target.includes('groupBy=')) {
-        return Promise.resolve(jsonResponse(groupsPage()));
-      }
-      if (target.startsWith('/api/v1/alerts')) {
-        return Promise.resolve(jsonResponse(alertsPage()));
-      }
-      return Promise.resolve(jsonResponse(OPEN_CONFIG));
-    });
-    render(<App />);
-    await screen.findByRole('treegrid');
-
-    fireEvent.click(screen.getByRole('button', { name: 'View' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Filter by team' }));
-
-    // The menu knows the field but never the value, so the draft is seeded and
-    // focused rather than applied — an empty matcher would empty the table.
-    const input = screen.getByRole('textbox', { name: /filter alerts/i }) as HTMLInputElement;
-    expect(input).toHaveValue('team=""');
-    expect(document.activeElement).toBe(input);
-    expect(input.selectionStart).toBe('team="'.length);
-
-    // Typing a value and applying puts the matcher on the wire.
-    fireEvent.change(input, { target: { value: 'team="ctops"' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => {
-      expect(alertCalls().some((url) => url.includes('match=team%3Dctops'))).toBe(true);
-    });
-  });
-
   it('switches the empty state when a filter is applied and cleared', async () => {
     mockApi();
     render(<App />);

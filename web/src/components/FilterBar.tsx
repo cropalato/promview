@@ -11,12 +11,6 @@ interface FilterBarProps {
    * applied server-side until the draft parses and is applied.
    */
   error?: string | null;
-  /**
-   * Bumped when something outside the bar has seeded the draft and wants the
-   * operator typing in it — the view menu's filter buttons know the label but
-   * never the value. The caret lands where the value goes.
-   */
-  focusRequest?: number;
   onChange: (value: string) => void;
   onApply: (value: string) => void;
 }
@@ -40,7 +34,6 @@ export function FilterBar({
   shown,
   total,
   error = null,
-  focusRequest = 0,
   onChange,
   onApply,
 }: FilterBarProps) {
@@ -61,23 +54,6 @@ export function FilterBar({
     document.addEventListener('keydown', handleGlobalKey);
     return () => document.removeEventListener('keydown', handleGlobalKey);
   }, []);
-
-  useEffect(() => {
-    if (focusRequest === 0) {
-      return;
-    }
-    const input = inputRef.current;
-    if (input === null) {
-      return;
-    }
-    input.focus();
-    // Between the quotes of the matcher that was just seeded, which is always
-    // the last empty pair in the draft.
-    const caret = input.value.lastIndexOf('""');
-    if (caret !== -1) {
-      input.setSelectionRange(caret + 1, caret + 1);
-    }
-  }, [focusRequest]);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
