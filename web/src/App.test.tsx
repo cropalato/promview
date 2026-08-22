@@ -774,6 +774,92 @@ describe('App', () => {
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   });
 
+  it('offers group silencing only to an operator on a deployment that can silence', async () => {
+    // Open mode hands every reader the same anonymous viewer, so the control
+    // could only ever answer 403. A button that always fails is worse than
+    // none, and the server refusing is not a substitute for not offering it.
+    const respond = (config: unknown, principal?: unknown) => (url: string) => {
+      const target = String(url);
+      if (target.includes('groupBy=')) {
+        return Promise.resolve(jsonResponse(groupsPage()));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      if (target === '/api/v1/me') {
+        return Promise.resolve(jsonResponse(principal));
+      }
+      return Promise.resolve(jsonResponse(config));
+    };
+
+    window.localStorage.clear();
+    fetchMock().mockImplementation(
+      respond({
+        ...OPEN_CONFIG,
+        silenceEnabled: true,
+        silenceDefaultSeconds: 7200,
+        silenceMaxSeconds: 86400,
+      }),
+    );
+    const open = render(<App />);
+    await screen.findByRole('treegrid');
+    expect(screen.queryByRole('button', { name: /^Silence / })).not.toBeInTheDocument();
+    open.unmount();
+
+    // A viewer in oidc mode is refused for the same reason.
+    fetchMock().mockImplementation(
+      respond(
+        {
+          ...OIDC_CONFIG,
+          silenceEnabled: true,
+          silenceDefaultSeconds: 7200,
+          silenceMaxSeconds: 86400,
+        },
+        { ...OIDC_PRINCIPAL, roles: ['viewer'] },
+      ),
+    );
+    const viewer = render(<App />);
+    await screen.findByRole('treegrid');
+    expect(screen.queryByRole('button', { name: /^Silence / })).not.toBeInTheDocument();
+    viewer.unmount();
+
+    // An operator on a deployment that can reach an Alertmanager gets it.
+    fetchMock().mockImplementation(
+      respond(
+        {
+          ...OIDC_CONFIG,
+          silenceEnabled: true,
+          silenceDefaultSeconds: 7200,
+          silenceMaxSeconds: 86400,
+        },
+        OIDC_PRINCIPAL,
+      ),
+    );
+    render(<App />);
+    await screen.findByRole('treegrid');
+    expect(await screen.findByRole('button', { name: /^Silence / })).toBeInTheDocument();
+  });
+
+  it('hides group silencing when the deployment cannot reach an Alertmanager', async () => {
+    window.localStorage.clear();
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('groupBy=')) {
+        return Promise.resolve(jsonResponse(groupsPage()));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      if (target === '/api/v1/me') {
+        return Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
+      }
+      return Promise.resolve(jsonResponse({ ...OIDC_CONFIG, silenceEnabled: false }));
+    });
+    render(<App />);
+    await screen.findByRole('treegrid');
+    expect(screen.queryByRole('button', { name: /^Silence / })).not.toBeInTheDocument();
+  });
+
   it('switches the empty state when a filter is applied and cleared', async () => {
     mockApi();
     render(<App />);

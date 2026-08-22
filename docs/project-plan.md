@@ -325,6 +325,8 @@ Density defaults to `auto`, resolved from the height the console has rather than
 
 The lifecycle state a row shows distinguishes `firing`, `resolved`, and `expired`, and a silenced alert carries a `silenced` chip alongside `firing` rather than instead of it.
 
+An operator action appears only where it can succeed. A control the reader may not use, or that the deployment cannot carry out, is not rendered at all rather than rendered and refused: the server's 403 is the backstop, not the interface. What gates a control differs by surface — the detail drawer reads the server's per-alert permission, while a group row has none of its own and checks the session's role together with whether the deployment can reach an Alertmanager — so a new action has to be told which of the two it is.
+
 Use color, shape, icon, and text together for severity. Target WCAG 2.2 AA, keyboard-only operation, reduced motion, and touch targets appropriate for mobile triage.
 
 Every color is a custom property declared once at the top of the stylesheet, so a palette is a block of token values and nothing below it names a color directly. A palette the operator picked is pinned with `data-theme` on the document; with no attribute set, `prefers-color-scheme` follows the operating system. Beyond taste, `high-contrast` targets wall displays and low vision, and `colorblind-safe` separates the severity ramp by lightness as well as hue. Every palette holds text at 4.5:1 against each of its own surfaces, and `high-contrast` holds 7:1.

@@ -108,6 +108,21 @@ export function parseSession(body: unknown): SessionInfo {
 /** Known roles by ascending privilege; the highest one labels the identity. */
 const ROLE_RANK: Record<string, number> = { viewer: 0, operator: 1, administrator: 2 };
 
+/**
+ * Whether the session may act on alerts, rather than only read them.
+ *
+ * The server is the authority and re-checks this on every mutation; this only
+ * decides whether the console offers the control. Offering one that always
+ * answers 403 is worse than not offering it, and in open mode every reader is
+ * an anonymous viewer, so nothing here can operate.
+ */
+export function canOperate(session: SessionInfo | undefined): boolean {
+  if (session === undefined || session.anonymous) {
+    return false;
+  }
+  return session.roles.some((role) => role === 'operator' || role === 'administrator');
+}
+
 export function highestRole(roles: readonly string[]): string | undefined {
   let best: string | undefined;
   let bestRank = -1;
