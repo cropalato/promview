@@ -11,7 +11,8 @@ This is the walking skeleton from `docs/desktop-client-plan.md`, not the MVP.
 - Builds and runs on Linux, loading the console in a window.
 - A tray icon with a menu: open the console, toggle a compact always-on-top
   window, quit. Closing a window hides it; the tray owns the process lifetime.
-- The tray tooltip shows firing counts by severity, polled by the Rust core.
+- The tray tooltip shows firing counts by severity, refreshed whenever the stream
+  reports a change and on a slow timer as a fallback.
 - `PROMVIEW_SERVER_URL` selects the server, validated on the way in.
 
 - The console loads and works: alerts, groups, detail, filters, preferences. Its
@@ -44,11 +45,21 @@ without a refresh. Reconnect policy stays in the console, which already has a
 tested one with backoff and cursor resumption; duplicating it in Rust would give
 the two halves separate opinions about when to give up.
 
-## What does not work yet
+The tray reads from that same connection. It re-reads the counts on each change
+rather than applying events as deltas, which is what the console does too:
+deriving totals from a delta stream means tracking every alert's severity and
+state, and being wrong in a way nobody notices until the number is. A burst of
+events settles for half a second first, so an alert storm costs one request
+rather than hundreds.
 
-The tray still polls rather than reading the stream it now holds, so its counts
-lag by up to the poll interval. Wiring it to the same connection is small and
-obvious once something needs it.
+One caveat: the console opens the stream, so the tray only gets prompt updates
+once a window has loaded. Closing a window hides it rather than destroying it,
+so this holds for the life of the process — and the fallback timer covers the
+gap before the first load either way. Moving stream ownership into the core
+entirely would remove the caveat, at the cost of the core needing its own
+snapshot cursor.
+
+## What does not work yet
 
 Absent, all deliberately deferred: OIDC loopback PKCE, OS keychain storage,
 native notifications, and the updater.
@@ -78,10 +89,10 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 npm --prefix desktop run dev
 
 ## Configuration
 
-| Variable                      | Default                 | Meaning                                                                                                                                          |
-| ----------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `PROMVIEW_SERVER_URL`         | `http://localhost:8080` | Server to talk to. Must be absolute http/https, may carry a path prefix, must not carry a query or fragment.                                     |
-| `PROMVIEW_POLL_INTERVAL_SECS` | `15`                    | Tray refresh cadence. Minimum 5, because a tray badge a few seconds stale costs nothing and a tight loop against a shared server costs everyone. |
+| Variable                      | Default                 | Meaning                                                                                                                                                                                              |
+| ----------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PROMVIEW_SERVER_URL`         | `http://localhost:8080` | Server to talk to. Must be absolute http/https, may carry a path prefix, must not carry a query or fragment.                                                                                         |
+| `PROMVIEW_POLL_INTERVAL_SECS` | `60`                    | Fallback tray refresh, for before a stream is open and while one is down. The stream is what makes the tray prompt. Minimum 5, because a tight loop against a shared server costs everyone using it. |
 
 Environment variables are the walking skeleton's answer. A settings surface and
 multiple server profiles are later work in the plan.

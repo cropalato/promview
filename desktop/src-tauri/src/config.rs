@@ -2,7 +2,7 @@ use std::env;
 
 use url::Url;
 
-/// Where this shell points, and how often it refreshes the tray.
+/// Where this shell points, and how often the tray falls back to polling.
 ///
 /// A desktop client has no origin to be relative to: unlike the browser
 /// console, which is served by the server it talks to, this one is a local
@@ -14,11 +14,13 @@ pub struct Config {
     pub poll_interval_secs: u64,
 }
 
-/// Refresh cadence for the tray count. The stream is not in the Rust core yet,
-/// so this polls; the interval is deliberately unhurried, because a tray badge
-/// that is a few seconds stale costs nothing and a tight loop against a shared
-/// server costs everyone.
-const DEFAULT_POLL_INTERVAL_SECS: u64 = 15;
+/// Fallback refresh cadence for the tray count.
+///
+/// The tray re-reads whenever the stream reports a change, so this is only what
+/// covers the gaps: before the console has opened a stream, and while one is
+/// down. A minute is unhurried on purpose — the stream is what makes the tray
+/// prompt, and a tight loop against a shared server costs everyone using it.
+const DEFAULT_POLL_INTERVAL_SECS: u64 = 60;
 const MIN_POLL_INTERVAL_SECS: u64 = 5;
 
 pub const SERVER_URL_ENV: &str = "PROMVIEW_SERVER_URL";
