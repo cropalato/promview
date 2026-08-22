@@ -100,6 +100,17 @@ export type EventSourceFactory = (url: string) => EventSourceLike;
  */
 export const browserEventSourceFactory: EventSourceFactory = (url) => new EventSource(url);
 
+/**
+ * The factory the console opens streams with. A host shell installs its own,
+ * because a stream owned by the webview dies with the window — and the tray has
+ * to keep counting after it closes.
+ */
+let currentFactory: EventSourceFactory = browserEventSourceFactory;
+
+export function setEventSourceFactory(next?: EventSourceFactory): void {
+  currentFactory = next ?? browserEventSourceFactory;
+}
+
 export function buildAlertStreamUrl(cursor: number): string {
   return apiUrl(`${ALERT_STREAM_URL}?cursor=${String(cursor)}`);
 }
@@ -211,7 +222,7 @@ export interface AlertStreamClient {
  * and the resume cursor always reflects snapshot progress.
  */
 export function createAlertStreamClient(options: AlertStreamClientOptions): AlertStreamClient {
-  const factory = options.factory ?? browserEventSourceFactory;
+  const factory = options.factory ?? currentFactory;
   const retryDelayMs = options.retryDelayMs ?? STREAM_RETRY_DELAY_MS;
   let cursor = options.cursor;
   let source: EventSourceLike | null = null;

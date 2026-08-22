@@ -15,10 +15,13 @@ use tauri::{Manager, WebviewWindow};
 use crate::api::Client;
 use crate::config::{api_base, Config};
 use crate::proxy::ApiProxy;
+use crate::stream::StreamHandle;
 
 pub mod api;
 pub mod config;
 pub mod proxy;
+pub mod sse;
+pub mod stream;
 
 /// Injected before the app boots so the console resolves its API paths against
 /// the configured server. It runs ahead of any application script, which is why
@@ -61,7 +64,12 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(proxy)
-        .invoke_handler(tauri::generate_handler![crate::proxy::api_request])
+        .manage(StreamHandle::default())
+        .invoke_handler(tauri::generate_handler![
+            crate::proxy::api_request,
+            crate::stream::stream_start,
+            crate::stream::stream_stop,
+        ])
         .setup(move |app| {
             let quit = MenuItem::with_id(app, "quit", "Quit Promview", true, None::<&str>)?;
             let console = MenuItem::with_id(app, "console", "Open console", true, None::<&str>)?;
