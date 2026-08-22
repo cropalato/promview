@@ -7,6 +7,7 @@
  * `EventSource` transport behind a small injectable factory so a future
  * Tauri transport can swap in without touching the hooks or components.
  */
+import { apiUrl } from '../config/apiBase';
 export const ALERT_STREAM_URL = '/api/v1/stream';
 
 /** Delay before reconnecting after the stream drops. */
@@ -100,7 +101,7 @@ export type EventSourceFactory = (url: string) => EventSourceLike;
 export const browserEventSourceFactory: EventSourceFactory = (url) => new EventSource(url);
 
 export function buildAlertStreamUrl(cursor: number): string {
-  return `${ALERT_STREAM_URL}?cursor=${String(cursor)}`;
+  return apiUrl(`${ALERT_STREAM_URL}?cursor=${String(cursor)}`);
 }
 
 /**

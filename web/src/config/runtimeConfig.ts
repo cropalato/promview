@@ -5,6 +5,7 @@
  * intentionally client-neutral (same-origin, cookie-based) so the same code
  * runs in the embedded browser build and the future Tauri desktop client.
  */
+import { apiUrl } from './apiBase';
 export type AuthMode = 'open' | 'oidc';
 
 export interface RuntimeConfig {
@@ -57,7 +58,7 @@ export async function loadRuntimeConfig(
 ): Promise<RuntimeConfig> {
   let response: Response;
   try {
-    response = await fetchImpl(RUNTIME_CONFIG_URL);
+    response = await fetchImpl(apiUrl(RUNTIME_CONFIG_URL));
   } catch (cause) {
     throw new RuntimeConfigError('Unable to reach the Promview API', { cause });
   }

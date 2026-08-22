@@ -9,6 +9,7 @@
  * `SessionFetch`/`NavigateTo` seams are the compatibility points where the
  * future Tauri client supplies its bearer-capable transport and navigation.
  */
+import { apiUrl } from '../config/apiBase';
 export const SESSION_URL = '/api/v1/me';
 export const OIDC_LOGIN_URL = '/api/v1/auth/oidc/login';
 export const LOGOUT_URL = '/api/v1/auth/logout';
@@ -57,7 +58,7 @@ const browserNavigate: NavigateTo = (url) => {
 export async function loadSession(fetchImpl: SessionFetch = defaultFetch): Promise<SessionInfo> {
   let response: Response;
   try {
-    response = await fetchImpl(SESSION_URL);
+    response = await fetchImpl(apiUrl(SESSION_URL));
   } catch (cause) {
     throw new SessionError('Unable to reach the Promview API', { cause });
   }
@@ -147,7 +148,7 @@ export async function endSession(
 ): Promise<void> {
   let response: Response;
   try {
-    response = await fetchImpl(LOGOUT_URL, { method: 'POST' });
+    response = await fetchImpl(apiUrl(LOGOUT_URL), { method: 'POST' });
   } catch (cause) {
     throw new SessionError('Unable to reach the Promview API', { cause });
   }

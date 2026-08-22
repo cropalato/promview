@@ -2,6 +2,7 @@ import { DEFAULT_COLUMN_IDS } from '../alerts/columns';
 import { DEFAULT_GROUP_KEYS, sanitizeGroupKeys } from '../alerts/grouping';
 import { isTheme } from './theme';
 import type { Theme } from './theme';
+import { apiUrl } from '../config/apiBase';
 
 /**
  * Console layout preferences: which columns, how dense, whether alerts arrive
@@ -157,7 +158,7 @@ export function writeLocalPreferences(value: Preferences, storage?: StorageLike)
  */
 export async function loadPreferences(storage?: StorageLike): Promise<LoadedPreferences> {
   try {
-    const response = await fetch(PREFERENCES_URL, {
+    const response = await fetch(apiUrl(PREFERENCES_URL), {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     });
@@ -188,7 +189,7 @@ export async function savePreferences(
     return 'local';
   }
   try {
-    const response = await fetch(PREFERENCES_URL, {
+    const response = await fetch(apiUrl(PREFERENCES_URL), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
