@@ -173,11 +173,15 @@ describe('injected transport', () => {
     expect(fetchMock()).not.toHaveBeenCalled();
   });
 
-  it('sends same-origin credentials when it falls back to the browser', async () => {
+  it('falls back to the browser, leaving its credential handling alone', async () => {
+    // `same-origin` is fetch's own default; setting it explicitly would only
+    // add noise to every call and every assertion about one.
     fetchMock().mockResolvedValue(jsonResponse({ endsAt: '', createdBy: 'ada', results: [] }));
     await silenceAlert('42', { durationSeconds: 7200, comment: '' });
-    const [, init] = fetchMock().mock.calls[0] as [string, RequestInit];
-    expect(init.credentials).toBe('same-origin');
+    const [url, init] = fetchMock().mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/v1/alerts/42/silence');
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBeUndefined();
   });
 });
 

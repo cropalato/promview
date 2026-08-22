@@ -2,6 +2,7 @@ import { normalizeSeverity, severityLabelFor } from './severity';
 import type { Severity } from './severity';
 import type { AlertState, AlertSummary } from './types';
 import { apiUrl } from '../config/apiBase';
+import { apiFetch } from '../config/transport';
 
 /**
  * Client for the alert query API, `GET /api/v1/alerts`. Same-origin and
@@ -191,7 +192,7 @@ export function buildAlertsUrl(query: AlertsQuery = {}): string {
  */
 export async function fetchAlerts(
   query: AlertsQuery = {},
-  fetchImpl: FetchLike = (url) => fetch(url),
+  fetchImpl: FetchLike = apiFetch,
 ): Promise<AlertsPage> {
   let response: Response;
   try {
@@ -222,7 +223,7 @@ export async function fetchAlerts(
  */
 export async function fetchAlertGroups(
   query: AlertsQuery,
-  fetchImpl: FetchLike = (url) => fetch(url),
+  fetchImpl: FetchLike = apiFetch,
 ): Promise<AlertGroupsPage> {
   let response: Response;
   try {

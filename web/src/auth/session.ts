@@ -10,6 +10,7 @@
  * future Tauri client supplies its bearer-capable transport and navigation.
  */
 import { apiUrl } from '../config/apiBase';
+import { apiFetch } from '../config/transport';
 export const SESSION_URL = '/api/v1/me';
 export const OIDC_LOGIN_URL = '/api/v1/auth/oidc/login';
 export const LOGOUT_URL = '/api/v1/auth/logout';
@@ -44,7 +45,7 @@ export type SessionFetch = (url: string, init?: RequestInit) => Promise<Response
  */
 export type NavigateTo = (url: string) => void;
 
-const defaultFetch: SessionFetch = (url, init) => fetch(url, init);
+const defaultFetch: SessionFetch = apiFetch;
 
 const browserNavigate: NavigateTo = (url) => {
   window.location.assign(url);
