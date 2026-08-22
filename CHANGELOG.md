@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Features
+
+- **desktop:** add a Tauri 2 shell in `desktop/`, wrapping the same React console the browser serves. A tray icon reports firing counts by severity, its menu opens the console or toggles a compact always-on-top window, and closing a window hides it rather than ending the process. `PROMVIEW_SERVER_URL` selects the server. This is the walking skeleton from the desktop plan, not its MVP: the console rendered in the window cannot yet reach the API, because the webview's requests are cross-origin and the server sends no CORS headers. See `desktop/README.md` for the two ways out.
+
 ### Build System
 
 - **ci:** drop the QEMU setup step from the release workflow. Releases are `linux/amd64` only, so there was no foreign architecture to emulate and the step did nothing but cost time. A comment now records that the single platform is deliberate.

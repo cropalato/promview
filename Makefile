@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test test-postgres build verify-go verify-web verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build
+.PHONY: fmt fmt-check vet test test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
@@ -28,6 +28,14 @@ verify-web:
 	npm --prefix web run test
 	npm --prefix web run build
 
+# The desktop shell. Kept out of verify-web: it is a Rust crate, and a web
+# change should not wait on a cargo build to be checked.
+verify-desktop:
+	cd desktop/src-tauri && cargo fmt --check
+	cd desktop/src-tauri && cargo clippy --all-targets -- -D warnings
+	cd desktop/src-tauri && cargo test
+	cd desktop/src-tauri && cargo build
+
 compose-check:
 	docker compose config --quiet
 
@@ -51,4 +59,4 @@ helm-package:
 
 verify-helm: helm-lint helm-template helm-package
 
-verify: verify-go verify-web compose-check verify-helm
+verify: verify-go verify-web verify-desktop compose-check verify-helm
