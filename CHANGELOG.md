@@ -6,11 +6,13 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.20] - 2026-08-22
+
 ### Changed
 
 - **console:** resolve every API path against a configurable base URL, defaulting to the same-origin relative paths the browser build uses. `setApiBaseUrl` points the client at a server that is not its own origin, which is what the planned desktop shell needs — a local webview has no origin to be relative to. The base is validated on the way in: a relative one, or one carrying a query or fragment, is refused rather than silently misrouting requests.
 
-## [0.1.0-alpha.19] - 2026-08-21
+## [0.1.0-alpha.19] - 2026-08-22
 
 ### Changed
 
