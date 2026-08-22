@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Changed
+
+- **console:** let a caller supply the fetch used for silence requests, matching the alerts, detail, session, and config clients. The desktop shell keeps credentials in its Rust core, out of the webview, so it cannot inherit the browser's cookie jar.
+
 ### Fixed
 
 - **console:** stop offering the group silence control to readers who cannot use it. It was shown whenever the deployment could reach an Alertmanager, without checking the reader's own rights, so in open mode — where every reader is an anonymous viewer — clicking it could only ever return 403. The alert detail drawer was already gated correctly on the server's per-alert permission; group rows now check the session the same way.

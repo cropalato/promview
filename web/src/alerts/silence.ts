@@ -79,13 +79,26 @@ export function formatDuration(seconds: number): string {
   return minutes === 1 ? '1 minute' : `${minutes} minutes`;
 }
 
-async function postSilence(url: string, body: unknown): Promise<SilenceResponse> {
+/**
+ * The transport seam the desktop client needs: a Tauri shell owns credentials
+ * in the Rust core and keeps them out of the webview, so it supplies its own
+ * caller rather than inheriting the browser's cookie jar. Defaults to a
+ * same-origin browser fetch, which is what the console itself uses.
+ */
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+const browserFetch: FetchLike = (url, init) => fetch(url, { credentials: 'same-origin', ...init });
+
+async function postSilence(
+  url: string,
+  body: unknown,
+  fetchImpl: FetchLike,
+): Promise<SilenceResponse> {
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetchImpl(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
       body: JSON.stringify(body),
     });
   } catch {
@@ -138,14 +151,19 @@ export function parseSilenceResponse(payload: unknown): SilenceResponse {
   };
 }
 
-export function silenceAlert(id: string, request: SilenceRequest): Promise<SilenceResponse> {
-  return postSilence(ALERT_SILENCE_URL(id), request);
+export function silenceAlert(
+  id: string,
+  request: SilenceRequest,
+  fetchImpl: FetchLike = browserFetch,
+): Promise<SilenceResponse> {
+  return postSilence(ALERT_SILENCE_URL(id), request, fetchImpl);
 }
 
 export function silenceGroup(
   groupBy: readonly string[],
   key: Record<string, string>,
   request: SilenceRequest,
+  fetchImpl: FetchLike = browserFetch,
 ): Promise<SilenceResponse> {
-  return postSilence(GROUP_SILENCE_URL, { groupBy: [...groupBy], key, ...request });
+  return postSilence(GROUP_SILENCE_URL, { groupBy: [...groupBy], key, ...request }, fetchImpl);
 }

@@ -69,10 +69,12 @@ React owns presentation and user interaction. The Rust core sends normalized str
 - native critical/warning notifications
 - OIDC and open mode login
 - OS keychain storage
-- view, acknowledge, assign, close, and notes according to server permissions
+- view, acknowledge, silence, assign, close, and notes according to server permissions
 - manual update check
 
 Keeping operator actions in the desktop MVP avoids an artificial behavior gap because the shared React controls and server endpoints already exist.
+
+Silencing was parked here until the server could create Alertmanager silences; it can as of 0.1.0-alpha.18, so it joins the MVP rather than Later Work. It does raise the stakes on the open-mode rule above: silencing hides alerts on a system Promview does not own, so a shell that renders the control where the reader cannot use it is worse than one that omits it.
 
 ## Later Work
 
@@ -81,7 +83,6 @@ Keeping operator actions in the desktop MVP avoids an artificial behavior gap be
 - automatic updater
 - signed and notarized release pipeline
 - offline snapshot and richer reconnect behavior
-- Alertmanager silence actions after server support exists
 - native badge APIs where available
 - mobile exploration through Tauri 2 only after desktop behavior is stable
 

@@ -145,6 +145,42 @@ describe('silenceGroup', () => {
   });
 });
 
+describe('injected transport', () => {
+  it('uses a caller-supplied fetch instead of the browser default', async () => {
+    // The desktop shell keeps credentials in its Rust core, out of the webview,
+    // so it supplies its own caller rather than inheriting the cookie jar.
+    const calls: [string, RequestInit | undefined][] = [];
+    const injected = (url: string, init?: RequestInit) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ endsAt: '', createdBy: 'ada', results: [] }));
+    };
+
+    await silenceAlert('42', { durationSeconds: 7200, comment: '' }, injected);
+    await silenceGroup(
+      ['alertname'],
+      { alertname: 'X' },
+      { durationSeconds: 7200, comment: '' },
+      injected,
+    );
+
+    expect(calls.map(([url]) => url)).toEqual([
+      '/api/v1/alerts/42/silence',
+      '/api/v1/groups/silence',
+    ]);
+    expect(calls.every(([, init]) => init?.method === 'POST')).toBe(true);
+    // The browser's cookie jar is the default's business, not the caller's.
+    expect(calls.every(([, init]) => init?.credentials === undefined)).toBe(true);
+    expect(fetchMock()).not.toHaveBeenCalled();
+  });
+
+  it('sends same-origin credentials when it falls back to the browser', async () => {
+    fetchMock().mockResolvedValue(jsonResponse({ endsAt: '', createdBy: 'ada', results: [] }));
+    await silenceAlert('42', { durationSeconds: 7200, comment: '' });
+    const [, init] = fetchMock().mock.calls[0] as [string, RequestInit];
+    expect(init.credentials).toBe('same-origin');
+  });
+});
+
 describe('parseSilenceResponse', () => {
   it('survives a malformed payload rather than taking the dialog down', () => {
     expect(parseSilenceResponse(null).results).toEqual([]);
