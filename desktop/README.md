@@ -38,15 +38,19 @@ this process was configured with, so a compromised page cannot point the client
 somewhere else and hand it whatever the jar holds. It also forwards only headers
 that are the page's business; anything identifying the caller is the core's.
 
+The live stream goes the same way. The core holds the SSE connection and pushes
+each frame into the page, so the console reports `stream: live` and updates
+without a refresh. Reconnect policy stays in the console, which already has a
+tested one with backoff and cursor resumption; duplicating it in Rust would give
+the two halves separate opinions about when to give up.
+
 ## What does not work yet
 
-**The live stream.** SSE still uses the browser's `EventSource` directly, which
-is cross-origin and blocked, so the console shows `stream: reconnecting` and
-relies on its own refreshes. Moving the stream into the Rust core is the next
-increment and the reason the plan chose Tauri over a PWA — a tray that keeps
-working with every window closed needs the stream outside the webview anyway.
+The tray still polls rather than reading the stream it now holds, so its counts
+lag by up to the poll interval. Wiring it to the same connection is small and
+obvious once something needs it.
 
-Also absent, all deliberately deferred: OIDC loopback PKCE, OS keychain storage,
+Absent, all deliberately deferred: OIDC loopback PKCE, OS keychain storage,
 native notifications, and the updater.
 
 ## Running it

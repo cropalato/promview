@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Features
+
+- **desktop:** hold the alert stream in the Rust core rather than the webview. The core keeps the SSE connection open and pushes each frame into the page, so the console reports `stream: live` and updates without a refresh — and the connection no longer dies with the window, which is what the tray needs and why the plan chose a shell over a progressive web app. Reconnect policy stays in the console, which already has a tested one; the core reports open, message and error and does as it is told. This also removes the last request the page was making cross-origin.
+
 ## [0.1.0-alpha.22] - 2026-08-22
 
 ### Features

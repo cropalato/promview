@@ -1,4 +1,6 @@
 import { setApiBaseUrl } from './apiBase';
+import { setEventSourceFactory } from '../alerts/stream';
+import { createHostEventSourceFactory } from './hostStream';
 import { setApiFetch } from './transport';
 
 /**
@@ -102,5 +104,9 @@ export function connectHost(): boolean {
     return false;
   }
   setApiFetch(createHostFetch(invoke, base));
+  // The stream goes the same way, and for a stronger reason than CORS: one the
+  // webview owns dies with the window, and the tray has to keep counting after
+  // the last one closes.
+  setEventSourceFactory(createHostEventSourceFactory(invoke, base));
   return true;
 }

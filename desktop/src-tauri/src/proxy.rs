@@ -55,6 +55,19 @@ impl ApiProxy {
         Ok(Self { http, base })
     }
 
+    /// The same path rule every request obeys, exposed so the stream resolves
+    /// its URL identically rather than growing a second opinion.
+    pub fn resolve_path(&self, path: &str) -> Result<Url, String> {
+        resolve(&self.base, path)
+    }
+
+    /// A clone of the client for a long-lived read. It shares the cookie jar,
+    /// which is the point: the stream is authenticated the same way everything
+    /// else is.
+    pub fn stream_client(&self) -> reqwest::Client {
+        self.http.clone()
+    }
+
     pub async fn send(&self, request: ApiRequest) -> Result<ApiResponse, String> {
         let url = resolve(&self.base, &request.path)?;
         let method = parse_method(&request.method)?;
