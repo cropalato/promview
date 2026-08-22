@@ -8,6 +8,8 @@
  * and for how long, and to report honestly when only part of it worked.
  */
 
+import { apiUrl } from '../config/apiBase';
+
 export const ALERT_SILENCE_URL = (id: string) => `/api/v1/alerts/${encodeURIComponent(id)}/silence`;
 export const GROUP_SILENCE_URL = '/api/v1/groups/silence';
 
@@ -96,7 +98,7 @@ async function postSilence(
 ): Promise<SilenceResponse> {
   let response: Response;
   try {
-    response = await fetchImpl(url, {
+    response = await fetchImpl(apiUrl(url), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

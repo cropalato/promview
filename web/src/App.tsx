@@ -12,6 +12,7 @@ import type { AlertStreamEvent } from './alerts/stream';
 import type { AlertSummary } from './alerts/types';
 import type { AlertGroupSummary } from './alerts/api';
 import { OIDC_LOGIN_URL, canOperate } from './auth/session';
+import { apiUrl } from './config/apiBase';
 import type { NavigateTo } from './auth/session';
 import { AlertDetailDrawer } from './components/AlertDetailDrawer';
 import { AlertTable } from './components/AlertTable';
@@ -399,7 +400,7 @@ export default function App({ navigate }: AppProps = {}) {
               This deployment uses OIDC sign-in. Alerts and the live stream stay paused until you
               sign in with your identity provider.
             </p>
-            <a className="button" href={OIDC_LOGIN_URL}>
+            <a className="button" href={apiUrl(OIDC_LOGIN_URL)}>
               Sign in with your identity provider
             </a>
           </section>

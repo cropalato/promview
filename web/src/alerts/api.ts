@@ -1,6 +1,7 @@
 import { normalizeSeverity, severityLabelFor } from './severity';
 import type { Severity } from './severity';
 import type { AlertState, AlertSummary } from './types';
+import { apiUrl } from '../config/apiBase';
 
 /**
  * Client for the alert query API, `GET /api/v1/alerts`. Same-origin and
@@ -194,7 +195,7 @@ export async function fetchAlerts(
 ): Promise<AlertsPage> {
   let response: Response;
   try {
-    response = await fetchImpl(buildAlertsUrl(query));
+    response = await fetchImpl(apiUrl(buildAlertsUrl(query)));
   } catch (cause) {
     throw new AlertsApiError('Unable to reach the Promview API', { cause });
   }
@@ -225,7 +226,7 @@ export async function fetchAlertGroups(
 ): Promise<AlertGroupsPage> {
   let response: Response;
   try {
-    response = await fetchImpl(buildAlertsUrl(query));
+    response = await fetchImpl(apiUrl(buildAlertsUrl(query)));
   } catch (cause) {
     throw new AlertsApiError('Unable to reach the Promview API', { cause });
   }

@@ -2,6 +2,7 @@ import { ALERTS_URL, AlertsApiError } from './api';
 import { normalizeSeverity, severityLabelFor } from './severity';
 import type { Severity } from './severity';
 import type { AlertState } from './types';
+import { apiUrl } from '../config/apiBase';
 
 /**
  * Client for the alert detail API, `GET /api/v1/alerts/{id}`. Same-origin and
@@ -119,7 +120,7 @@ export async function fetchAlertDetail(
 ): Promise<AlertDetailResult> {
   let response: Response;
   try {
-    response = await fetchImpl(buildAlertDetailUrl(id));
+    response = await fetchImpl(apiUrl(buildAlertDetailUrl(id)));
   } catch (cause) {
     throw new AlertsApiError('Unable to reach the Promview API', { cause });
   }
@@ -162,7 +163,7 @@ export async function setAlertAcknowledgement(
 ): Promise<AlertDetailResult> {
   let response: Response;
   try {
-    response = await fetchImpl(buildAcknowledgeUrl(id), {
+    response = await fetchImpl(apiUrl(buildAcknowledgeUrl(id)), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ acknowledged }),

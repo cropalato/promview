@@ -28,7 +28,7 @@ Desktop compatibility must be designed into the server before the shell is built
 - REST and SSE accept revocable opaque bearer credentials in addition to browser sessions.
 - SSE supports `Last-Event-ID` and explicit resynchronization after retention gaps.
 - Events are typed and coarse enough to drive tray state and notifications without diffing full snapshots.
-- The API client accepts injected base URL and credential providers.
+- The API client accepts injected base URL and credential providers. The browser console does this today: every path resolves through `setApiBaseUrl`/`apiUrl` in `web/src/config/apiBase.ts`, and each client module takes an injectable caller, so a shell supplies both without forking the request code.
 - Authorization behavior is identical for browser and desktop clients.
 - Notification preferences are server-side label selectors so policy is shared across future clients.
 
