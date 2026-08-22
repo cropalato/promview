@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Build System
+
+- **ci:** drop the QEMU setup step from the release workflow. Releases are `linux/amd64` only, so there was no foreign architecture to emulate and the step did nothing but cost time. A comment now records that the single platform is deliberate.
+
 ## [0.1.0-alpha.21] - 2026-08-22
 
 ### Changed
