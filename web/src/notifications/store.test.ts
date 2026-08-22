@@ -1,12 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  createSeenEventStore,
-  loadNotificationPreference,
-  NOTIFICATION_PREFERENCE_KEY,
-  NOTIFICATION_SEEN_KEY,
-  NOTIFICATION_SEEN_LIMIT,
-  saveNotificationPreference,
-} from './store';
+import { createSeenEventStore, NOTIFICATION_SEEN_KEY, NOTIFICATION_SEEN_LIMIT } from './store';
 import type { StorageLike } from './store';
 
 function memoryStorage(): StorageLike & { data: Map<string, string> } {
@@ -25,41 +18,6 @@ function memoryStorage(): StorageLike & { data: Map<string, string> } {
 
 beforeEach(() => {
   window.localStorage.clear();
-});
-
-describe('notification preference', () => {
-  it('defaults to off and round-trips through storage', () => {
-    const storage = memoryStorage();
-    expect(loadNotificationPreference(storage)).toBe(false);
-
-    saveNotificationPreference(true, storage);
-    expect(loadNotificationPreference(storage)).toBe(true);
-    expect(storage.data.get(NOTIFICATION_PREFERENCE_KEY)).toBe('true');
-
-    saveNotificationPreference(false, storage);
-    expect(loadNotificationPreference(storage)).toBe(false);
-  });
-
-  it('uses window.localStorage by default', () => {
-    expect(loadNotificationPreference()).toBe(false);
-    saveNotificationPreference(true);
-    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBe('true');
-    expect(loadNotificationPreference()).toBe(true);
-  });
-
-  it('tolerates a throwing storage', () => {
-    const throwing: StorageLike = {
-      getItem: () => {
-        throw new Error('denied');
-      },
-      setItem: () => {
-        throw new Error('denied');
-      },
-      removeItem: vi.fn(),
-    };
-    expect(loadNotificationPreference(throwing)).toBe(false);
-    expect(() => saveNotificationPreference(true, throwing)).not.toThrow();
-  });
 });
 
 describe('seen event store', () => {

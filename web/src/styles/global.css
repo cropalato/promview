@@ -1171,6 +1171,14 @@ kbd {
   text-transform: none;
 }
 
+/* A rejected selector: named here rather than only refused by the server, so
+   the operator sees which field is wrong while still looking at the box. */
+.view-menu-error {
+  margin: 0;
+  color: var(--down);
+  font-size: 12px;
+}
+
 .view-menu-add {
   display: flex;
   gap: 6px;

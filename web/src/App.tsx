@@ -265,7 +265,16 @@ export default function App({ navigate }: AppProps = {}) {
     optInState: notificationOptInState,
     toggleOptIn: toggleNotificationOptIn,
     handleEvent: handleNotificationEvent,
-  } = useAlertNotifications({ navigateToAlert: openAlert });
+  } = useAlertNotifications({
+    navigateToAlert: openAlert,
+    enabled: preferences.notifications.enabled,
+    matchers: preferences.notifications.matchers,
+    onEnabledChange: (enabled) =>
+      updatePreferences({
+        ...preferences,
+        notifications: { ...preferences.notifications, enabled },
+      }),
+  });
   // Every stream event — including redacted removals — refreshes the list;
   // when it targets the open alert, the detail drawer quietly refreshes
   // alongside it. The same event also feeds the notification check (opted

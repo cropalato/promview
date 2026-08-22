@@ -43,6 +43,12 @@ func (store *Store) ReadPreferences(ctx context.Context, principal auth.Principa
 	if value.Theme == "" {
 		value.Theme = preferences.Default().Theme
 	}
+	if value.Notifications.Matchers == nil {
+		// A row written before notifications were configurable has no key at
+		// all. Falling back to the default selector keeps opting in doing what
+		// it did then, rather than silently matching nothing.
+		value.Notifications = preferences.Default().Notifications
+	}
 	return value, nil
 }
 

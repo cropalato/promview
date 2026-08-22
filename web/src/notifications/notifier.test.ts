@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AlertStreamNotificationEvent, AlertStreamRemovedEvent } from '../alerts/stream';
 import { FakeNotification } from '../test/fakeNotification';
-import { createAlertNotifier } from './notifier';
+import { createAlertNotifier, eventMatchesSelector } from './notifier';
 import type { AlertNotifierOptions } from './notifier';
 import { createSeenEventStore } from './store';
 import type { StorageLike } from './store';
@@ -193,5 +193,52 @@ describe('createAlertNotifier', () => {
     });
 
     expect(() => notifier.handleEvent(createdCritical())).not.toThrow();
+  });
+});
+
+describe('eventMatchesSelector', () => {
+  const event = createdCritical({ severity: 'critical' });
+
+  it('matches nothing on an empty selector, never everything', () => {
+    // Read as vacuous truth, an empty AND would page for every alert in the
+    // deployment the moment notifications were switched on.
+    expect(eventMatchesSelector(event, [])).toBe(false);
+  });
+
+  it('ANDs its matchers', () => {
+    expect(
+      eventMatchesSelector(event, [
+        { name: 'severity', op: '=', value: 'critical' },
+        { name: 'source', op: '=', value: event.source },
+      ]),
+    ).toBe(true);
+    expect(
+      eventMatchesSelector(event, [
+        { name: 'severity', op: '=', value: 'critical' },
+        { name: 'source', op: '=', value: 'somewhere-else' },
+      ]),
+    ).toBe(false);
+  });
+
+  it('supports negation, for paging on everything except one noisy source', () => {
+    expect(eventMatchesSelector(event, [{ name: 'source', op: '!=', value: 'lab' }])).toBe(true);
+    expect(eventMatchesSelector(event, [{ name: 'source', op: '!=', value: event.source }])).toBe(
+      false,
+    );
+  });
+
+  it('normalises severity the way the rest of the console does', () => {
+    const shouty = createdCritical({ severity: 'CRITICAL' });
+    expect(eventMatchesSelector(shouty, [{ name: 'severity', op: '=', value: 'critical' }])).toBe(
+      true,
+    );
+  });
+
+  it('refuses a field the stream event does not carry', () => {
+    // The server rejects such a selector at write time; if one arrives anyway,
+    // failing closed beats notifying on everything.
+    expect(eventMatchesSelector(event, [{ name: 'instance', op: '=', value: 'web-01' }])).toBe(
+      false,
+    );
   });
 });

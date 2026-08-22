@@ -30,7 +30,7 @@ Desktop compatibility must be designed into the server before the shell is built
 - Events are typed and coarse enough to drive tray state and notifications without diffing full snapshots.
 - The API client accepts injected base URL and credential providers. The browser console does this today: every path resolves through `setApiBaseUrl`/`apiUrl` in `web/src/config/apiBase.ts`, and each client module takes an injectable caller, so a shell supplies both without forking the request code.
 - Authorization behavior is identical for browser and desktop clients.
-- Notification preferences are server-side label selectors so policy is shared across future clients.
+- Notification preferences are server-side label selectors so policy is shared across future clients. The console does this today: the opt-in and selector live in `user_preferences`, and the selector matches on the fields a stream event carries (`severity`, `alertname`, `source`, `team`). The per-device dedupe ledger deliberately stays local — it records what one client already showed, and is written on every qualifying event.
 
 ## Authentication
 

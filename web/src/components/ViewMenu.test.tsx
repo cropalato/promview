@@ -28,6 +28,59 @@ describe('ViewMenu', () => {
     );
   });
 
+  it("edits the notification selector in the filter bar's own syntax", () => {
+    const onChange = vi.fn();
+    render(<ViewMenu preferences={defaultPreferences()} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+
+    const input = screen.getByRole('textbox', { name: /notification selector/i });
+    expect(input).toHaveValue('severity="critical"');
+
+    fireEvent.change(input, { target: { value: '{severity="critical", team="platform"}' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notifications: expect.objectContaining({
+          matchers: [
+            { name: 'severity', op: '=', value: 'critical' },
+            { name: 'team', op: '=', value: 'platform' },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it('refuses a selector on a field a stream event does not carry', () => {
+    // The server rejects it too, but saying so here means the operator learns
+    // which field is wrong while still looking at the box.
+    const onChange = vi.fn();
+    render(<ViewMenu preferences={defaultPreferences()} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+
+    fireEvent.change(screen.getByRole('textbox', { name: /notification selector/i }), {
+      target: { value: 'instance="web-01"' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/cannot match on instance/i);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('reports a selector that does not parse instead of saving it', () => {
+    const onChange = vi.fn();
+    render(<ViewMenu preferences={defaultPreferences()} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+
+    fireEvent.change(screen.getByRole('textbox', { name: /notification selector/i }), {
+      target: { value: 'severity=' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('shows what auto density currently resolves to', () => {
     // Choosing auto should not leave the operator guessing which row height
     // they are about to get.

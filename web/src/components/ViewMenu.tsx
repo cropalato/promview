@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { FIXED_COLUMNS, LABEL_COLUMN_PREFIX } from '../alerts/columns';
-import { DENSITIES } from '../preferences/store';
+import { DENSITIES, NOTIFICATION_FIELDS } from '../preferences/store';
+import { formatFilter, parseFilter } from '../alerts/filter';
 import type { ColumnPreference, Density, Preferences } from '../preferences/store';
 import { GroupingEditor } from './GroupingEditor';
 
@@ -51,6 +52,10 @@ export function ViewMenu({
 }: ViewMenuProps) {
   const [open, setOpen] = useState(false);
   const [labelDraft, setLabelDraft] = useState('');
+  const [notificationDraft, setNotificationDraft] = useState(() =>
+    formatFilter(preferences.notifications.matchers),
+  );
+  const [notificationError, setNotificationError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
 
@@ -100,6 +105,30 @@ export function ViewMenu({
       return;
     }
     onChange({ ...preferences, columns: [...preferences.columns, { id }] });
+  };
+
+  const applyNotificationSelector = () => {
+    let matchers;
+    try {
+      matchers = parseFilter(notificationDraft);
+    } catch (cause) {
+      setNotificationError(cause instanceof Error ? cause.message : String(cause));
+      return;
+    }
+    // Refuse here rather than letting the server do it, so the operator learns
+    // which field is wrong while they are still looking at the box.
+    const unknown = matchers.find((matcher) => !NOTIFICATION_FIELDS.includes(matcher.name));
+    if (unknown !== undefined) {
+      setNotificationError(
+        `Notifications cannot match on ${unknown.name}; only ${NOTIFICATION_FIELDS.join(', ')}.`,
+      );
+      return;
+    }
+    setNotificationError(null);
+    onChange({
+      ...preferences,
+      notifications: { ...preferences.notifications, matchers },
+    });
   };
 
   const fixedIds = new Set(FIXED_COLUMNS.map((column) => column.id));
@@ -275,6 +304,41 @@ export function ViewMenu({
                 Add
               </button>
             </div>
+          </fieldset>
+
+          <fieldset className="view-menu-group">
+            <legend>Notify me about</legend>
+            {/* The filter bar's syntax, because it is the expression language
+                this console already has and an operator already reads. The
+                vocabulary is narrower: a stream event carries only these four
+                fields, so a selector on anything else could never fire and the
+                server refuses it. */}
+            <div className="view-menu-add">
+              <input
+                type="text"
+                aria-label="Notification selector"
+                placeholder='{severity="critical"}'
+                value={notificationDraft}
+                onChange={(event) => setNotificationDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    applyNotificationSelector();
+                  }
+                }}
+              />
+              <button type="button" className="button" onClick={applyNotificationSelector}>
+                Apply
+              </button>
+            </div>
+            {notificationError !== null ? (
+              <p className="view-menu-error" role="alert">
+                {notificationError}
+              </p>
+            ) : null}
+            <p className="view-menu-note">
+              Matches on {NOTIFICATION_FIELDS.join(', ')}. An empty selector notifies about nothing.
+            </p>
           </fieldset>
         </div>
       ) : null}

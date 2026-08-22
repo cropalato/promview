@@ -6,6 +6,15 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Changed
+
+- **console:** store notification preferences with the operator instead of in one browser. The opt-in and a new label selector live in `user_preferences` alongside columns, density and palette, so the policy follows an operator to whatever client they sign in from — which is what the planned desktop shell needs. The selector replaces the hardcoded critical-only rule and is edited in the view menu using the filter bar's own syntax; it matches on `severity`, `alertname`, `source`, and `team`, the fields a stream event actually carries, and the server refuses a selector naming anything else rather than letting it silently never fire. An empty selector notifies about nothing, never everything.
+- **console:** the dedupe ledger stays in local storage. It records what this device already showed, which is not policy, and it writes on every qualifying event — a server round trip there would land on the hot path of an alert storm.
+
+### Note
+
+- The previous opt-in, stored as `promview.notifications.enabled` in local storage, is not migrated. Notifications were off by default, and the browser permission grant is unaffected, so re-enabling is one click with no prompt.
+
 ## [0.1.0-alpha.20] - 2026-08-22
 
 ### Changed
