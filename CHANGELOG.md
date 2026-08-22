@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.22] - 2026-08-22
+
 ### Features
 
 - **desktop:** add a Tauri 2 shell in `desktop/`, wrapping the same React console the browser serves. A tray icon reports firing counts by severity, its menu opens the console or toggles a compact always-on-top window, and closing a window hides it rather than ending the process. `PROMVIEW_SERVER_URL` selects the server. This is the walking skeleton from the desktop plan, not its MVP: the live stream still uses the browser's `EventSource` and is blocked cross-origin, and OIDC, keychain storage, notifications and the updater are all still to come.
