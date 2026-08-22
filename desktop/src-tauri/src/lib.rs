@@ -6,6 +6,7 @@
 //! cannot do for itself — a tray that survives every window being closed, and
 //! transport owned outside the webview so credentials can stay out of it.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::menu::{Menu, MenuItem};
@@ -15,7 +16,7 @@ use tauri::{Manager, WebviewWindow};
 use crate::api::Client;
 use crate::config::{api_base, Config};
 use crate::proxy::ApiProxy;
-use crate::stream::StreamHandle;
+use crate::stream::{StreamActivity, StreamHandle};
 
 pub mod api;
 pub mod config;
@@ -65,6 +66,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(proxy)
         .manage(StreamHandle::default())
+        .manage(Arc::new(StreamActivity::default()))
         .invoke_handler(tauri::generate_handler![
             crate::proxy::api_request,
             crate::stream::stream_start,
@@ -103,13 +105,15 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // The tray is the always-present surface, so it is what keeps
-            // asking. A failed poll leaves the last known counts on screen and
-            // says so in the tooltip rather than blanking to zero, which would
-            // read as "nothing is firing".
+            // The tray re-reads whenever the stream says something changed, and
+            // on a timer as a fallback for when the stream is down or has not
+            // been opened yet. A failed read leaves the last known counts on
+            // screen and says so in the tooltip rather than blanking to zero,
+            // which would read as "nothing is firing".
             let client = Client::new(config.server_url.clone(), Duration::from_secs(10))
                 .map_err(std::io::Error::other)?;
-            let interval = Duration::from_secs(config.poll_interval_secs);
+            let fallback = Duration::from_secs(config.poll_interval_secs);
+            let activity: Arc<StreamActivity> = Arc::clone(&app.state::<Arc<StreamActivity>>());
             tauri::async_runtime::spawn(async move {
                 loop {
                     let tooltip = match client.firing_counts().await {
@@ -120,7 +124,16 @@ pub fn run() {
                         }
                     };
                     let _ = tray.set_tooltip(Some(&tooltip));
-                    tokio::time::sleep(interval).await;
+
+                    tokio::select! {
+                        _ = activity.wait() => {
+                            // A burst of events is one change as far as a
+                            // tooltip is concerned; settle before re-reading so
+                            // an alert storm costs one request, not hundreds.
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                        }
+                        _ = tokio::time::sleep(fallback) => {}
+                    }
                 }
             });
 

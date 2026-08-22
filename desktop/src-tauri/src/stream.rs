@@ -10,14 +10,37 @@
 //! the two halves separate opinions about when to give up. This side reports
 //! open, message, and error, and does as it is told.
 
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use futures_util::StreamExt;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
+use tokio::sync::Notify;
 use url::Url;
 
 use crate::sse::SseParser;
+
+/// Signalled whenever the stream says something changed.
+///
+/// The tray listens rather than polling, but it re-reads the counts instead of
+/// applying the event as a delta — exactly what the console does. Deriving
+/// totals from a delta stream means tracking every alert's severity and state,
+/// and being wrong in a way nobody notices until the number is wrong.
+#[derive(Default)]
+pub struct StreamActivity {
+    notify: Notify,
+}
+
+impl StreamActivity {
+    pub fn changed(&self) {
+        self.notify.notify_one();
+    }
+
+    pub async fn wait(&self) {
+        self.notify.notified().await;
+    }
+}
 
 /// Pushed into the webview as a call to a global the page installs. Tauri's own
 /// event plugin would need the JS API package in the console's bundle, which a
@@ -75,7 +98,7 @@ fn dispatch(app: &AppHandle, message: &StreamMessage) {
     }
 }
 
-async fn pump(app: AppHandle, http: reqwest::Client, url: Url) {
+async fn pump(app: AppHandle, http: reqwest::Client, url: Url, activity: Arc<StreamActivity>) {
     let request = http
         .get(url.clone())
         .header("Accept", "text/event-stream")
@@ -106,6 +129,9 @@ async fn pump(app: AppHandle, http: reqwest::Client, url: Url) {
     }
 
     dispatch(&app, &StreamMessage::Open);
+    // A fresh connection may have missed events while it was down, so the tray
+    // re-reads on open as well as on every event.
+    activity.changed();
 
     let mut parser = SseParser::new();
     let mut body = response.bytes_stream();
@@ -131,6 +157,7 @@ async fn pump(app: AppHandle, http: reqwest::Client, url: Url) {
                     id: event.id,
                 },
             );
+            activity.changed();
         }
     }
 
@@ -149,6 +176,7 @@ pub async fn stream_start(
     app: AppHandle,
     proxy: State<'_, crate::proxy::ApiProxy>,
     handle: State<'_, StreamHandle>,
+    activity: State<'_, Arc<StreamActivity>>,
     path: String,
 ) -> Result<(), String> {
     // Resolved by the same rule every other request uses: the page says what to
@@ -156,8 +184,9 @@ pub async fn stream_start(
     let url = proxy.resolve_path(&path)?;
     let http = proxy.stream_client();
     let app_handle = app.clone();
+    let activity = Arc::clone(&activity);
     handle.replace(tauri::async_runtime::spawn(async move {
-        pump(app_handle, http, url).await;
+        pump(app_handle, http, url, activity).await;
     }));
     Ok(())
 }
@@ -191,6 +220,36 @@ mod tests {
         })
         .unwrap();
         assert_eq!(error, r#"{"kind":"error","message":"boom"}"#);
+    }
+
+    #[tokio::test]
+    async fn activity_wakes_a_waiting_tray() {
+        let activity = StreamActivity::default();
+        activity.changed();
+        // Already signalled: the wait must return rather than block, or a tray
+        // that was busy reading when the event arrived would miss it.
+        tokio::time::timeout(std::time::Duration::from_millis(100), activity.wait())
+            .await
+            .expect("wait should return for a signal that already happened");
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_events_is_one_wakeup() {
+        let activity = StreamActivity::default();
+        for _ in 0..50 {
+            activity.changed();
+        }
+        tokio::time::timeout(std::time::Duration::from_millis(100), activity.wait())
+            .await
+            .expect("first wait returns");
+        // The tray debounces after waking, so fifty events cost one re-read
+        // rather than fifty. Nothing further is pending.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), activity.wait())
+                .await
+                .is_err(),
+            "a burst should not queue a wakeup per event"
+        );
     }
 
     #[test]
