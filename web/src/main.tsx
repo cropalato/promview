@@ -1,22 +1,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { setApiBaseUrl } from './config/apiBase';
+import { connectHost } from './config/hostBridge';
 import './styles/global.css';
 
-/**
- * A shell hosting this console injects the server it was configured for before
- * any application script runs, because a local webview has no origin to be
- * relative to. The browser build sets nothing and keeps its relative paths.
- *
- * A bad value is reported rather than swallowed: booting against a silently
- * wrong server is worse than not booting, since every screen would then be a
- * connection error with no clue where it was looking.
- */
-const injectedBase = (globalThis as { __PROMVIEW_API_BASE__?: unknown }).__PROMVIEW_API_BASE__;
-if (typeof injectedBase === 'string' && injectedBase !== '') {
-  setApiBaseUrl(injectedBase);
-}
+// A host shell points the console at its configured server and hands it a
+// transport; a browser has neither and keeps its own. Runs before the first
+// render so the very first request already goes the right way.
+connectHost();
 
 const container = document.getElementById('root');
 if (!container) {

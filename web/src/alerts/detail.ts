@@ -3,6 +3,7 @@ import { normalizeSeverity, severityLabelFor } from './severity';
 import type { Severity } from './severity';
 import type { AlertState } from './types';
 import { apiUrl } from '../config/apiBase';
+import { apiFetch } from '../config/transport';
 
 /**
  * Client for the alert detail API, `GET /api/v1/alerts/{id}`. Same-origin and
@@ -116,7 +117,7 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
  */
 export async function fetchAlertDetail(
   id: string,
-  fetchImpl: FetchLike = (url) => fetch(url),
+  fetchImpl: FetchLike = apiFetch,
 ): Promise<AlertDetailResult> {
   let response: Response;
   try {
@@ -159,7 +160,7 @@ export function isAlertNotFound(error: unknown): boolean {
 export async function setAlertAcknowledgement(
   id: string,
   acknowledged: boolean,
-  fetchImpl: FetchLike = (url, init) => fetch(url, init),
+  fetchImpl: FetchLike = apiFetch,
 ): Promise<AlertDetailResult> {
   let response: Response;
   try {

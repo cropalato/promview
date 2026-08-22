@@ -3,6 +3,7 @@ import { DEFAULT_GROUP_KEYS, sanitizeGroupKeys } from '../alerts/grouping';
 import { isTheme } from './theme';
 import type { Theme } from './theme';
 import { apiUrl } from '../config/apiBase';
+import { apiFetch } from '../config/transport';
 
 /**
  * Console layout preferences: which columns, how dense, whether alerts arrive
@@ -220,9 +221,8 @@ export function writeLocalPreferences(value: Preferences, storage?: StorageLike)
  */
 export async function loadPreferences(storage?: StorageLike): Promise<LoadedPreferences> {
   try {
-    const response = await fetch(apiUrl(PREFERENCES_URL), {
+    const response = await apiFetch(apiUrl(PREFERENCES_URL), {
       headers: { Accept: 'application/json' },
-      credentials: 'same-origin',
     });
     if (response.status === 404) {
       return { preferences: readLocalPreferences(storage), origin: 'local' };
@@ -251,10 +251,9 @@ export async function savePreferences(
     return 'local';
   }
   try {
-    const response = await fetch(apiUrl(PREFERENCES_URL), {
+    const response = await apiFetch(apiUrl(PREFERENCES_URL), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
       body: JSON.stringify(value),
     });
     if (response.status === 404) {

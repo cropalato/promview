@@ -9,6 +9,7 @@
  */
 
 import { apiUrl } from '../config/apiBase';
+import { apiFetch } from '../config/transport';
 
 export const ALERT_SILENCE_URL = (id: string) => `/api/v1/alerts/${encodeURIComponent(id)}/silence`;
 export const GROUP_SILENCE_URL = '/api/v1/groups/silence';
@@ -89,8 +90,6 @@ export function formatDuration(seconds: number): string {
  */
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
-const browserFetch: FetchLike = (url, init) => fetch(url, { credentials: 'same-origin', ...init });
-
 async function postSilence(
   url: string,
   body: unknown,
@@ -156,7 +155,7 @@ export function parseSilenceResponse(payload: unknown): SilenceResponse {
 export function silenceAlert(
   id: string,
   request: SilenceRequest,
-  fetchImpl: FetchLike = browserFetch,
+  fetchImpl: FetchLike = apiFetch,
 ): Promise<SilenceResponse> {
   return postSilence(ALERT_SILENCE_URL(id), request, fetchImpl);
 }
@@ -165,7 +164,7 @@ export function silenceGroup(
   groupBy: readonly string[],
   key: Record<string, string>,
   request: SilenceRequest,
-  fetchImpl: FetchLike = browserFetch,
+  fetchImpl: FetchLike = apiFetch,
 ): Promise<SilenceResponse> {
   return postSilence(GROUP_SILENCE_URL, { groupBy: [...groupBy], key, ...request }, fetchImpl);
 }

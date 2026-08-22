@@ -14,24 +14,40 @@ This is the walking skeleton from `docs/desktop-client-plan.md`, not the MVP.
 - The tray tooltip shows firing counts by severity, polled by the Rust core.
 - `PROMVIEW_SERVER_URL` selects the server, validated on the way in.
 
+- The console loads and works: alerts, groups, detail, filters, preferences. Its
+  API requests go through the Rust core over Tauri's `invoke`, not from the
+  webview.
+
+## How requests flow
+
+The webview never calls the server. `web/src/config/hostBridge.ts` installs a
+transport that hands each request to the `api_request` command, and every client
+module already defaults to it.
+
+Two things fall out of that, and the second is the reason:
+
+- No CORS is needed. A webview talking to a remote server is cross-origin, and a
+  server that serves its own console same-origin has no reason to send CORS
+  headers.
+- Credentials stay out of the webview. The cookie jar lives in the Rust client,
+  where page script cannot read it — which is what makes OIDC sessions safe to
+  add next.
+
+The page names a **path**, never a host. The core resolves it against the server
+this process was configured with, so a compromised page cannot point the client
+somewhere else and hand it whatever the jar holds. It also forwards only headers
+that are the page's business; anything identifying the caller is the core's.
+
 ## What does not work yet
 
-**The console in the window cannot reach the API.** The Rust core can — the tray
-counts are live — but the webview's own requests are cross-origin and the server
-sends no CORS headers, so every fetch from the page is blocked.
-
-That is a design decision, not an oversight, and it has two answers:
-
-1. Add CORS to the Go server. Small, but it means the webview holds credentials
-   and talks to the server directly, which is the posture the plan avoids.
-2. Route the console's requests through the Rust core over Tauri's `invoke`,
-   using the `fetchImpl` seam every client module already accepts. No CORS
-   needed, and credentials stay out of the webview — which is what
-   `docs/desktop-client-plan.md` asks for ("The Rust core owns … REST/SSE
-   transport").
+**The live stream.** SSE still uses the browser's `EventSource` directly, which
+is cross-origin and blocked, so the console shows `stream: reconnecting` and
+relies on its own refreshes. Moving the stream into the Rust core is the next
+increment and the reason the plan chose Tauri over a PWA — a tray that keeps
+working with every window closed needs the stream outside the webview anyway.
 
 Also absent, all deliberately deferred: OIDC loopback PKCE, OS keychain storage,
-background SSE in the Rust core, native notifications, and the updater.
+native notifications, and the updater.
 
 ## Running it
 

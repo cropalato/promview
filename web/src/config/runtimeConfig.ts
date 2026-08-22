@@ -6,6 +6,7 @@
  * runs in the embedded browser build and the future Tauri desktop client.
  */
 import { apiUrl } from './apiBase';
+import { apiFetch } from './transport';
 export type AuthMode = 'open' | 'oidc';
 
 export interface RuntimeConfig {
@@ -53,9 +54,7 @@ type FetchLike = (url: string) => Promise<Response>;
  * (the fetch default) keep browser session cookies flowing without any
  * client-side transport branching.
  */
-export async function loadRuntimeConfig(
-  fetchImpl: FetchLike = (url) => fetch(url),
-): Promise<RuntimeConfig> {
+export async function loadRuntimeConfig(fetchImpl: FetchLike = apiFetch): Promise<RuntimeConfig> {
   let response: Response;
   try {
     response = await fetchImpl(apiUrl(RUNTIME_CONFIG_URL));

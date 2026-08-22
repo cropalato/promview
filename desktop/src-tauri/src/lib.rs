@@ -14,9 +14,11 @@ use tauri::{Manager, WebviewWindow};
 
 use crate::api::Client;
 use crate::config::{api_base, Config};
+use crate::proxy::ApiProxy;
 
 pub mod api;
 pub mod config;
+pub mod proxy;
 
 /// Injected before the app boots so the console resolves its API paths against
 /// the configured server. It runs ahead of any application script, which is why
@@ -49,7 +51,17 @@ pub fn run() {
     let base = api_base(&config.server_url);
     eprintln!("promview-desktop: using server {base}");
 
+    let proxy = match ApiProxy::new(config.server_url.clone(), Duration::from_secs(30)) {
+        Ok(proxy) => proxy,
+        Err(message) => {
+            eprintln!("promview-desktop: {message}");
+            std::process::exit(2);
+        }
+    };
+
     tauri::Builder::default()
+        .manage(proxy)
+        .invoke_handler(tauri::generate_handler![crate::proxy::api_request])
         .setup(move |app| {
             let quit = MenuItem::with_id(app, "quit", "Quit Promview", true, None::<&str>)?;
             let console = MenuItem::with_id(app, "console", "Open console", true, None::<&str>)?;
