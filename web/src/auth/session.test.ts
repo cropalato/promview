@@ -8,7 +8,9 @@ import {
   highestRole,
   loadSession,
   parseSession,
+  canOperate,
 } from './session';
+import type { SessionInfo } from './session';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -166,5 +168,37 @@ describe('endSession', () => {
 
     await expect(endSession(fetchImpl, navigate)).rejects.toThrowError(/unable to reach/i);
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('canOperate', () => {
+  function session(overrides: Partial<SessionInfo> = {}): SessionInfo {
+    return {
+      subject: 'ada',
+      email: 'ada@example.com',
+      displayName: 'Ada',
+      roles: ['operator'],
+      anonymous: false,
+      ...overrides,
+    };
+  }
+
+  it('allows operators and administrators', () => {
+    expect(canOperate(session({ roles: ['operator'] }))).toBe(true);
+    expect(canOperate(session({ roles: ['administrator'] }))).toBe(true);
+    expect(canOperate(session({ roles: ['viewer', 'operator'] }))).toBe(true);
+  });
+
+  it('refuses a viewer, an unknown role, and no session at all', () => {
+    expect(canOperate(session({ roles: ['viewer'] }))).toBe(false);
+    expect(canOperate(session({ roles: ['unmapped'] }))).toBe(false);
+    expect(canOperate(session({ roles: [] }))).toBe(false);
+    expect(canOperate(undefined)).toBe(false);
+  });
+
+  it('refuses the anonymous reader open mode grants', () => {
+    // Open mode hands every reader the same anonymous viewer, so an operator
+    // control there could only ever answer 403.
+    expect(canOperate(session({ anonymous: true, roles: ['administrator'] }))).toBe(false);
   });
 });

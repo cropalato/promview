@@ -186,6 +186,7 @@ An operator can silence a single alert or a whole group from the console, which 
 - A single alert silences on its **full label set**, so only that series stops notifying. A group silences on its **grouping key**; `source` names a Promview source rather than an alert label, so it selects which Alertmanager to write to instead of becoming a matcher.
 - A group whose members span several Alertmanagers produces one silence per Alertmanager, and the console reports the outcome for each. A partial application is reported as such (HTTP 207) rather than as success.
 - Silences are attributed to the signed-in user, so this needs `PROMVIEW_AUTH_MODE=oidc` and an operator or administrator role binding. Open mode has no user to attribute a silence to and cannot create one.
+- Where silencing is unavailable — open mode, a viewer, or a source with no `alertmanager_url` — the console hides the controls rather than showing ones that fail. If you deploy this and see no **Silence** buttons, that is the gate rather than a fault; check the auth mode, your role binding, and the source's Alertmanager URL.
 - Every silence expires. `PROMVIEW_SILENCE_DEFAULT_DURATION` sets the window an operator gets by default (`2h`), and `PROMVIEW_SILENCE_MAX_DURATION` caps what they may ask for (`720h`).
 
 Writing a silence is the only place Promview writes to an Alertmanager. Reads are unauthenticated in the deployments this targets, but writes are commonly protected, so a source can carry a credential for them:

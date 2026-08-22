@@ -11,7 +11,7 @@ import type { LabelMatcher } from './alerts/filter';
 import type { AlertStreamEvent } from './alerts/stream';
 import type { AlertSummary } from './alerts/types';
 import type { AlertGroupSummary } from './alerts/api';
-import { OIDC_LOGIN_URL } from './auth/session';
+import { OIDC_LOGIN_URL, canOperate } from './auth/session';
 import type { NavigateTo } from './auth/session';
 import { AlertDetailDrawer } from './components/AlertDetailDrawer';
 import { AlertTable } from './components/AlertTable';
@@ -323,6 +323,13 @@ export default function App({ navigate }: AppProps = {}) {
   }, [loadedAlerts]);
 
   const config = configState.status === 'ready' ? configState.config : undefined;
+
+  // Group rows carry no per-alert permission of their own, unlike the detail
+  // drawer, which reads actions.canSilence from the server. This is the group
+  // equivalent: the deployment can write silences, and this session may.
+  const silenceAvailable =
+    config?.silenceEnabled === true &&
+    canOperate(sessionState.status === 'ready' ? sessionState.session : undefined);
   const filterActive = appliedMatchers.length > 0;
   const appliedFilterText = formatFilter(appliedMatchers);
 
@@ -503,9 +510,11 @@ export default function App({ navigate }: AppProps = {}) {
                     onSelect={(alert) => openAlert(alert.id)}
                     onOpenAlert={openAlert}
                     onSilenceGroup={
-                      // Hidden entirely when the deployment cannot write a
-                      // silence; a control that always fails is worse than none.
-                      config?.silenceEnabled === true
+                      // Both halves matter: the deployment has to be able to
+                      // write a silence at all, and this operator has to be
+                      // allowed to. In open mode every reader is an anonymous
+                      // viewer, so the control would only ever answer 403.
+                      silenceAvailable
                         ? (group) => openGroupSilence(group, preferences.grouping.keys)
                         : undefined
                     }
