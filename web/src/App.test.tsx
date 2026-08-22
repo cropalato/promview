@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import { NOTIFICATION_PREFERENCE_KEY, NOTIFICATION_SEEN_KEY } from './notifications/store';
+import { NOTIFICATION_SEEN_KEY } from './notifications/store';
+import { PREFERENCES_KEY, defaultPreferences } from './preferences/store';
 import { AutoOpenEventSource, FakeEventSource } from './test/fakeEventSource';
 import { FakeNotification } from './test/fakeNotification';
 
@@ -16,6 +17,35 @@ const OIDC_PRINCIPAL = {
   roles: ['operator'],
   anonymous: false,
 };
+
+/**
+ * The opt-in lives with the operator's other preferences now. In open mode
+ * there is no user to key them against, so they fall back to this browser —
+ * which is what these tests drive.
+ */
+function seedNotificationsEnabled(enabled = true): void {
+  // Grouping is written off explicitly. These tests assert on a flat alert row
+  // and their fetch mock serves no grouped page; before the opt-in moved here
+  // they happened to inherit grouping-off from a previous test's leftover
+  // preferences, which is not something to keep relying on.
+  const preferences = defaultPreferences();
+  window.localStorage.setItem(
+    PREFERENCES_KEY,
+    JSON.stringify({
+      ...preferences,
+      grouping: { ...preferences.grouping, enabled: false },
+      notifications: { ...preferences.notifications, enabled },
+    }),
+  );
+}
+
+function storedNotificationsEnabled(): boolean | undefined {
+  const raw = window.localStorage.getItem(PREFERENCES_KEY);
+  if (raw === null) {
+    return undefined;
+  }
+  return (JSON.parse(raw) as { notifications?: { enabled?: boolean } }).notifications?.enabled;
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -1588,10 +1618,10 @@ describe('App browser notifications', () => {
       await screen.findByRole('button', { name: /mute critical alert notifications/i }),
     ).toHaveAttribute('aria-pressed', 'true');
     expect(FakeNotification.requestCount).toBe(0);
-    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBe('true');
+    expect(storedNotificationsEnabled()).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: /mute critical alert notifications/i }));
-    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBe('false');
+    expect(storedNotificationsEnabled()).toBe(false);
   });
 
   it('prompts for permission only from the opt-in click', async () => {
@@ -1611,7 +1641,7 @@ describe('App browser notifications', () => {
       await screen.findByRole('button', { name: /mute critical alert notifications/i }),
     ).toBeInTheDocument();
     expect(FakeNotification.requestCount).toBe(1);
-    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBe('true');
+    expect(storedNotificationsEnabled()).toBe(true);
   });
 
   it('reflects a denied browser permission without prompting', async () => {
@@ -1625,11 +1655,11 @@ describe('App browser notifications', () => {
     expect(toggle).toBeDisabled();
     fireEvent.click(toggle);
     expect(FakeNotification.requestCount).toBe(0);
-    expect(window.localStorage.getItem(NOTIFICATION_PREFERENCE_KEY)).toBeNull();
+    expect(storedNotificationsEnabled() ?? false).toBe(false);
   });
 
   it('notifies a new critical alert while hidden; the click focuses and deep-links', async () => {
-    window.localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, 'true');
+    seedNotificationsEnabled();
     vi.stubGlobal('Notification', FakeNotification);
     const focus = vi.fn();
     vi.stubGlobal('focus', focus);
@@ -1664,7 +1694,7 @@ describe('App browser notifications', () => {
   });
 
   it('suppresses while the tab is visible and dedupes the replay once hidden', async () => {
-    window.localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, 'true');
+    seedNotificationsEnabled();
     vi.stubGlobal('Notification', FakeNotification);
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     mockApi(alertsPage({ streamCursor: 7 }));
@@ -1702,7 +1732,7 @@ describe('App browser notifications', () => {
   });
 
   it('stays silent for non-critical or non-created events even when hidden', async () => {
-    window.localStorage.setItem(NOTIFICATION_PREFERENCE_KEY, 'true');
+    seedNotificationsEnabled();
     vi.stubGlobal('Notification', FakeNotification);
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     mockApi(alertsPage({ streamCursor: 7 }));

@@ -201,7 +201,9 @@ The Alertmanager token is stored as given rather than hashed, because it has to 
 
 ## Console Preferences
 
-Column choice and order, row density, grouping keys, and the console palette are stored per user in `user_preferences` and served by `GET`/`PUT /api/v1/preferences`, so a layout follows an operator between machines.
+Column choice and order, row density, grouping keys, the console palette, and notification policy are stored per user in `user_preferences` and served by `GET`/`PUT /api/v1/preferences`, so they follow an operator between machines.
+
+Notification policy is an opt-in plus a label selector, edited in the view menu with the same syntax as the filter bar. It matches on `severity`, `alertname`, `source`, and `team` — the fields a stream event carries — and a selector naming anything else is refused rather than silently never firing. An empty selector notifies about nothing. Browser permission is separate: it belongs to one browser profile, no server can grant it, and the dedupe ledger that stops a replayed event notifying twice stays local for the same reason.
 
 This requires a user to key against, which means `PROMVIEW_AUTH_MODE=oidc`. In `open` mode every reader is the same anonymous principal, the endpoint answers `404`, and the console keeps its preferences in the browser instead — the choices still work, they just do not travel.
 

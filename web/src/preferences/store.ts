@@ -36,11 +36,32 @@ export interface GroupingPreference {
   keys: string[];
 }
 
+/**
+ * A notification selector matches on the fields a stream event carries, which
+ * is not every alert label: the server denormalized a handful into the stream
+ * record, and a selector naming anything else could never fire. The server
+ * refuses those at write time rather than letting them fail silently.
+ */
+export const NOTIFICATION_FIELDS: readonly string[] = ['severity', 'alertname', 'source', 'team'];
+
+export interface NotificationMatcher {
+  name: string;
+  op: '=' | '!=';
+  value: string;
+}
+
+export interface NotificationPreference {
+  enabled: boolean;
+  /** ANDed. Empty matches nothing, never everything. */
+  matchers: NotificationMatcher[];
+}
+
 export interface Preferences {
   columns: ColumnPreference[];
   density: Density;
   grouping: GroupingPreference;
   theme: Theme;
+  notifications: NotificationPreference;
 }
 
 export function defaultPreferences(): Preferences {
@@ -49,6 +70,9 @@ export function defaultPreferences(): Preferences {
     density: 'auto',
     grouping: { enabled: true, keys: [...DEFAULT_GROUP_KEYS] },
     theme: 'system',
+    // Off, carrying the selector the console hardcoded before this was
+    // configurable, so opting in does what it always did.
+    notifications: { enabled: false, matchers: [{ name: 'severity', op: '=', value: 'critical' }] },
   };
 }
 
@@ -126,7 +150,45 @@ export function parsePreferences(value: unknown): Preferences {
     density: isDensity(raw.density) ? raw.density : defaults.density,
     grouping,
     theme: isTheme(raw.theme) ? raw.theme : defaults.theme,
+    notifications: parseNotifications(raw.notifications, defaults.notifications),
   };
+}
+
+/**
+ * A selector written by another version, or naming a field this console cannot
+ * evaluate, costs the matchers it got wrong rather than the whole preference.
+ * A payload with no notifications key at all predates the feature and takes the
+ * default.
+ */
+function parseNotifications(
+  value: unknown,
+  fallback: NotificationPreference,
+): NotificationPreference {
+  if (typeof value !== 'object' || value === null) {
+    return fallback;
+  }
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.matchers)) {
+    return { enabled: raw.enabled === true, matchers: fallback.matchers };
+  }
+  const matchers: NotificationMatcher[] = [];
+  for (const entry of raw.matchers) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const matcher = entry as Record<string, unknown>;
+    if (typeof matcher.name !== 'string' || !NOTIFICATION_FIELDS.includes(matcher.name)) {
+      continue;
+    }
+    if (matcher.op !== '=' && matcher.op !== '!=') {
+      continue;
+    }
+    if (typeof matcher.value !== 'string' || matcher.value === '') {
+      continue;
+    }
+    matchers.push({ name: matcher.name, op: matcher.op, value: matcher.value });
+  }
+  return { enabled: raw.enabled === true, matchers };
 }
 
 export function readLocalPreferences(storage?: StorageLike): Preferences {

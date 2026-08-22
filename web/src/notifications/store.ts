@@ -1,13 +1,17 @@
 /**
- * Persistence for the browser-notification feature: the user's opt-in
- * preference and the dedupe ledger of stream event ids that were already
- * considered (notified or deliberately suppressed). Both live in
- * localStorage so they survive reloads; every access is defensive because
- * storage can be unavailable or throw (private modes, the future Tauri
- * shell), in which case the seen ledger degrades to in-memory behavior.
+ * The dedupe ledger of stream event ids already considered (notified, or
+ * deliberately suppressed because the tab was visible or notifications were
+ * off).
+ *
+ * This stays in localStorage while the opt-in and selector do not: it records
+ * what *this device* already showed, which is not policy and does not follow
+ * the operator to another client. It is also written on every qualifying
+ * event, so a server round trip would land on the hot path of exactly the
+ * alert storm where it would hurt. Every access is defensive because storage
+ * can be unavailable or throw (private modes, the future Tauri shell), in
+ * which case the ledger degrades to in-memory behavior.
  */
 
-export const NOTIFICATION_PREFERENCE_KEY = 'promview.notifications.enabled';
 export const NOTIFICATION_SEEN_KEY = 'promview.notifications.seenEvents';
 
 /**
@@ -29,25 +33,6 @@ function defaultStorage(): StorageLike | undefined {
     return typeof window === 'undefined' ? undefined : window.localStorage;
   } catch {
     return undefined;
-  }
-}
-
-/** Persisted opt-in preference; defaults to off and never grants by itself. */
-export function loadNotificationPreference(storage?: StorageLike): boolean {
-  const store = storage ?? defaultStorage();
-  try {
-    return store?.getItem(NOTIFICATION_PREFERENCE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-export function saveNotificationPreference(enabled: boolean, storage?: StorageLike): void {
-  const store = storage ?? defaultStorage();
-  try {
-    store?.setItem(NOTIFICATION_PREFERENCE_KEY, enabled ? 'true' : 'false');
-  } catch {
-    // Storage unavailable: the preference simply resets on next load.
   }
 }
 

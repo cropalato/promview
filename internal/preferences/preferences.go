@@ -49,6 +49,42 @@ var Themes = []string{
 	"solarized-light", "high-contrast", "colorblind-safe",
 }
 
+// NotificationFields are what a notification selector may match on.
+//
+// The vocabulary is bounded by the transport, not by taste: a stream event
+// carries only the handful of fields the server denormalized into the stream
+// record, so a selector naming anything else could never fire. Refusing it at
+// write time is the difference between "no notifications yet" and "notifications
+// that will never arrive and nobody can explain".
+var NotificationFields = []string{"severity", "alertname", "source", "team"}
+
+// NotificationOperators mirror the filter bar's, minus the regular-expression
+// forms: a selector is evaluated per event on a hot path, and an operator
+// debugging why a page never arrived should not also be debugging a regex.
+var NotificationOperators = []string{"=", "!="}
+
+// maxNotificationMatchers bounds a selector. Past a handful the operator wants
+// a different alerting rule, not a longer client-side filter.
+const maxNotificationMatchers = 8
+
+// NotificationMatcher constrains one field of a stream event.
+type NotificationMatcher struct {
+	Name  string `json:"name"`
+	Op    string `json:"op"`
+	Value string `json:"value"`
+}
+
+// Notifications is who gets told about what, stored per user so the policy
+// follows an operator to whatever client they are using rather than living in
+// one browser's local storage.
+type Notifications struct {
+	Enabled bool `json:"enabled"`
+	// Matchers are ANDed. An empty list matches nothing rather than
+	// everything: the vacuous-truth reading would turn switching notifications
+	// on into a page for every alert in the deployment.
+	Matchers []NotificationMatcher `json:"matchers"`
+}
+
 const (
 	maxColumns     = 24
 	minColumnWidth = 40
@@ -78,6 +114,8 @@ type Preferences struct {
 	Density  string   `json:"density"`
 	Grouping Grouping `json:"grouping"`
 	Theme    string   `json:"theme"`
+
+	Notifications Notifications `json:"notifications"`
 }
 
 // Default is what a user who has never saved anything gets, and what the
@@ -101,6 +139,13 @@ func Default() Preferences {
 		// System by default: the console has always followed the OS setting,
 		// and a user who never opens the picker should see no change.
 		Theme: "system",
+		// Off, with the selector the console hardcoded before this was
+		// configurable. Opting in should do what it always did; widening it is
+		// then the operator's explicit choice.
+		Notifications: Notifications{
+			Enabled:  false,
+			Matchers: []NotificationMatcher{{Name: "severity", Op: "=", Value: "critical"}},
+		},
 	}
 }
 
@@ -132,6 +177,9 @@ func Validate(value Preferences) error {
 	if !isTheme(value.Theme) {
 		return fmt.Errorf("theme must be one of %s", strings.Join(Themes, ", "))
 	}
+	if err := validateNotifications(value.Notifications); err != nil {
+		return err
+	}
 	if value.Grouping.Enabled {
 		if err := alerts.ValidateGroupBy(value.Grouping.Keys); err != nil {
 			return err
@@ -158,6 +206,44 @@ func validateColumnID(id string) error {
 func isDensity(value string) bool {
 	for _, density := range Densities {
 		if density == value {
+			return true
+		}
+	}
+	return false
+}
+
+func validateNotifications(value Notifications) error {
+	if len(value.Matchers) > maxNotificationMatchers {
+		return fmt.Errorf("at most %d notification matchers are allowed", maxNotificationMatchers)
+	}
+	seen := make(map[string]bool, len(value.Matchers))
+	for _, matcher := range value.Matchers {
+		if !isNotificationField(matcher.Name) {
+			return fmt.Errorf(
+				"notifications can only match on %s, not %q",
+				strings.Join(NotificationFields, ", "), matcher.Name,
+			)
+		}
+		if matcher.Op != "=" && matcher.Op != "!=" {
+			return fmt.Errorf("notification matcher operator must be = or !=, not %q", matcher.Op)
+		}
+		if matcher.Value == "" {
+			return fmt.Errorf("notification matcher on %q needs a value", matcher.Name)
+		}
+		// Two constraints on one field are either contradictory (severity is
+		// both critical and warning) or redundant, and neither is what the
+		// operator meant.
+		if seen[matcher.Name] {
+			return fmt.Errorf("duplicate notification matcher on %q", matcher.Name)
+		}
+		seen[matcher.Name] = true
+	}
+	return nil
+}
+
+func isNotificationField(name string) bool {
+	for _, field := range NotificationFields {
+		if field == name {
 			return true
 		}
 	}

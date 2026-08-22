@@ -2,12 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AlertStreamEvent } from '../alerts/stream';
 import { browserNotificationFactory, createAlertNotifier } from '../notifications/notifier';
 import type { NotificationFactoryLike, NotificationOptInState } from '../notifications/notifier';
-import {
-  createSeenEventStore,
-  loadNotificationPreference,
-  saveNotificationPreference,
-} from '../notifications/store';
+import { createSeenEventStore } from '../notifications/store';
 import type { StorageLike } from '../notifications/store';
+import type { NotificationMatcher } from '../preferences/store';
 
 export type { NotificationOptInState } from '../notifications/notifier';
 
@@ -16,10 +13,23 @@ export interface UseAlertNotificationsOptions {
   navigateToAlert: (alertId: string) => void;
   /** Notification constructor seam; defaults to the browser global. */
   factory?: NotificationFactoryLike;
-  /** Storage seam for the preference and dedupe ledger. */
+  /** Storage seam for the dedupe ledger, which stays per device. */
   storage?: StorageLike;
   focusWindow?: () => void;
   isDocumentHidden?: () => boolean;
+  /**
+   * The operator's stored opt-in and selector. These live with the rest of
+   * their preferences, on the server where there is a user to key them
+   * against, so the policy follows them to whatever client they sign in from
+   * rather than to one browser profile.
+   */
+  enabled: boolean;
+  matchers: readonly NotificationMatcher[];
+  /**
+   * Persists a change to the opt-in. Permission is the browser's business and
+   * stays here; whether the operator wants notifications is not.
+   */
+  onEnabledChange: (enabled: boolean) => void;
 }
 
 export interface AlertNotifications {
@@ -37,9 +47,13 @@ export interface AlertNotifications {
 
 /**
  * Owns the browser-notification opt-in for the console: the persisted
- * preference, the live permission state, and a stable notifier that stream
- * events flow through. The preference persists in localStorage; the dedupe
- * ledger lives there too, so replays after a reload never re-notify.
+ * live permission state and a stable notifier that stream events flow through.
+ *
+ * The opt-in and selector are not owned here: they are the operator's stored
+ * preferences, which follow them between clients. Permission is the opposite —
+ * it belongs to this browser profile and this origin, and no server can grant
+ * it. The dedupe ledger stays local too, since it records what this device
+ * already showed.
  */
 export function useAlertNotifications({
   navigateToAlert,
@@ -47,6 +61,9 @@ export function useAlertNotifications({
   storage,
   focusWindow,
   isDocumentHidden,
+  enabled,
+  matchers,
+  onEnabledChange,
 }: UseAlertNotificationsOptions): AlertNotifications {
   // Resolved once per mount: an injected factory wins, otherwise the
   // browser global when it exists. Permission itself is read live.
@@ -56,9 +73,7 @@ export function useAlertNotifications({
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     () => resolvedFactory?.permission ?? 'unsupported',
   );
-  const [preferenceEnabled, setPreferenceEnabled] = useState(() =>
-    loadNotificationPreference(storage),
-  );
+  const preferenceEnabled = enabled;
 
   const optInState: NotificationOptInState =
     permission === 'unsupported'
@@ -78,9 +93,7 @@ export function useAlertNotifications({
     const current = resolvedFactory.permission;
     setPermission(current);
     if (current === 'granted') {
-      const next = !preferenceEnabled;
-      setPreferenceEnabled(next);
-      saveNotificationPreference(next, storage);
+      onEnabledChange(!preferenceEnabled);
       return;
     }
     if (current === 'default') {
@@ -88,8 +101,7 @@ export function useAlertNotifications({
         (result) => {
           setPermission(result);
           if (result === 'granted') {
-            setPreferenceEnabled(true);
-            saveNotificationPreference(true, storage);
+            onEnabledChange(true);
           }
         },
         () => {
@@ -102,7 +114,7 @@ export function useAlertNotifications({
       );
     }
     // denied: no prompt is possible; the top bar shows the blocked state.
-  }, [resolvedFactory, preferenceEnabled, storage]);
+  }, [resolvedFactory, preferenceEnabled, onEnabledChange]);
 
   const navigateRef = useRef(navigateToAlert);
   useEffect(() => {
@@ -114,10 +126,18 @@ export function useAlertNotifications({
     enabledRef.current = optInState === 'enabled';
   }, [optInState]);
 
+  // Read through a ref so editing the selector takes effect on the next event
+  // rather than rebuilding the notifier and losing its identity.
+  const matchersRef = useRef(matchers);
+  useEffect(() => {
+    matchersRef.current = matchers;
+  }, [matchers]);
+
   const notifier = useMemo(
     () =>
       createAlertNotifier({
         isEnabled: () => enabledRef.current,
+        matchers: () => matchersRef.current,
         isDocumentHidden: () =>
           isDocumentHidden !== undefined ? isDocumentHidden() : document.hidden,
         createNotification: (title, options) => {

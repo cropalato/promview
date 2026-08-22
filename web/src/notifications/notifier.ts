@@ -8,6 +8,12 @@
  * same logic without a browser notification stack.
  */
 import { normalizeSeverity } from '../alerts/severity';
+import type { NotificationMatcher } from '../preferences/store';
+
+/** What the console matched on before selectors were configurable. */
+const DEFAULT_SELECTOR: readonly NotificationMatcher[] = [
+  { name: 'severity', op: '=', value: 'critical' },
+];
 import type { AlertStreamEvent, AlertStreamNotificationEvent } from '../alerts/stream';
 import type { SeenEventStore } from './store';
 
@@ -88,6 +94,12 @@ export interface AlertNotifierOptions {
   navigateToAlert: (alertId: string) => void;
   focusWindow: () => void;
   store: SeenEventStore;
+  /**
+   * The operator's stored selector, read per event so a change applies without
+   * rebuilding the notifier. Absent keeps the rule the console hardcoded
+   * before selectors existed.
+   */
+  matchers?: () => readonly NotificationMatcher[];
 }
 
 export interface AlertNotifier {
@@ -95,7 +107,54 @@ export interface AlertNotifier {
 }
 
 function notificationTitle(event: AlertStreamNotificationEvent): string {
-  return `Critical: ${event.alertName}`;
+  return `${event.severity === '' ? 'Alert' : titleCase(event.severity)}: ${event.alertName}`;
+}
+
+function titleCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+/**
+ * The event fields a selector may match on. Deliberately the same four the
+ * server accepts: a selector it stored must mean the same thing here, or an
+ * operator debugging a missing page is comparing two different rules.
+ */
+function eventField(event: AlertStreamNotificationEvent, name: string): string | undefined {
+  switch (name) {
+    case 'severity':
+      return normalizeSeverity(event.severity);
+    case 'alertname':
+      return event.alertName;
+    case 'source':
+      return event.source;
+    case 'team':
+      return event.team;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Matchers are ANDed. An empty selector matches nothing rather than
+ * everything: read as vacuous truth, switching notifications on would page for
+ * every alert in the deployment.
+ */
+export function eventMatchesSelector(
+  event: AlertStreamNotificationEvent,
+  matchers: readonly NotificationMatcher[],
+): boolean {
+  if (matchers.length === 0) {
+    return false;
+  }
+  return matchers.every((matcher) => {
+    const actual = eventField(event, matcher.name);
+    if (actual === undefined) {
+      // A field this console cannot read cannot be satisfied; refusing is the
+      // safe direction, and the server rejects such a selector anyway.
+      return false;
+    }
+    return matcher.op === '=' ? actual === matcher.value : actual !== matcher.value;
+  });
 }
 
 function notificationBody(event: AlertStreamNotificationEvent): string {
@@ -120,7 +179,8 @@ export function createAlertNotifier(options: AlertNotifierOptions): AlertNotifie
       if (event.type !== 'alert.created') {
         return;
       }
-      if (normalizeSeverity(event.severity) !== 'critical') {
+      const matchers = options.matchers?.() ?? DEFAULT_SELECTOR;
+      if (!eventMatchesSelector(event, matchers)) {
         return;
       }
       const { store } = options;

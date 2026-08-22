@@ -55,6 +55,10 @@ func TestStorePreferences(t *testing.T) {
 	saved.Columns = []preferences.Column{{ID: "severity"}, {ID: "alert"}, {ID: "label:prometheus_cluster", Width: 180}}
 	saved.Grouping = preferences.Grouping{Enabled: true, Keys: []string{"alertname"}}
 	saved.Theme = "nord"
+	saved.Notifications = preferences.Notifications{
+		Enabled:  true,
+		Matchers: []preferences.NotificationMatcher{{Name: "team", Op: "=", Value: "payments"}},
+	}
 	if err := store.WritePreferences(ctx, user, saved); err != nil {
 		t.Fatalf("WritePreferences() error = %v", err)
 	}
@@ -70,6 +74,14 @@ func TestStorePreferences(t *testing.T) {
 	// browser.
 	if read.Theme != "nord" {
 		t.Errorf("read theme = %q, want nord", read.Theme)
+	}
+	// The notification policy follows the operator too: that is the whole point
+	// of it living here rather than in one browser's local storage.
+	if !read.Notifications.Enabled || len(read.Notifications.Matchers) != 1 {
+		t.Fatalf("read notifications = %#v, want the saved policy", read.Notifications)
+	}
+	if got := read.Notifications.Matchers[0]; got.Name != "team" || got.Value != "payments" {
+		t.Errorf("read notification matcher = %#v, want team=payments", got)
 	}
 
 	// Saving again replaces rather than accumulating.
@@ -96,6 +108,13 @@ func TestStorePreferences(t *testing.T) {
 	if err := store.WritePreferences(ctx, user, unknownTheme); err == nil {
 		t.Error("WritePreferences() with an unknown theme error = nil, want error")
 	}
+	unmatchable := preferences.Default()
+	unmatchable.Notifications.Matchers = []preferences.NotificationMatcher{
+		{Name: "instance", Op: "=", Value: "web-01"},
+	}
+	if err := store.WritePreferences(ctx, user, unmatchable); err == nil {
+		t.Error("WritePreferences() with a selector that could never fire error = nil, want error")
+	}
 
 	// A row written by an older console can lack fields this one needs; the
 	// read fills them in instead of failing and leaving the table blank.
@@ -113,6 +132,16 @@ func TestStorePreferences(t *testing.T) {
 	// an empty theme would be refused by the next write.
 	if partial.Theme != "system" {
 		t.Errorf("partial theme = %q, want system", partial.Theme)
+	}
+	// A row written before notifications were configurable has no key at all.
+	// Falling back to the default selector keeps opting in doing what it did
+	// then, rather than silently matching nothing.
+	if len(partial.Notifications.Matchers) != 1 ||
+		partial.Notifications.Matchers[0].Value != "critical" {
+		t.Errorf("partial notifications = %#v, want the default selector", partial.Notifications)
+	}
+	if partial.Notifications.Enabled {
+		t.Error("partial notifications came back enabled, want off")
 	}
 
 	// Open mode has no user to key against; both directions say so plainly.
