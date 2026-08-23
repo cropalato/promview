@@ -15,6 +15,7 @@ This is the walking skeleton from `docs/desktop-client-plan.md`, not the MVP.
   reports a change and on a slow timer as a fallback.
 - `PROMVIEW_SERVER_URL` selects the server, validated on the way in.
 - Signing in against an `oidc` deployment, from the tray menu.
+- Native notifications for alerts the console's selector matches.
 
 - The console loads and works: alerts, groups, detail, filters, preferences. Its
   API requests go through the Rust core over Tauri's `invoke`, not from the
@@ -85,10 +86,26 @@ told. They stay signed in until the process exits, then sign in again. Nothing
 secret is written to disk: a bearer token in a file is readable by anything
 running as the user, and surviving a restart is not worth that.
 
+## Notifications
+
+Shown by the host, because WebKitGTK has no usable Notification API — without
+this the console's notifications never appear at all in a shell built on it.
+
+Only the _showing_ moves. Whether to notify stays in the console, which owns the
+opt-in, the label selector, and the ledger that stops a replayed event notifying
+twice. That is the same split as the stream's reconnect policy, and for the same
+reason: two implementations of one rule eventually disagree.
+
+Two limits worth knowing. Clicking a notification does nothing yet — the host
+has no click callback to hand back, so deep-linking to the alert is still to
+come. And the console only notifies while its window is hidden, as it does in a
+browser, so a visible window shows the alert in the table instead.
+
 ## What does not work yet
 
-Absent, all deliberately deferred: OIDC loopback PKCE, OS keychain storage,
-native notifications, and the updater.
+Absent, all deliberately deferred: the updater, and packaging or signing of any
+kind — the release workflow builds the server image only, so this client is
+buildable but not distributed.
 
 ## Running it
 

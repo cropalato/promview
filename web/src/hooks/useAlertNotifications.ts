@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AlertStreamEvent } from '../alerts/stream';
-import { browserNotificationFactory, createAlertNotifier } from '../notifications/notifier';
+import { createAlertNotifier, resolveNotificationFactory } from '../notifications/notifier';
 import type { NotificationFactoryLike, NotificationOptInState } from '../notifications/notifier';
 import { createSeenEventStore } from '../notifications/store';
 import type { StorageLike } from '../notifications/store';
@@ -68,7 +68,7 @@ export function useAlertNotifications({
   // Resolved once per mount: an injected factory wins, otherwise the
   // browser global when it exists. Permission itself is read live.
   const [resolvedFactory] = useState<NotificationFactoryLike | undefined>(
-    () => factory ?? browserNotificationFactory(),
+    () => factory ?? resolveNotificationFactory(),
   );
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     () => resolvedFactory?.permission ?? 'unsupported',

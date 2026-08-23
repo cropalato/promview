@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::api::Client;
 use crate::config::{api_base, Config};
@@ -72,6 +72,7 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(proxy)
         .manage(StreamHandle::default())
         .manage(Arc::new(StreamActivity::default()))
@@ -86,6 +87,7 @@ pub fn run() {
             sign_in,
             sign_out,
             auth_status,
+            show_notification,
         ])
         .setup(move |app| {
             let quit = MenuItem::with_id(app, "quit", "Quit Promview", true, None::<&str>)?;
@@ -235,6 +237,25 @@ fn sign_out(state: tauri::State<'_, SignInState>) {
 #[tauri::command]
 fn auth_status(state: tauri::State<'_, SignInState>) -> bool {
     state.credentials.token().is_some()
+}
+
+/// Shows an operating-system notification.
+///
+/// The console decides *whether* to notify — it owns the opt-in, the selector,
+/// and the ledger that stops a replayed event notifying twice. Duplicating any
+/// of that here would give the two halves separate opinions about what deserves
+/// a page. This only puts one on screen, which is the part a webview cannot do:
+/// WebKitGTK has no usable Notification API, so without this there are no
+/// notifications at all.
+#[tauri::command]
+fn show_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|err| format!("show notification: {err}"))
 }
 
 #[cfg(test)]

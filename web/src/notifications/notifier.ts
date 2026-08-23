@@ -54,6 +54,23 @@ export interface NotificationFactoryLike {
  * notification is adapted to `NotificationHandle` so its event-handler
  * typing never leaks into the notifier.
  */
+/**
+ * The factory the console notifies through. A host shell installs its own,
+ * because a webview may have no usable Notification API at all — WebKitGTK does
+ * not — and because a desktop notification should come from the application,
+ * not from a page inside it.
+ */
+let currentFactory: (() => NotificationFactoryLike | undefined) | null = null;
+
+export function setNotificationFactory(next?: NotificationFactoryLike): void {
+  currentFactory = next === undefined ? null : () => next;
+}
+
+/** Resolves the factory in use: a host's if one was installed, else the browser's. */
+export function resolveNotificationFactory(): NotificationFactoryLike | undefined {
+  return currentFactory === null ? browserNotificationFactory() : currentFactory();
+}
+
 export function browserNotificationFactory(): NotificationFactoryLike | undefined {
   if (typeof Notification === 'undefined') {
     return undefined;
