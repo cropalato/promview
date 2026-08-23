@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.24] - 2026-08-23
+
 ### Build System
 
 - **ci:** build the desktop client for Linux and Windows on a tag and attach the installers to a GitHub release — `.deb`, `.rpm`, `.msi`, and an NSIS `.exe`. Each platform builds its own, since a Tauri bundle cannot practically be cross-compiled. The installers are unsigned, which the release notes say plainly. AppImage is left out: `linuxdeploy` fails to produce one here, and a format nobody has seen succeed is not worth shipping.
