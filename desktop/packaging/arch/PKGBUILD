@@ -1,0 +1,35 @@
+# Maintainer: Ricardo Melo <ricardo@cropa.ca>
+#
+# Repackages the Debian bundle Tauri already produces rather than compiling
+# again. Tauri's Linux targets are deb, rpm and appimage — there is no pacman
+# target — and a second from-source build would only risk disagreeing with the
+# binary that ships everywhere else.
+#
+# The deb is expected next to this file, named promview-desktop.deb. The release
+# workflow puts it there; to build by hand, copy it from
+# desktop/src-tauri/target/release/bundle/deb/.
+
+pkgname=promview-desktop-bin
+_binname=promview-desktop
+pkgver=0.0.0
+pkgrel=1
+pkgdesc="Operational console for Prometheus Alertmanager alerts"
+arch=('x86_64')
+url="https://github.com/cropalato/promview"
+license=('MIT')
+# What the Tauri shell links against at runtime. The webkit and appindicator
+# names are Arch's, which differ from the Debian ones the deb declares.
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
+provides=("${_binname}")
+conflicts=("${_binname}")
+options=('!strip' '!debug')
+source=("${_binname}.deb")
+sha256sums=('SKIP')
+
+package() {
+    # The deb carries the layout already: /usr/bin, the desktop entry, icons.
+    # Unpacking it into $pkgdir is the whole job.
+    bsdtar -xOf "${srcdir}/${_binname}.deb" data.tar.gz | bsdtar -xzf - -C "${pkgdir}"
+
+    install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE" 2>/dev/null || true
+}

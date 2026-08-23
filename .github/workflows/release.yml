@@ -121,9 +121,48 @@ jobs:
             desktop/src-tauri/target/release/bundle/msi/*.msi
             desktop/src-tauri/target/release/bundle/nsis/*.exe
 
+  # Arch has no Tauri bundle target — the CLI offers deb, rpm and appimage only
+  # — so the deb is repackaged rather than built a second time. A second
+  # from-source build could only disagree with the binary shipped everywhere
+  # else.
+  desktop-arch:
+    needs: desktop
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-linux
+          path: bundles
+
+      - name: Build the package
+        run: |
+          set -eu
+          pacman -Sy --noconfirm --needed libarchive
+          # makepkg refuses to run as root, and a container has no other user.
+          useradd --create-home builder
+          install -d -o builder /work
+          cp desktop/packaging/arch/PKGBUILD /work/
+          cp bundles/deb/*.deb /work/promview-desktop.deb
+          # The tag is the version; strip the leading v and any pre-release
+          # suffix pacman would reject in pkgver.
+          version="${GITHUB_REF_NAME#v}"
+          sed -i "s/^pkgver=.*/pkgver=${version//-/_}/" /work/PKGBUILD
+          chown -R builder /work
+          su builder -c "cd /work && makepkg --nodeps --noconfirm"
+          ls -l /work/*.pkg.tar.zst
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-arch
+          if-no-files-found: error
+          path: /work/*.pkg.tar.zst
+
   # A separate job so the two builds cannot race to create the same release.
   release:
-    needs: [publish, desktop]
+    needs: [publish, desktop, desktop-arch]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
