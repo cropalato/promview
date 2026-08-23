@@ -29,6 +29,7 @@ url = "2"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tiny_http = "0.12"
 keyring = { version = "3", features = ["sync-secret-service", "apple-native", "windows-native"] }
+tauri-plugin-notification = "2.3.3"
 
 [profile.release]
 # The shell is a thin wrapper around a webview; the smaller binary matters more

@@ -1,6 +1,8 @@
 import { setApiBaseUrl } from './apiBase';
 import { setEventSourceFactory } from '../alerts/stream';
 import { createHostEventSourceFactory } from './hostStream';
+import { createHostNotificationFactory } from './hostNotifications';
+import { setNotificationFactory } from '../notifications/notifier';
 import { setApiFetch } from './transport';
 
 /**
@@ -108,5 +110,8 @@ export function connectHost(): boolean {
   // webview owns dies with the window, and the tray has to keep counting after
   // the last one closes.
   setEventSourceFactory(createHostEventSourceFactory(invoke, base));
+  // Not an optimisation: a webview may have no usable Notification API at all,
+  // so without this the console's notifications never appear.
+  setNotificationFactory(createHostNotificationFactory(invoke));
   return true;
 }
