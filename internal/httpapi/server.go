@@ -77,6 +77,9 @@ func New(
 		mux.Handle("GET /api/v1/auth/oidc/login", authenticationHandlers[0])
 		mux.Handle("GET /api/v1/auth/oidc/callback", authenticationHandlers[0])
 		mux.Handle("POST /api/v1/auth/logout", authenticationHandlers[0])
+		// The desktop client cannot receive the cookie the browser flow ends
+		// in; it redeems a one-time code for the same session instead.
+		mux.Handle("POST /api/v1/auth/desktop/exchange", authenticationHandlers[0])
 	}
 	mux.HandleFunc("GET /health/live", api.live)
 	mux.HandleFunc("GET /health/ready", api.ready)

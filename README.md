@@ -199,6 +199,28 @@ promview source set --slug demo --name Demo --token <ingest-token> \
 
 The Alertmanager token is stored as given rather than hashed, because it has to be replayed on every request. Treat `alert_sources.alertmanager_token` as a secret at rest. A source with no token sends no credential, which is the right setting for an Alertmanager that allows anonymous writes.
 
+## Desktop Sign-In
+
+A desktop client cannot receive the cookie the browser flow ends in, so it signs
+in through a loopback redirect:
+
+1. It opens the system browser at `/api/v1/auth/oidc/login?desktop_redirect=http://127.0.0.1:<port>/callback`.
+2. The server runs the usual OIDC exchange, then redirects to that loopback
+   address with a one-time `code` rather than setting a cookie.
+3. The client posts the code to `/api/v1/auth/desktop/exchange` and receives an
+   ordinary session token, revocable like any other.
+
+The desktop never talks to the identity provider and never holds a token issued
+by one. The code is single-use, expires after a minute, is stored only as a
+hash, and is redeemed over POST so the credential itself never appears in a URL
+that could reach browser history or a proxy log.
+
+`desktop_redirect` is validated strictly, because the server sends a freshly
+minted credential to whatever it accepts. Only `127.0.0.1`, `::1`, or
+`localhost` with an explicit port, over plain http, with no query, fragment, or
+userinfo. A hostname that merely resolves to a loopback address is refused: that
+is a promise which can change.
+
 ## Console Preferences
 
 Column choice and order, row density, grouping keys, the console palette, and notification policy are stored per user in `user_preferences` and served by `GET`/`PUT /api/v1/preferences`, so they follow an operator between machines.

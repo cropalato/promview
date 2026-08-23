@@ -84,7 +84,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if migrationCount != len(upMigrations) {
 		t.Fatalf("migration count = %d, want %d", migrationCount, len(upMigrations))
 	}
-	if _, err := pool.Exec(ctx, "TRUNCATE user_preferences, oidc_login_transactions, sessions, role_binding_matchers, role_bindings, auth_identity_groups, auth_identities, users, stream_events, alert_history, alerts RESTART IDENTITY"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE user_preferences, oidc_login_transactions, desktop_auth_codes, sessions, role_binding_matchers, role_bindings, auth_identity_groups, auth_identities, users, stream_events, alert_history, alerts RESTART IDENTITY"); err != nil {
 		t.Fatal(err)
 	}
 

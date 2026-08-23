@@ -188,9 +188,10 @@ func (store *Store) StoreOIDCTransaction(ctx context.Context, transaction auth.O
 			return err
 		}
 		_, err := tx.Exec(ctx, `
-			INSERT INTO oidc_login_transactions (state_hash, nonce, code_verifier, expires_at)
-			VALUES ($1, $2, $3, $4)
-		`, transaction.StateHash, transaction.Nonce, transaction.CodeVerifier, transaction.ExpiresAt)
+			INSERT INTO oidc_login_transactions (state_hash, nonce, code_verifier, expires_at, desktop_redirect)
+			VALUES ($1, $2, $3, $4, $5)
+		`, transaction.StateHash, transaction.Nonce, transaction.CodeVerifier, transaction.ExpiresAt,
+			transaction.DesktopRedirect)
 		return err
 	})
 	if err != nil {
@@ -204,9 +205,10 @@ func (store *Store) ConsumeOIDCTransaction(ctx context.Context, stateHash []byte
 	err := store.pool.QueryRow(ctx, `
 		DELETE FROM oidc_login_transactions
 		WHERE state_hash = $1 AND expires_at > $2
-		RETURNING state_hash, nonce, code_verifier, expires_at
+		RETURNING state_hash, nonce, code_verifier, expires_at, desktop_redirect
 	`, stateHash, now).Scan(
 		&transaction.StateHash, &transaction.Nonce, &transaction.CodeVerifier, &transaction.ExpiresAt,
+		&transaction.DesktopRedirect,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.OIDCTransaction{}, auth.ErrInvalidOIDCTransaction
