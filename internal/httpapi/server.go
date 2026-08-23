@@ -79,6 +79,13 @@ func New(
 		mux.Handle("POST /api/v1/auth/logout", authenticationHandlers[0])
 		// The desktop client cannot receive the cookie the browser flow ends
 		// in; it redeems a one-time code for the same session instead.
+		//
+		// Method-prefixed like the routes above, which means a GET here does
+		// not match and falls through to the SPA route, answering index.html
+		// rather than 405. A method-less pattern would answer correctly but
+		// ServeMux refuses one: it conflicts with `GET /`. The handler keeps
+		// its own method guard regardless, so it is right when called directly
+		// and nothing but a page is served when it is not.
 		mux.Handle("POST /api/v1/auth/desktop/exchange", authenticationHandlers[0])
 	}
 	mux.HandleFunc("GET /health/live", api.live)

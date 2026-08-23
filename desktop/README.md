@@ -14,6 +14,7 @@ This is the walking skeleton from `docs/desktop-client-plan.md`, not the MVP.
 - The tray tooltip shows firing counts by severity, refreshed whenever the stream
   reports a change and on a slow timer as a fallback.
 - `PROMVIEW_SERVER_URL` selects the server, validated on the way in.
+- Signing in against an `oidc` deployment, from the tray menu.
 
 - The console loads and works: alerts, groups, detail, filters, preferences. Its
   API requests go through the Rust core over Tauri's `invoke`, not from the
@@ -58,6 +59,31 @@ so this holds for the life of the process — and the fallback timer covers the
 gap before the first load either way. Moving stream ownership into the core
 entirely would remove the caveat, at the cost of the core needing its own
 snapshot cursor.
+
+## Signing in
+
+The tray's **Sign in…** opens the _system_ browser, not a window of ours. The
+identity provider's login form belongs somewhere the operator has an address bar
+to check and their own password manager to hand — a login form inside our
+webview is the shape phishing takes.
+
+A loopback listener is bound first, on a port the operating system picks, and
+its address is handed to the server as the place to send the result. What comes
+back is a one-time code, not a credential; the core posts it for an ordinary
+session token. The desktop never speaks to the identity provider and never holds
+a token issued by one.
+
+The session goes into the platform secret store, keyed by server URL so pointing
+the client elsewhere does not hand it the previous one's session. It is attached
+to every request and to the stream by the core, and never reaches the webview:
+the proxy refuses an `Authorization` header the page tries to set, so the only
+credential that can leave this process is the one the core holds.
+
+**When there is no secret store** — a minimal Linux desktop, a container, no
+keyring daemon — the token is kept in memory for the run and the operator is
+told. They stay signed in until the process exits, then sign in again. Nothing
+secret is written to disk: a bearer token in a file is readable by anything
+running as the user, and surviving a restart is not worth that.
 
 ## What does not work yet
 
