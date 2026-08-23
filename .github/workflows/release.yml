@@ -137,7 +137,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          ls -l artifacts
+          # upload-artifact keeps the bundle's directory layout, so the files
+          # sit one level down. Globbing the top level hands gh a directory.
+          mapfile -t files < <(find artifacts -type f | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no installers were produced" >&2
+            exit 1
+          fi
+          printf 'attaching %s\n' "${files[@]}"
           {
             printf 'Server image: `%s/%s:%s`\n' "ghcr.io" "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
             printf 'Helm chart: `oci://ghcr.io/cropalato/charts/promview`\n\n'
@@ -145,8 +152,14 @@ jobs:
             printf 'warns on first run, and macOS is not built at all: signing needs\n'
             printf 'certificates this project does not have yet.\n'
           } > notes.md
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes-file notes.md \
-            artifacts/*
+          # Re-runnable: a release left behind by a failed upload is filled in
+          # rather than colliding with a second create.
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${files[@]}"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file notes.md \
+              "${files[@]}"
+          fi

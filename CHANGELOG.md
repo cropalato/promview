@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **ci:** attach the desktop installers correctly. The upload preserved each bundle's directory, so the release step handed `gh` a directory rather than a file and 0.1.0-alpha.24 published its images without a GitHub release. The step now collects files and is re-runnable, filling in a release left behind by a failed upload instead of colliding with it.
+
 ## [0.1.0-alpha.24] - 2026-08-23
 
 ### Build System
