@@ -101,11 +101,26 @@ has no click callback to hand back, so deep-linking to the alert is still to
 come. And the console only notifies while its window is hidden, as it does in a
 browser, so a visible window shows the alert in the table instead.
 
+## Installers
+
+Tagging a release builds the client on Linux and Windows and attaches the
+installers to the GitHub release: `.deb` and `.rpm`, `.msi` and an NSIS `.exe`.
+Each platform builds its own, because cross-compiling a Tauri bundle is not
+practical — the installer formats are produced by that platform's own tooling.
+
+They are **unsigned**. Windows SmartScreen warns on first run. Signing needs
+certificates this project does not have.
+
+AppImage is deliberately not built. It is in Tauri's target list but
+`linuxdeploy` fails here even with FUSE present, and shipping a format nobody
+has seen succeed is worse than not shipping it. Adding `"appimage"` to
+`bundle.targets` is all it takes once someone confirms it works.
+
+macOS is not built at all: it needs an Apple runner and a developer certificate.
+
 ## What does not work yet
 
-Absent, all deliberately deferred: the updater, and packaging or signing of any
-kind — the release workflow builds the server image only, so this client is
-buildable but not distributed.
+The updater. Tauri's verifies signatures, so it waits on signing.
 
 ## Running it
 
