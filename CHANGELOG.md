@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.23] - 2026-08-23
+
 ### Features
 
 - **desktop:** show native notifications. A webview may have no usable Notification API — WebKitGTK does not — so the host puts them on screen and the console's notifications appear at all. Only the showing moves: the opt-in, the label selector, and the dedupe ledger stay in the console, the same split the stream's reconnect policy has. Clicking a notification does nothing yet, since the host has no click callback to offer.
