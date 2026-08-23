@@ -55,6 +55,10 @@ type OIDCTransaction struct {
 	Nonce        string
 	CodeVerifier string
 	ExpiresAt    time.Time
+	// DesktopRedirect is the loopback address a desktop client asked the
+	// callback to hand its one-time code to. Empty for a browser sign-in,
+	// which ends in a cookie instead.
+	DesktopRedirect string
 }
 
 type OIDCTransactionRepository interface {
@@ -73,6 +77,9 @@ type OIDCHandler struct {
 	provider     OIDCProvider
 	cookieSecure bool
 	sessionTTL   time.Duration
+	// desktopCodes is nil where desktop sign-in is not wired; the loopback
+	// branch then answers 501 rather than pretending.
+	desktopCodes DesktopCodeRepository
 }
 
 func NewOIDCHandler(
@@ -82,11 +89,36 @@ func NewOIDCHandler(
 	provider OIDCProvider,
 	cookieSecure bool,
 	sessionTTL time.Duration,
+	desktopCodes DesktopCodeRepository,
 ) *OIDCHandler {
 	return &OIDCHandler{
 		repository: repository, identities: identities, sessions: sessions, provider: provider,
-		cookieSecure: cookieSecure, sessionTTL: sessionTTL,
+		cookieSecure: cookieSecure, sessionTTL: sessionTTL, desktopCodes: desktopCodes,
 	}
+}
+
+// ExchangeDesktopCode redeems a one-time code for a session.
+//
+// Redemption deletes the code as part of the read, so two racing requests
+// cannot both succeed. Unknown, expired and already-used codes are reported
+// identically: distinguishing them would let a caller probe for codes that have
+// existed.
+func (handler *OIDCHandler) ExchangeDesktopCode(
+	ctx context.Context,
+	code string,
+) (string, time.Time, error) {
+	if handler.desktopCodes == nil {
+		return "", time.Time{}, ErrDesktopCodeInvalid
+	}
+	userID, err := handler.desktopCodes.ConsumeDesktopCode(ctx, HashSessionToken(code), time.Now().UTC())
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	token, err := handler.sessions.NewSession(ctx, Principal{UserID: userID})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return token, time.Now().UTC().Add(handler.sessionTTL), nil
 }
 
 func (handler *OIDCHandler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
@@ -98,6 +130,13 @@ func (handler *OIDCHandler) ServeHTTP(response http.ResponseWriter, request *htt
 			return
 		}
 		handler.login(response, request)
+	case "/api/v1/auth/desktop/exchange":
+		if request.Method != http.MethodPost {
+			response.Header().Set("Allow", http.MethodPost)
+			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handler.exchange(response, request)
 	case "/api/v1/auth/oidc/callback":
 		if request.Method != http.MethodGet {
 			response.Header().Set("Allow", http.MethodGet)
@@ -133,9 +172,21 @@ func (handler *OIDCHandler) login(response http.ResponseWriter, request *http.Re
 		http.Error(response, "could not start sign-in", http.StatusInternalServerError)
 		return
 	}
+	// A desktop client cannot receive the cookie this normally ends in, so it
+	// asks for the result at a loopback address instead. Validated before it is
+	// stored: this is where an open redirect would live.
+	desktopRedirect := ""
+	if raw := request.URL.Query().Get("desktop_redirect"); raw != "" {
+		validated, err := ValidateDesktopRedirect(raw)
+		if err != nil {
+			http.Error(response, "invalid desktop redirect", http.StatusBadRequest)
+			return
+		}
+		desktopRedirect = validated
+	}
 	transaction := OIDCTransaction{
 		StateHash: HashSessionToken(state), Nonce: nonce, CodeVerifier: verifier,
-		ExpiresAt: time.Now().UTC().Add(oidcTransactionTTL),
+		ExpiresAt: time.Now().UTC().Add(oidcTransactionTTL), DesktopRedirect: desktopRedirect,
 	}
 	if err := handler.repository.StoreOIDCTransaction(request.Context(), transaction); err != nil {
 		http.Error(response, "could not start sign-in", http.StatusInternalServerError)
@@ -188,6 +239,11 @@ func (handler *OIDCHandler) callback(response http.ResponseWriter, request *http
 		http.Error(response, "could not resolve identity", http.StatusInternalServerError)
 		return
 	}
+	if transaction.DesktopRedirect != "" {
+		handler.completeDesktopSignIn(response, request, transaction.DesktopRedirect, principal)
+		return
+	}
+
 	token, err := handler.sessions.NewSession(request.Context(), principal)
 	if err != nil {
 		http.Error(response, "could not create session", http.StatusInternalServerError)
@@ -200,6 +256,76 @@ func (handler *OIDCHandler) callback(response http.ResponseWriter, request *http
 		MaxAge: int(handler.sessionTTL.Seconds()), Expires: expiresAt,
 	})
 	http.Redirect(response, request, "/", http.StatusSeeOther)
+}
+
+// completeDesktopSignIn hands the desktop a one-time code at its loopback
+// address rather than a session in a cookie.
+//
+// The credential itself never travels in the URL: what goes there is redeemable
+// once, within a minute, over POST. A code that leaks from browser history or a
+// proxy log after the desktop has redeemed it buys nothing.
+func (handler *OIDCHandler) completeDesktopSignIn(
+	response http.ResponseWriter,
+	request *http.Request,
+	redirect string,
+	principal Principal,
+) {
+	if handler.desktopCodes == nil {
+		http.Error(response, "desktop sign-in is not configured", http.StatusNotImplemented)
+		return
+	}
+	code, err := randomToken()
+	if err != nil {
+		http.Error(response, "could not complete sign-in", http.StatusInternalServerError)
+		return
+	}
+	stored := DesktopCode{
+		CodeHash:  HashSessionToken(code),
+		UserID:    principal.UserID,
+		ExpiresAt: time.Now().UTC().Add(DesktopCodeTTL),
+	}
+	if err := handler.desktopCodes.StoreDesktopCode(request.Context(), stored); err != nil {
+		http.Error(response, "could not complete sign-in", http.StatusInternalServerError)
+		return
+	}
+	target, err := DesktopRedirectWithCode(redirect, code)
+	if err != nil {
+		http.Error(response, "invalid desktop redirect", http.StatusBadRequest)
+		return
+	}
+	http.Redirect(response, request, target, http.StatusSeeOther)
+}
+
+// exchange redeems a one-time desktop code for a session token.
+//
+// Over POST, so the credential is in a response body rather than a URL, and
+// answered as JSON because the caller is a desktop client rather than a
+// browser being redirected.
+func (handler *OIDCHandler) exchange(response http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Code string `json:"code"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(response, request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Code == "" {
+		http.Error(response, "code is required", http.StatusBadRequest)
+		return
+	}
+	token, expiresAt, err := handler.ExchangeDesktopCode(request.Context(), body.Code)
+	if errors.Is(err, ErrDesktopCodeInvalid) {
+		http.Error(response, "code is invalid or has already been used", http.StatusUnauthorized)
+		return
+	}
+	if err != nil {
+		http.Error(response, "could not complete sign-in", http.StatusInternalServerError)
+		return
+	}
+	response.Header().Set("Content-Type", "application/json")
+	response.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(response).Encode(map[string]any{
+		"token":     token,
+		"expiresAt": expiresAt.Format(time.RFC3339),
+	})
 }
 
 func (handler *OIDCHandler) logout(response http.ResponseWriter, request *http.Request) {

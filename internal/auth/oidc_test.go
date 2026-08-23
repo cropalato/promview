@@ -83,7 +83,7 @@ func TestOIDCLoginAndCallback(t *testing.T) {
 		Grants: []Grant{{Role: RoleAdministrator}},
 	}}
 	handler := NewOIDCHandler(
-		transactions, identities, NewSessionManager(sessions, time.Hour), provider, true, time.Hour,
+		transactions, identities, NewSessionManager(sessions, time.Hour), provider, true, time.Hour, nil,
 	)
 
 	loginResponse := httptest.NewRecorder()
@@ -146,7 +146,7 @@ func TestOIDCCallbackRejectsNonceAndUnmappedGroups(t *testing.T) {
 			if test.name == "groups" {
 				identities.err = ErrAccessDenied
 			}
-			handler := NewOIDCHandler(transactions, identities, NewSessionManager(sessions, time.Hour), provider, false, time.Hour)
+			handler := NewOIDCHandler(transactions, identities, NewSessionManager(sessions, time.Hour), provider, false, time.Hour, nil)
 			loginResponse := httptest.NewRecorder()
 			handler.ServeHTTP(loginResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/login", nil))
 			provider.identity = test.identity(provider.nonce)
@@ -163,7 +163,7 @@ func TestOIDCCallbackRejectsNonceAndUnmappedGroups(t *testing.T) {
 
 func TestOIDCLogoutRevokesSession(t *testing.T) {
 	repository := &fakeSessionRepository{}
-	handler := NewOIDCHandler(&fakeOIDCTransactionRepository{}, &fakeOIDCIdentityRepository{}, NewSessionManager(repository, time.Hour), &fakeOIDCProvider{}, true, time.Hour)
+	handler := NewOIDCHandler(&fakeOIDCTransactionRepository{}, &fakeOIDCIdentityRepository{}, NewSessionManager(repository, time.Hour), &fakeOIDCProvider{}, true, time.Hour, nil)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session-token"})
 	response := httptest.NewRecorder()
@@ -180,7 +180,7 @@ func TestOIDCLogoutRevokesSession(t *testing.T) {
 func TestOIDCCallbackRejectsProviderFailure(t *testing.T) {
 	transactions := &fakeOIDCTransactionRepository{}
 	provider := &fakeOIDCProvider{err: errors.New("provider failed")}
-	handler := NewOIDCHandler(transactions, &fakeOIDCIdentityRepository{}, NewSessionManager(&fakeSessionRepository{}, time.Hour), provider, false, time.Hour)
+	handler := NewOIDCHandler(transactions, &fakeOIDCIdentityRepository{}, NewSessionManager(&fakeSessionRepository{}, time.Hour), provider, false, time.Hour, nil)
 	loginResponse := httptest.NewRecorder()
 	handler.ServeHTTP(loginResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/login", nil))
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/callback?state="+url.QueryEscape(provider.state)+"&code=secret-code", nil)
