@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.26] - 2026-08-23
+
 ### Build System
 
 - **ci:** build an Arch Linux package for the desktop client and attach it to the release. Tauri offers no pacman target, so the deb it already produces is repackaged by a PKGBUILD rather than compiled again — a second from-source build could only disagree with the binary shipped everywhere else. The tag becomes the `pkgver` with `-` replaced by `_`, which pacman reserves.
