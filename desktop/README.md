@@ -111,6 +111,12 @@ practical — the installer formats are produced by that platform's own tooling.
 They are **unsigned**. Windows SmartScreen warns on first run. Signing needs
 certificates this project does not have.
 
+Arch Linux gets a `.pkg.tar.zst` too. Tauri has no pacman target, so the deb is
+repackaged by `desktop/packaging/arch/PKGBUILD` rather than compiled a second
+time — a second from-source build could only disagree with the binary shipped
+everywhere else. To build one by hand, copy the deb next to that PKGBUILD as
+`promview-desktop.deb` and run `makepkg`.
+
 AppImage is deliberately not built. It is in Tauri's target list but
 `linuxdeploy` fails here even with FUSE present, and shipping a format nobody
 has seen succeed is worse than not shipping it. Adding `"appimage"` to
