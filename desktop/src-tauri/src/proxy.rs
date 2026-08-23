@@ -10,6 +10,7 @@
 //! process was configured with, so a compromised page cannot point the client
 //! at a server of its choosing and hand it whatever credentials the jar holds.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -41,10 +42,15 @@ pub struct ApiResponse {
 pub struct ApiProxy {
     http: reqwest::Client,
     base: Url,
+    credentials: Arc<crate::credentials::Credentials>,
 }
 
 impl ApiProxy {
-    pub fn new(base: Url, timeout: Duration) -> Result<Self, String> {
+    pub fn new(
+        base: Url,
+        timeout: Duration,
+        credentials: Arc<crate::credentials::Credentials>,
+    ) -> Result<Self, String> {
         let http = reqwest::Client::builder()
             .timeout(timeout)
             // The jar is the point: a session cookie set by the server is held
@@ -52,7 +58,18 @@ impl ApiProxy {
             .cookie_store(true)
             .build()
             .map_err(|err| format!("build api client: {err}"))?;
-        Ok(Self { http, base })
+        Ok(Self {
+            http,
+            base,
+            credentials,
+        })
+    }
+
+    /// The bearer the core attaches, if it holds one. Never taken from the
+    /// page: is_forwardable_header refuses an Authorization the webview sets,
+    /// so the only credential that can reach the server is this one.
+    pub fn bearer(&self) -> Option<String> {
+        self.credentials.token()
     }
 
     /// The same path rule every request obeys, exposed so the stream resolves
@@ -73,6 +90,9 @@ impl ApiProxy {
         let method = parse_method(&request.method)?;
 
         let mut builder = self.http.request(method, url.clone());
+        if let Some(token) = self.bearer() {
+            builder = builder.bearer_auth(token);
+        }
         for (name, value) in &request.headers {
             if is_forwardable_header(name) {
                 builder = builder.header(name, value);

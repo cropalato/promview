@@ -15,12 +15,15 @@ use tauri::{Manager, WebviewWindow};
 
 use crate::api::Client;
 use crate::config::{api_base, Config};
+use crate::credentials::{Credentials, Durability};
 use crate::proxy::ApiProxy;
 use crate::stream::{StreamActivity, StreamHandle};
 
 pub mod api;
 pub mod config;
+pub mod credentials;
 pub mod proxy;
+pub mod signin;
 pub mod sse;
 pub mod stream;
 
@@ -55,7 +58,12 @@ pub fn run() {
     let base = api_base(&config.server_url);
     eprintln!("promview-desktop: using server {base}");
 
-    let proxy = match ApiProxy::new(config.server_url.clone(), Duration::from_secs(30)) {
+    let credentials = Arc::new(Credentials::new(&base));
+    let proxy = match ApiProxy::new(
+        config.server_url.clone(),
+        Duration::from_secs(30),
+        Arc::clone(&credentials),
+    ) {
         Ok(proxy) => proxy,
         Err(message) => {
             eprintln!("promview-desktop: {message}");
@@ -67,17 +75,29 @@ pub fn run() {
         .manage(proxy)
         .manage(StreamHandle::default())
         .manage(Arc::new(StreamActivity::default()))
+        .manage(SignInState {
+            credentials: Arc::clone(&credentials),
+            server: config.server_url.clone(),
+        })
         .invoke_handler(tauri::generate_handler![
             crate::proxy::api_request,
             crate::stream::stream_start,
             crate::stream::stream_stop,
+            sign_in,
+            sign_out,
+            auth_status,
         ])
         .setup(move |app| {
             let quit = MenuItem::with_id(app, "quit", "Quit Promview", true, None::<&str>)?;
+            let sign_in_item = MenuItem::with_id(app, "sign-in", "Sign in…", true, None::<&str>)?;
+            let sign_out_item = MenuItem::with_id(app, "sign-out", "Sign out", true, None::<&str>)?;
             let console = MenuItem::with_id(app, "console", "Open console", true, None::<&str>)?;
             let compact =
                 MenuItem::with_id(app, "compact", "Toggle compact window", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&console, &compact, &quit])?;
+            let menu = Menu::with_items(
+                app,
+                &[&console, &compact, &sign_in_item, &sign_out_item, &quit],
+            )?;
 
             let tray = TrayIconBuilder::with_id("promview")
                 .icon(
@@ -100,6 +120,20 @@ pub fn run() {
                         if let Some(window) = app.get_webview_window("compact") {
                             let _ = toggle_window(&window);
                         }
+                    }
+                    "sign-in" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(message) =
+                                run_sign_in(app.state::<SignInState>().inner()).await
+                            {
+                                eprintln!("promview-desktop: sign-in failed: {message}");
+                            }
+                        });
+                    }
+                    "sign-out" => {
+                        app.state::<SignInState>().credentials.clear();
+                        eprintln!("promview-desktop: signed out");
                     }
                     _ => {}
                 })
@@ -150,6 +184,57 @@ pub fn run() {
         .append_invoke_initialization_script(base_url_script(&base))
         .run(tauri::generate_context!())
         .expect("error while running the Promview desktop shell");
+}
+
+/// What the sign-in commands need: where the server is, and where to put the
+/// session once there is one.
+pub struct SignInState {
+    credentials: Arc<Credentials>,
+    server: url::Url,
+}
+
+/// Runs the whole flow: bind a loopback listener, send the operator to the
+/// system browser, wait for the one-time code, exchange it, store the session.
+///
+/// The listener is bound before the browser opens, so the redirect can never
+/// arrive at a port nothing is listening on.
+async fn run_sign_in(state: &SignInState) -> Result<Durability, String> {
+    let callback = crate::signin::Callback::bind()?;
+    let url = crate::signin::authorization_url(&state.server, &callback.redirect_uri())?;
+    crate::signin::open_in_browser(url.as_str())?;
+
+    // The listener blocks, so it waits on a thread rather than holding the
+    // async runtime for as long as someone takes to type a password.
+    let code = tauri::async_runtime::spawn_blocking(move || callback.wait_for_code())
+        .await
+        .map_err(|err| format!("sign-in listener stopped: {err}"))??;
+
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|err| format!("build sign-in client: {err}"))?;
+    let token = crate::signin::exchange_code(&http, &state.server, &code).await?;
+    Ok(state.credentials.store(&token))
+}
+
+#[tauri::command]
+async fn sign_in(state: tauri::State<'_, SignInState>) -> Result<String, String> {
+    match run_sign_in(state.inner()).await? {
+        Durability::Keychain => Ok("keychain".to_string()),
+        // Signed in either way; the difference is only whether they will still
+        // be tomorrow, and saying so beats a silent surprise at next launch.
+        Durability::Memory => Ok("memory".to_string()),
+    }
+}
+
+#[tauri::command]
+fn sign_out(state: tauri::State<'_, SignInState>) {
+    state.credentials.clear();
+}
+
+#[tauri::command]
+fn auth_status(state: tauri::State<'_, SignInState>) -> bool {
+    state.credentials.token().is_some()
 }
 
 #[cfg(test)]

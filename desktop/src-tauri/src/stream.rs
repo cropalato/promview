@@ -98,13 +98,23 @@ fn dispatch(app: &AppHandle, message: &StreamMessage) {
     }
 }
 
-async fn pump(app: AppHandle, http: reqwest::Client, url: Url, activity: Arc<StreamActivity>) {
-    let request = http
+async fn pump(
+    app: AppHandle,
+    http: reqwest::Client,
+    url: Url,
+    bearer: Option<String>,
+    activity: Arc<StreamActivity>,
+) {
+    let mut request = http
         .get(url.clone())
         .header("Accept", "text/event-stream")
         // Whatever the server's own idea of a keepalive interval is, the read
         // must not time out waiting for the next event.
         .timeout(std::time::Duration::from_secs(86_400));
+    if let Some(token) = bearer {
+        // The stream is authenticated the same way every other request is.
+        request = request.bearer_auth(token);
+    }
 
     let response = match request.send().await {
         Ok(response) => response,
@@ -183,10 +193,11 @@ pub async fn stream_start(
     // stream, never who to stream it from.
     let url = proxy.resolve_path(&path)?;
     let http = proxy.stream_client();
+    let bearer = proxy.bearer();
     let app_handle = app.clone();
     let activity = Arc::clone(&activity);
     handle.replace(tauri::async_runtime::spawn(async move {
-        pump(app_handle, http, url, activity).await;
+        pump(app_handle, http, url, bearer, activity).await;
     }));
     Ok(())
 }

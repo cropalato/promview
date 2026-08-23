@@ -190,11 +190,16 @@ func TestExchangeRejectsAMalformedRequest(t *testing.T) {
 }
 
 func TestExchangeRequiresPost(t *testing.T) {
+	// Over POST only: a GET would put the credential in a URL, which is the one
+	// thing this whole flow exists to avoid.
+	//
+	// This exercises the handler directly. Mounted behind the API's ServeMux
+	// the route is method-prefixed, so a GET does not reach here at all — it
+	// falls through to the SPA route and is answered with index.html. The guard
+	// is what makes the handler correct on its own terms.
 	handler, _ := desktopHandler(newFakeDesktopCodes())
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/desktop/exchange", nil))
-	// Over POST only: a GET would put the credential in a URL, which is the
-	// one thing this whole flow exists to avoid.
 	if response.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want %d", response.Code, http.StatusMethodNotAllowed)
 	}
