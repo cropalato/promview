@@ -98,9 +98,23 @@ func run() error {
 	// The same client reconciliation reads with; its timeout already bounds one
 	// Alertmanager request, which is the property a silence write needs too.
 	silencer := alertmanager.NewClient(cfg.ReconcileTimeout)
+	// A silence that lands is invisible in the console until something re-reads
+	// the source, which would otherwise be the reconcile ticker up to a whole
+	// interval later. An operator who silences an alert and sees no change
+	// assumes it did not work.
+	//
+	// Gated on reconciliation being enabled at all: with it off, promview never
+	// reads suppression from anywhere, and refreshing one source on one write
+	// would leave the console half-informed rather than consistently uninformed.
+	var apiSilencer httpapi.Silencer = silencer
+	var refresher *silenceRefresher
+	if cfg.ReconcileInterval != 0 {
+		refresher = newSilenceRefresher(store, alertmanager.NewClient(cfg.ReconcileTimeout))
+		apiSilencer = refreshingSilencer{inner: silencer, refresher: refresher, ctx: ctx}
+	}
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           httpapi.New(cfg, store, authenticator, silencer, authenticationHandler),
+		Handler:           httpapi.New(cfg, store, authenticator, apiSilencer, authenticationHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -125,6 +139,14 @@ func run() error {
 		runReconciliation(ctx, store, alertmanager.NewClient(cfg.ReconcileTimeout), cfg.ReconcileInterval)
 	}()
 
+	refreshDone := make(chan struct{})
+	go func() {
+		defer close(refreshDone)
+		if refresher != nil {
+			refresher.run(ctx)
+		}
+	}()
+
 	select {
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -137,6 +159,7 @@ func run() error {
 		err := server.Shutdown(shutdownCtx)
 		<-sweepDone
 		<-reconcileDone
+		<-refreshDone
 		return err
 	}
 }
