@@ -642,7 +642,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 	listSQL := `
 		SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen, alert.repeat_count,
-		       alert.occurrence, alert.acknowledged, alert.suppressed, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
+		       alert.occurrence, alert.acknowledged, alert.suppressed, alert.silenced_by, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
 		FROM alerts AS alert` + listWhere + fmt.Sprintf(`
 		ORDER BY `+sort.expression+" "+strings.ToUpper(query.Order)+`, alert.id `+strings.ToUpper(query.Order)+`
 		LIMIT $%d`, len(listArgs))
@@ -662,7 +662,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 			&item.ID, &item.SourceSlug, &item.Fingerprint, &item.SourceStatus,
 			&labelsJSON, &annotationsJSON, &item.StartsAt, &item.EndsAt,
 			&item.GeneratorURL, &item.ExternalURL, &item.FirstSeen, &item.LastSeen, &item.RepeatCount,
-			&item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
+			&item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.SilencedBy, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
 		); err != nil {
 			return alerts.ListResult{}, fmt.Errorf("scan alert: %w", err)
 		}
@@ -709,14 +709,14 @@ func (store *Store) GetAlertDetail(ctx context.Context, principal auth.Principal
 	err := store.pool.QueryRow(ctx, `
 		SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen,
-		       alert.repeat_count, alert.occurrence, alert.acknowledged, alert.suppressed, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
+		       alert.repeat_count, alert.occurrence, alert.acknowledged, alert.suppressed, alert.silenced_by, alert.acknowledged_at, alert.acknowledged_by, alert.raw_data
 		FROM alerts AS alert
 		WHERE alert.id = $1 AND (`+access+`)
 	`, args...).Scan(
 		&item.ID, &item.SourceSlug, &item.Fingerprint, &item.SourceStatus,
 		&labelsJSON, &annotationsJSON, &item.StartsAt, &item.EndsAt,
 		&item.GeneratorURL, &item.ExternalURL, &item.FirstSeen, &item.LastSeen,
-		&item.RepeatCount, &item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
+		&item.RepeatCount, &item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.SilencedBy, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.RawData,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return alerts.Detail{}, alerts.ErrNotFound
@@ -758,7 +758,11 @@ func (store *Store) GetAlertDetail(ctx context.Context, principal auth.Principal
 	if err := rows.Err(); err != nil {
 		return alerts.Detail{}, fmt.Errorf("iterate history for alert %d: %w", id, err)
 	}
-	return alerts.Detail{Alert: item, History: history}, nil
+	silences, err := store.silenceRecords(ctx, item.SourceSlug, item.SilencedBy)
+	if err != nil {
+		return alerts.Detail{}, err
+	}
+	return alerts.Detail{Alert: item, History: history, Silences: silences}, nil
 }
 
 func (store *Store) AcknowledgeAlert(ctx context.Context, principal auth.Principal, id int64, acknowledged bool) (alerts.Detail, error) {
@@ -994,6 +998,9 @@ func alertFilters(principal auth.Principal, query alerts.Query, alias string) (s
 	}
 	if query.Team != "" {
 		add(alias+".labels->>'team' = $%d", query.Team)
+	}
+	if query.Suppressed != nil {
+		add(alias+".suppressed = $%d", *query.Suppressed)
 	}
 	for _, matcher := range query.Matches {
 		args = append(args, matcher.Name, matcher.Value)

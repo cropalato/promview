@@ -41,6 +41,8 @@ type fakeStore struct {
 	principal    auth.Principal
 	silenceScope alerts.SilenceScope
 	silenceErr   error
+	recorded     []alerts.SilenceRecord
+	recordErr    error
 	groupBy      []string
 	groupKey     map[string]string
 }
@@ -138,6 +140,11 @@ func (store *fakeStore) SilenceScopeForGroup(
 	store.groupBy = groupBy
 	store.groupKey = key
 	return store.silenceScope, store.silenceErr
+}
+
+func (store *fakeStore) RecordSilence(_ context.Context, record alerts.SilenceRecord) error {
+	store.recorded = append(store.recorded, record)
+	return store.recordErr
 }
 
 // fakeSilencer records what reached each Alertmanager, and can be told to fail

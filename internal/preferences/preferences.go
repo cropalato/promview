@@ -109,11 +109,19 @@ type Grouping struct {
 	Keys    []string `json:"keys"`
 }
 
+// SilencedVisibilities are what an operator can do about alerts a silence or
+// inhibition is holding back. "hide" is offered but is not the default: an
+// alert disappearing because somebody else silenced it is the failure mode
+// silencing is supposed to replace, not cause.
+var SilencedVisibilities = []string{"show", "hide", "only"}
+
 type Preferences struct {
 	Columns  []Column `json:"columns"`
 	Density  string   `json:"density"`
 	Grouping Grouping `json:"grouping"`
 	Theme    string   `json:"theme"`
+	// SilencedVisibility decides whether suppressed alerts appear in the list.
+	SilencedVisibility string `json:"silencedVisibility"`
 
 	Notifications Notifications `json:"notifications"`
 }
@@ -139,6 +147,10 @@ func Default() Preferences {
 		// System by default: the console has always followed the OS setting,
 		// and a user who never opens the picker should see no change.
 		Theme: "system",
+		// Shown by default, dimmed and chipped rather than hidden. An operator
+		// has to be able to see that an alert is firing and being held back;
+		// those are different facts from it not being there.
+		SilencedVisibility: "show",
 		// Off, with the selector the console hardcoded before this was
 		// configurable. Opting in should do what it always did; widening it is
 		// then the operator's explicit choice.
@@ -176,6 +188,9 @@ func Validate(value Preferences) error {
 	}
 	if !isTheme(value.Theme) {
 		return fmt.Errorf("theme must be one of %s", strings.Join(Themes, ", "))
+	}
+	if !isSilencedVisibility(value.SilencedVisibility) {
+		return fmt.Errorf("silencedVisibility must be one of %s", strings.Join(SilencedVisibilities, ", "))
 	}
 	if err := validateNotifications(value.Notifications); err != nil {
 		return err
@@ -244,6 +259,15 @@ func validateNotifications(value Notifications) error {
 func isNotificationField(name string) bool {
 	for _, field := range NotificationFields {
 		if field == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isSilencedVisibility(value string) bool {
+	for _, candidate := range SilencedVisibilities {
+		if candidate == value {
 			return true
 		}
 	}

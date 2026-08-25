@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -60,6 +61,8 @@ func (store *Store) SilenceScopeForAlert(
 	if target.AlertmanagerURL == "" {
 		return alerts.SilenceScope{}, alerts.ErrNoSilenceTarget
 	}
+	target.Labels = labels
+	target.Members = 1
 	return alerts.SilenceScope{Labels: labels, Targets: []alerts.SilenceTarget{target}}, nil
 }
 
@@ -106,14 +109,41 @@ func (store *Store) SilenceScopeForGroup(
 	}
 
 	access, args := operateAccessCondition(principal, "alert.labels", args)
+	// The grouping key is the coarsest match that covers the group, not the
+	// narrowest. Members almost always agree on far more than the two or three
+	// keys they were grouped by, and a silence written on the key alone hides
+	// every future alert sharing it - including ones nobody has seen yet. So
+	// the match is widened back out to every label the members actually agree
+	// on, folded per source for the reason SilenceTarget.Labels explains.
 	rows, err := store.pool.Query(ctx, `
-		SELECT DISTINCT alert.source_slug, source.alertmanager_url, source.alertmanager_token
-		FROM alerts AS alert
-		JOIN alert_sources AS source ON source.slug = alert.source_slug
-		WHERE `+strings.Join(conditions, " AND ")+`
-		  AND alert.source_status = 'firing'
-		  AND (`+access+`)
-		ORDER BY alert.source_slug
+		WITH scoped AS (
+			SELECT alert.id, alert.source_slug, alert.labels
+			FROM alerts AS alert
+			WHERE `+strings.Join(conditions, " AND ")+`
+			  AND alert.source_status = 'firing'
+			  AND (`+access+`)
+		), totals AS (
+			SELECT source_slug, count(*) AS members
+			FROM scoped
+			GROUP BY source_slug
+		), common AS (
+			SELECT scoped.source_slug, pair.key, min(pair.value) AS value
+			FROM scoped, jsonb_each_text(scoped.labels) AS pair
+			GROUP BY scoped.source_slug, pair.key
+			HAVING count(*) = (SELECT members FROM totals WHERE totals.source_slug = scoped.source_slug)
+			   AND min(pair.value) = max(pair.value)
+		)
+		SELECT totals.source_slug,
+		       source.alertmanager_url,
+		       source.alertmanager_token,
+		       totals.members,
+		       COALESCE(jsonb_object_agg(common.key, common.value)
+		                FILTER (WHERE common.key IS NOT NULL), '{}'::jsonb)
+		FROM totals
+		JOIN alert_sources AS source ON source.slug = totals.source_slug
+		LEFT JOIN common ON common.source_slug = totals.source_slug
+		GROUP BY totals.source_slug, source.alertmanager_url, source.alertmanager_token, totals.members
+		ORDER BY totals.source_slug
 	`, args...)
 	if err != nil {
 		return alerts.SilenceScope{}, fmt.Errorf("read silence scope for group: %w", err)
@@ -124,15 +154,30 @@ func (store *Store) SilenceScopeForGroup(
 	members := 0
 	for rows.Next() {
 		var target alerts.SilenceTarget
-		if err := rows.Scan(&target.Source, &target.AlertmanagerURL, &target.AlertmanagerToken); err != nil {
+		var commonJSON []byte
+		if err := rows.Scan(
+			&target.Source, &target.AlertmanagerURL, &target.AlertmanagerToken,
+			&target.Members, &commonJSON,
+		); err != nil {
 			return alerts.SilenceScope{}, fmt.Errorf("scan silence target: %w", err)
 		}
-		members++
+		members += target.Members
 		if target.AlertmanagerURL == "" {
 			// A source with no Alertmanager is not reconciled either; skip it
 			// rather than failing the whole group for one unconfigured source.
 			continue
 		}
+		common := map[string]string{}
+		if err := json.Unmarshal(commonJSON, &common); err != nil {
+			return alerts.SilenceScope{}, fmt.Errorf("decode common labels for %s: %w", target.Source, err)
+		}
+		// The key always survives, even where the fold could not see it: a key
+		// whose value is the empty string matches members that carry no such
+		// label at all, so jsonb_each_text never emitted a pair for it.
+		for name, value := range labels {
+			common[name] = value
+		}
+		target.Labels = common
 		targets = append(targets, target)
 	}
 	if err := rows.Err(); err != nil {
@@ -144,5 +189,76 @@ func (store *Store) SilenceScopeForGroup(
 	if len(targets) == 0 {
 		return alerts.SilenceScope{}, alerts.ErrNoSilenceTarget
 	}
-	return alerts.SilenceScope{Labels: labels, Targets: targets}, nil
+	return alerts.SilenceScope{Labels: alerts.CommonLabels(targets), Targets: targets}, nil
+}
+
+// RecordSilence remembers a silence promview created. Alertmanager owns the
+// live state and expires it on its own schedule; this row is the reasoning,
+// which is what still answers "who silenced this, and why" after the silence
+// itself is gone.
+//
+// A repeated (source, id) is an upsert rather than an error: the id comes from
+// Alertmanager, and a retry that lands twice should not fail a silence that
+// actually worked.
+func (store *Store) RecordSilence(ctx context.Context, record alerts.SilenceRecord) error {
+	matchersJSON, err := json.Marshal(record.Matchers)
+	if err != nil {
+		return fmt.Errorf("encode silence matchers: %w", err)
+	}
+	_, err = store.pool.Exec(ctx, `
+		INSERT INTO alertmanager_silences
+			(source_slug, silence_id, matchers, created_by, comment, starts_at, ends_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (source_slug, silence_id) DO UPDATE SET
+			matchers = EXCLUDED.matchers,
+			created_by = EXCLUDED.created_by,
+			comment = EXCLUDED.comment,
+			starts_at = EXCLUDED.starts_at,
+			ends_at = EXCLUDED.ends_at
+	`, record.Source, record.SilenceID, matchersJSON, record.CreatedBy, record.Comment,
+		record.StartsAt.UTC(), record.EndsAt.UTC())
+	if err != nil {
+		return fmt.Errorf("record silence %s: %w", record.SilenceID, err)
+	}
+	return nil
+}
+
+// silenceRecords reads back the promview-created silences with these ids. Ids
+// promview never created simply do not come back: a silence made straight on
+// the Alertmanager is still real and still suppressing, and the console says so
+// without inventing an author for it.
+func (store *Store) silenceRecords(ctx context.Context, sourceSlug string, ids []string) ([]alerts.SilenceRecord, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := store.pool.Query(ctx, `
+		SELECT source_slug, silence_id, matchers, created_by, comment, starts_at, ends_at
+		FROM alertmanager_silences
+		WHERE source_slug = $1 AND silence_id = ANY($2)
+		ORDER BY ends_at DESC
+	`, sourceSlug, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read silence records: %w", err)
+	}
+	defer rows.Close()
+	records := make([]alerts.SilenceRecord, 0, len(ids))
+	for rows.Next() {
+		var record alerts.SilenceRecord
+		var matchersJSON []byte
+		var startsAt, endsAt time.Time
+		if err := rows.Scan(&record.Source, &record.SilenceID, &matchersJSON,
+			&record.CreatedBy, &record.Comment, &startsAt, &endsAt); err != nil {
+			return nil, fmt.Errorf("scan silence record: %w", err)
+		}
+		if err := json.Unmarshal(matchersJSON, &record.Matchers); err != nil {
+			return nil, fmt.Errorf("decode silence matchers for %s: %w", record.SilenceID, err)
+		}
+		record.StartsAt = startsAt.UTC()
+		record.EndsAt = endsAt.UTC()
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate silence records: %w", err)
+	}
+	return records, nil
 }

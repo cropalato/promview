@@ -129,6 +129,7 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 	selections = append(selections,
 		"count(*)",
 		"count(*) FILTER (WHERE alert.acknowledged)",
+		"count(*) FILTER (WHERE alert.suppressed)",
 		"max("+severityRank+")",
 		"max(alert.last_seen)",
 		"min(alert.starts_at)",
@@ -168,7 +169,7 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 		var other int64
 		bucketCounts := make([]int64, len(severityBuckets))
 		scanTargets = append(scanTargets,
-			&group.Total, &group.Acknowledged, &rank,
+			&group.Total, &group.Acknowledged, &group.Silenced, &rank,
 			&group.LatestLastSeen, &group.EarliestStartsAt, &group.SampleAlertID,
 		)
 		var value any

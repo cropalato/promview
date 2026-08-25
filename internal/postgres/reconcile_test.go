@@ -72,7 +72,7 @@ func TestStoreReconcileSource(t *testing.T) {
 
 	live := []alertmanager.LiveAlert{
 		{Fingerprint: "still-firing"},
-		{Fingerprint: "silenced", Suppressed: true},
+		{Fingerprint: "silenced", Suppressed: true, SilencedBy: []string{"sil-2", "sil-1"}},
 	}
 	result, err := store.ReconcileSource(ctx, "yul", live, map[string]bool{"gone": true}, now)
 	if err != nil {
@@ -114,6 +114,17 @@ func TestStoreReconcileSource(t *testing.T) {
 	// Suppressed is a flag, not a status: a silenced alert is still firing.
 	if !suppressed["silenced"] || suppressed["still-firing"] {
 		t.Errorf("suppression = %v, want only the silenced alert flagged", suppressed)
+	}
+
+	// Which silence is holding it back, stored in a stable order so a later
+	// pass reading the same set does not rewrite the row and wake every console.
+	var silencedBy []string
+	if err := pool.QueryRow(ctx,
+		"SELECT silenced_by FROM alerts WHERE fingerprint = 'silenced'").Scan(&silencedBy); err != nil {
+		t.Fatal(err)
+	}
+	if len(silencedBy) != 2 || silencedBy[0] != "sil-1" || silencedBy[1] != "sil-2" {
+		t.Errorf("silenced_by = %v, want the ids sorted", silencedBy)
 	}
 	// Another source's alerts are never touched by this source's reconciliation.
 	if statuses["untouched"] != alerts.StatusFiring {

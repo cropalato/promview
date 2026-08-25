@@ -38,7 +38,11 @@ type Alert struct {
 	Acknowledged bool
 	// Suppressed means a silence or inhibition is holding the alert back at the
 	// source. It is separate from status because such an alert is still firing.
-	Suppressed     bool
+	Suppressed bool
+	// SilencedBy names the silences currently matching. Suppressed with no ids
+	// means inhibited, which the console renders differently: an inhibition
+	// lifts itself, a silence was somebody's decision and has an expiry.
+	SilencedBy     []string
 	AcknowledgedAt *time.Time
 	AcknowledgedBy string
 	RawData        json.RawMessage
@@ -66,9 +70,14 @@ type Query struct {
 	Status   string
 	Severity string
 	Team     string
-	Matches  []LabelMatcher
-	Sort     string
-	Order    string
+	// Suppressed filters on whether a silence or inhibition is holding the
+	// alert back. Nil leaves suppressed alerts in the list, which is the
+	// default on purpose: hiding them by default is how an alert disappears
+	// without anybody deciding it should.
+	Suppressed *bool
+	Matches    []LabelMatcher
+	Sort       string
+	Order      string
 	// GroupBy collapses the result into one row per distinct combination of
 	// these label keys, plus the special source key. Empty lists alerts individually.
 	GroupBy     []string
@@ -112,9 +121,13 @@ func IsGroupKey(name string) bool {
 // read restrictions as the alerts themselves, so a group never reports members
 // the reader cannot open.
 type Group struct {
-	Key              map[string]string
-	Total            int64
-	Acknowledged     int64
+	Key          map[string]string
+	Total        int64
+	Acknowledged int64
+	// Silenced is how many members a silence or inhibition is holding back. A
+	// group is otherwise indistinguishable from a fully firing one, which is
+	// the case an operator most needs to tell apart at a glance.
+	Silenced         int64
 	SeverityCounts   map[string]int64
 	WorstSeverity    string
 	LatestLastSeen   time.Time
@@ -154,15 +167,16 @@ const (
 // CursorIdentity binds a cursor to the filters that produced it.
 func (query Query) CursorIdentity() string {
 	payload, err := json.Marshal(struct {
-		Source   string         `json:"source"`
-		Status   string         `json:"status"`
-		Severity string         `json:"severity"`
-		Team     string         `json:"team"`
-		Matches  []LabelMatcher `json:"matches"`
-		GroupBy  []string       `json:"groupBy"`
-		Sort     string         `json:"sort"`
-		Order    string         `json:"order"`
-	}{query.Source, query.Status, query.Severity, query.Team, query.Matches, query.GroupBy, query.Sort, query.Order})
+		Source     string         `json:"source"`
+		Status     string         `json:"status"`
+		Severity   string         `json:"severity"`
+		Team       string         `json:"team"`
+		Suppressed *bool          `json:"suppressed"`
+		Matches    []LabelMatcher `json:"matches"`
+		GroupBy    []string       `json:"groupBy"`
+		Sort       string         `json:"sort"`
+		Order      string         `json:"order"`
+	}{query.Source, query.Status, query.Severity, query.Team, query.Suppressed, query.Matches, query.GroupBy, query.Sort, query.Order})
 	if err != nil {
 		panic(fmt.Sprintf("marshal cursor identity: %v", err))
 	}
@@ -210,4 +224,9 @@ type HistoryEvent struct {
 type Detail struct {
 	Alert   Alert
 	History []HistoryEvent
+	// Silences are the promview-created silences currently holding this alert
+	// back, matched by the ids the source Alertmanager reports. Empty when the
+	// alert is suppressed by a silence somebody made elsewhere, or by an
+	// inhibition, and the console says so rather than inventing an author.
+	Silences []SilenceRecord
 }
