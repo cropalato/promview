@@ -192,7 +192,7 @@ pub async fn stream_start(
     // Resolved by the same rule every other request uses: the page says what to
     // stream, never who to stream it from.
     let url = proxy.resolve_path(&path)?;
-    let http = proxy.stream_client();
+    let http = proxy.http_client();
     let bearer = proxy.bearer();
     let app_handle = app.clone();
     let activity = Arc::clone(&activity);

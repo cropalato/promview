@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Deserialize;
 use url::Url;
+
+use crate::credentials::Credentials;
 
 /// Reading alert counts for the tray.
 ///
@@ -53,19 +56,30 @@ struct AlertsPage {
     severity_counts: BTreeMap<String, i64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Client {
+    /// The proxy's client, not one of this module's own: the session a
+    /// cookie-based deployment sets lands in that jar, and a second client
+    /// would have a second, permanently empty one.
     http: reqwest::Client,
     base: Url,
+    timeout: Duration,
+    credentials: Arc<Credentials>,
 }
 
 impl Client {
-    pub fn new(base: Url, timeout: Duration) -> Result<Self, String> {
-        let http = reqwest::Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|err| format!("build http client: {err}"))?;
-        Ok(Self { http, base })
+    pub fn new(
+        http: reqwest::Client,
+        base: Url,
+        timeout: Duration,
+        credentials: Arc<Credentials>,
+    ) -> Self {
+        Self {
+            http,
+            base,
+            timeout,
+            credentials,
+        }
     }
 
     /// Firing counts. Asks for a single alert because only the aggregate is
@@ -75,15 +89,31 @@ impl Client {
             .base
             .join("api/v1/alerts?limit=1&status=firing")
             .map_err(|err| format!("build alerts url: {err}"))?;
-        let response = self
+        let mut request = self
             .http
             .get(url.clone())
             .header("Accept", "application/json")
+            // The shared client's timeout is the proxy's, which is generous
+            // because a page may ask for a lot. A tooltip may not: it is read
+            // at a glance, and a stale one beats a hung read.
+            .timeout(self.timeout);
+        // Read per request rather than once at construction: the tray outlives
+        // signing in, and a token captured before there was one never updates.
+        if let Some(token) = self.credentials.token() {
+            request = request.bearer_auth(token);
+        }
+        let response = request
             .send()
             .await
             .map_err(|err| format!("query {url}: {err}"))?;
-        if !response.status().is_success() {
-            return Err(format!("{url} returned HTTP {}", response.status()));
+        let status = response.status();
+        if !status.is_success() {
+            // An unauthenticated server is not an unreachable one, and the
+            // tooltip should not say it is: the answer is to sign in.
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                return Err(format!("{url} needs a session: sign in from the tray"));
+            }
+            return Err(format!("{url} returned HTTP {status}"));
         }
         let page: AlertsPage = response
             .json()
@@ -101,6 +131,82 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server that answers one request and hands back the `Authorization` it
+    /// saw. Enough to prove what left this process, which is the whole question.
+    fn serve_once(
+        status: u16,
+        body: &'static str,
+    ) -> (Url, std::sync::mpsc::Receiver<Option<String>>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind test server");
+        let base = Url::parse(&format!("http://{}/", server.server_addr())).expect("test url");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok(request) = server.recv() {
+                let seen = request
+                    .headers()
+                    .iter()
+                    .find(|header| header.field.equiv("Authorization"))
+                    .map(|header| header.value.as_str().to_string());
+                let _ = tx.send(seen);
+                let response = tiny_http::Response::from_string(body)
+                    .with_status_code(tiny_http::StatusCode(status));
+                let _ = request.respond(response);
+            }
+        });
+        (base, rx)
+    }
+
+    fn client(base: Url, credentials: Arc<Credentials>) -> Client {
+        Client::new(
+            reqwest::Client::new(),
+            base,
+            Duration::from_secs(5),
+            credentials,
+        )
+    }
+
+    #[tokio::test]
+    async fn the_tray_read_carries_the_session() {
+        // The regression this guards: the tray had its own client with no
+        // credentials, so it got a 401 on every poll while the console — which
+        // goes through the proxy — showed the alerts perfectly well.
+        let (base, seen) = serve_once(200, r#"{"total":1,"severityCounts":{"critical":1}}"#);
+        let credentials = Arc::new(Credentials::new("https://tray-read.example"));
+        credentials.store("session-token");
+
+        let counts = client(base, Arc::clone(&credentials))
+            .firing_counts()
+            .await
+            .expect("counts");
+        assert_eq!(counts.critical, 1);
+        assert_eq!(
+            seen.recv().expect("request"),
+            Some("Bearer session-token".to_string())
+        );
+        credentials.clear();
+    }
+
+    #[tokio::test]
+    async fn a_read_before_signing_in_sends_no_bearer() {
+        let (base, seen) = serve_once(200, r#"{"total":0,"severityCounts":{}}"#);
+        let credentials = Arc::new(Credentials::new("https://no-session.example"));
+
+        let _ = client(base, credentials).firing_counts().await;
+        assert_eq!(seen.recv().expect("request"), None);
+    }
+
+    #[tokio::test]
+    async fn an_unauthenticated_server_is_not_reported_as_unreachable() {
+        let (base, _seen) = serve_once(401, "unauthorized");
+        let credentials = Arc::new(Credentials::new("https://needs-session.example"));
+
+        let message = client(base, credentials)
+            .firing_counts()
+            .await
+            .expect_err("401 is an error");
+        assert!(message.contains("sign in"), "unexpected message: {message}");
+    }
 
     #[test]
     fn tray_label_leads_with_severity() {
