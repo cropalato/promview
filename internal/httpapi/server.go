@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -105,7 +106,7 @@ func (api *API) requireAuthentication(next http.Handler) http.Handler {
 			if errors.Is(err, auth.ErrUnauthenticated) {
 				writeError(w, http.StatusUnauthorized, "authentication required")
 			} else {
-				writeError(w, http.StatusInternalServerError, "authentication failed")
+				writeServerError(w, r, "authentication failed", err)
 			}
 			return
 		}
@@ -121,7 +122,7 @@ func (api *API) requireAuthentication(next http.Handler) http.Handler {
 func (api *API) getMe(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requestPrincipal(r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		writeServerError(w, r, "principal is unavailable", nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, principal)
@@ -134,7 +135,7 @@ func (api *API) getAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := requestPrincipal(r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		writeServerError(w, r, "principal is unavailable", nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -157,7 +158,7 @@ func silenceRecordsResponse(records []alerts.SilenceRecord) []alerts.SilenceReco
 func (api *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requestPrincipal(r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		writeServerError(w, r, "principal is unavailable", nil)
 		return
 	}
 	if !principal.CanOperate() {
@@ -188,7 +189,7 @@ func (api *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update acknowledgement")
+		writeServerError(w, r, "failed to update acknowledgement", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -214,7 +215,7 @@ func (api *API) loadAlertDetail(w http.ResponseWriter, r *http.Request) (alerts.
 	}
 	principal, ok := requestPrincipal(r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		writeServerError(w, r, "principal is unavailable", nil)
 		return alerts.Detail{}, false
 	}
 	detail, err := api.store.GetAlertDetail(r.Context(), principal, id)
@@ -223,7 +224,7 @@ func (api *API) loadAlertDetail(w http.ResponseWriter, r *http.Request) (alerts.
 		return alerts.Detail{}, false
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to query alert")
+		writeServerError(w, r, "failed to query alert", err)
 		return alerts.Detail{}, false
 	}
 	return detail, true
@@ -237,7 +238,7 @@ func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, ok := requestPrincipal(r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		writeServerError(w, r, "principal is unavailable", nil)
 		return
 	}
 	if len(query.GroupBy) > 0 {
@@ -246,7 +247,7 @@ func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := api.store.ListAlerts(r.Context(), principal, query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to query alerts")
+		writeServerError(w, r, "failed to query alerts", err)
 		return
 	}
 
@@ -258,7 +259,7 @@ func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 	if result.NextCursor != nil {
 		nextCursor, err = encodeCursor(*result.NextCursor)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to encode cursor")
+			writeServerError(w, r, "failed to encode cursor", err)
 			return
 		}
 	}
@@ -278,7 +279,7 @@ func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 func (api *API) listAlertGroups(w http.ResponseWriter, r *http.Request, principal auth.Principal, query alerts.Query) {
 	result, err := api.store.GroupAlerts(r.Context(), principal, query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to group alerts")
+		writeServerError(w, r, "failed to group alerts", err)
 		return
 	}
 	groups := make([]alertGroupResponse, 0, len(result.Groups))
@@ -299,7 +300,7 @@ func (api *API) listAlertGroups(w http.ResponseWriter, r *http.Request, principa
 	if result.NextCursor != nil {
 		nextCursor, err = encodeGroupCursor(*result.NextCursor)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to encode cursor")
+			writeServerError(w, r, "failed to encode cursor", err)
 			return
 		}
 	}
@@ -320,7 +321,7 @@ func (api *API) listAlertGroups(w http.ResponseWriter, r *http.Request, principa
 func (api *API) getPreferences(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requestPrincipal(r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		writeServerError(w, r, "principal is unavailable", nil)
 		return
 	}
 	stored, err := api.store.ReadPreferences(r.Context(), principal)
@@ -329,7 +330,7 @@ func (api *API) getPreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read preferences")
+		writeServerError(w, r, "failed to read preferences", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, stored)
@@ -338,7 +339,7 @@ func (api *API) getPreferences(w http.ResponseWriter, r *http.Request) {
 func (api *API) putPreferences(w http.ResponseWriter, r *http.Request) {
 	principal, ok := requestPrincipal(r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		writeServerError(w, r, "principal is unavailable", nil)
 		return
 	}
 	var value preferences.Preferences
@@ -357,7 +358,7 @@ func (api *API) putPreferences(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "preferences are unavailable without a signed-in user")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to save preferences")
+		writeServerError(w, r, "failed to save preferences", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, value)
@@ -371,7 +372,7 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming is unsupported")
+		writeServerError(w, r, "streaming is unsupported", nil)
 		return
 	}
 
@@ -468,7 +469,7 @@ func (api *API) ingestAlertmanager(w http.ResponseWriter, r *http.Request) {
 	token := requestBearerToken(r)
 	authorized, err := api.store.AuthenticateSource(r.Context(), r.PathValue("source"), token)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to authenticate source")
+		writeServerError(w, r, "failed to authenticate source", err)
 		return
 	}
 	if !authorized {
@@ -496,7 +497,7 @@ func (api *API) ingestAlertmanager(w http.ResponseWriter, r *http.Request) {
 
 	alerts := alertmanager.Normalize(payload, source, time.Now())
 	if err := api.store.Ingest(r.Context(), alerts); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist alerts")
+		writeServerError(w, r, "failed to persist alerts", err)
 		return
 	}
 
@@ -863,6 +864,22 @@ func validMutationOrigin(r *http.Request) bool {
 	}
 	origin, err := url.Parse(r.Header.Get("Origin"))
 	return err == nil && origin.Scheme != "" && origin.Host == r.Host
+}
+
+// writeServerError answers with a generic message and records the cause.
+//
+// The client is deliberately told nothing useful: a 500 body is not the place
+// to describe a database. But an operator with nothing at all in the log cannot
+// tell a schema mismatch from a dead connection pool, which is exactly the hole
+// a silent 500 leaves. Both halves matter, and only one of them belongs in the
+// response.
+func writeServerError(w http.ResponseWriter, r *http.Request, message string, err error) {
+	attributes := []any{"method", r.Method, "path", r.URL.Path}
+	if err != nil {
+		attributes = append(attributes, "error", err)
+	}
+	slog.Error(message, attributes...)
+	writeError(w, http.StatusInternalServerError, message)
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
