@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **desktop:** trust the operating system's certificate store. reqwest was built against `rustls-tls`, which compiles in the Mozilla root set and never consults the platform's own, so a server behind a private or corporate CA — the ordinary case for an internal console — failed the TLS handshake. It surfaced as `error sending request for url (...)`, which reads like the server is unreachable rather than untrusted, and no environment variable could correct it because the roots were baked into the binary. `rustls-tls-native-roots` keeps rustls and loads the machine's own roots, so a certificate the rest of the system already accepts is accepted here too; `SSL_CERT_FILE` and `SSL_CERT_DIR` now work for pointing at a bundle kept outside the system store.
+
 ## [0.1.0-alpha.26] - 2026-08-23
 
 ### Build System
