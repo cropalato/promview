@@ -1,6 +1,9 @@
 package alerts
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 /*
 What a silence needs to know before it can be created: which labels it matches
@@ -17,28 +20,78 @@ the group handled.
 // alertmanager_url is not reconciled either.
 var ErrNoSilenceTarget = errors.New("no source in scope has an alertmanager url")
 
-// SilenceTarget is one Alertmanager a silence must reach, and the credential to
-// reach it with.
+// SilenceTarget is one Alertmanager a silence must reach, the credential to
+// reach it with, and the exact match to write there.
 type SilenceTarget struct {
 	Source            string
 	AlertmanagerURL   string
 	AlertmanagerToken string
+	// Labels become one equality matcher each: the narrowest equality match
+	// that still covers every in-scope member this Alertmanager holds.
+	//
+	// It is per target rather than per request because a group spanning two
+	// Alertmanagers usually differs between them on exactly the label worth
+	// matching on — members at one may all carry cluster=a and at the other
+	// cluster=b. A single shared match would drop `cluster` and silence both
+	// clusters at both places.
+	Labels map[string]string
+	// Members is how many in-scope alerts this target contributed, so a caller
+	// can report what a silence is actually covering.
+	Members int
 }
 
-// SilenceScope is a resolved silence request: the exact label set to match, and
-// every Alertmanager holding alerts that match it.
+// SilenceScope is a resolved silence request: every Alertmanager to write to,
+// and what to write there.
 type SilenceScope struct {
-	// Labels become one equality matcher each. For a single alert this is its
-	// full label set; for a group it is the grouping key, minus `source`, which
-	// names a promview source rather than an alert label and so selects the
-	// target instead of constraining the match.
+	// Labels is what every target agrees on, and so a subset of each target's
+	// own Labels. It is what a console previews when it has one line to show;
+	// the silence actually written is always at least this narrow.
 	Labels  map[string]string
 	Targets []SilenceTarget
 }
 
-// SilenceResult reports what happened at one Alertmanager.
+// CommonLabels folds the targets down to the labels they all share, which is
+// the honest single-line summary of a scope that writes several matches.
+func CommonLabels(targets []SilenceTarget) map[string]string {
+	common := map[string]string{}
+	for index, target := range targets {
+		if index == 0 {
+			for name, value := range target.Labels {
+				common[name] = value
+			}
+			continue
+		}
+		for name, value := range common {
+			if other, ok := target.Labels[name]; !ok || other != value {
+				delete(common, name)
+			}
+		}
+	}
+	return common
+}
+
+// SilenceResult reports what happened at one Alertmanager, including the exact
+// match written there. The match is per result because it is per target, and an
+// operator reading a partial failure needs to know what did land, not only
+// where.
 type SilenceResult struct {
-	Source    string `json:"source"`
-	SilenceID string `json:"silenceId,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Source    string            `json:"source"`
+	SilenceID string            `json:"silenceId,omitempty"`
+	Matchers  map[string]string `json:"matchers"`
+	Members   int               `json:"members"`
+	Error     string            `json:"error,omitempty"`
+}
+
+// SilenceRecord is a silence promview created itself, kept after Alertmanager
+// has expired and forgotten it. Alertmanager keeps the live state; this keeps
+// the reasoning, which is what lets the console still say who silenced an alert
+// and why once the silence is gone.
+type SilenceRecord struct {
+	Source    string            `json:"source"`
+	SilenceID string            `json:"silenceId"`
+	Matchers  map[string]string `json:"matchers"`
+	CreatedBy string            `json:"createdBy"`
+	Comment   string            `json:"comment"`
+	StartsAt  time.Time         `json:"startsAt"`
+	EndsAt    time.Time         `json:"endsAt"`
 }

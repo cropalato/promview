@@ -42,8 +42,14 @@ func postSilence(handler http.Handler, path, body string) *httptest.ResponseReco
 
 func oneTarget() alerts.SilenceScope {
 	return alerts.SilenceScope{
-		Labels:  map[string]string{"alertname": "HighCPU", "instance": "web-01"},
-		Targets: []alerts.SilenceTarget{{Source: "demo", AlertmanagerURL: "http://am-a:9093", AlertmanagerToken: "sekret"}},
+		Labels: map[string]string{"alertname": "HighCPU", "instance": "web-01"},
+		Targets: []alerts.SilenceTarget{{
+			Source:            "demo",
+			AlertmanagerURL:   "http://am-a:9093",
+			AlertmanagerToken: "sekret",
+			Labels:            map[string]string{"alertname": "HighCPU", "instance": "web-01"},
+			Members:           1,
+		}},
 	}
 }
 
@@ -142,8 +148,18 @@ func TestSilenceGroupFansOutToEveryAlertmanagerItSpans(t *testing.T) {
 	store := &fakeStore{silenceScope: alerts.SilenceScope{
 		Labels: map[string]string{"alertname": "HighCPU"},
 		Targets: []alerts.SilenceTarget{
-			{Source: "demo", AlertmanagerURL: "http://am-a:9093"},
-			{Source: "edge", AlertmanagerURL: "http://am-b:9093"},
+			{
+				Source:          "demo",
+				AlertmanagerURL: "http://am-a:9093",
+				Labels:          map[string]string{"alertname": "HighCPU"},
+				Members:         2,
+			},
+			{
+				Source:          "edge",
+				AlertmanagerURL: "http://am-b:9093",
+				Labels:          map[string]string{"alertname": "HighCPU"},
+				Members:         1,
+			},
 		},
 	}}
 	silencer := newFakeSilencer()
@@ -169,8 +185,18 @@ func TestSilenceGroupReportsPartialApplicationRatherThanClaimingSuccess(t *testi
 	store := &fakeStore{silenceScope: alerts.SilenceScope{
 		Labels: map[string]string{"alertname": "HighCPU"},
 		Targets: []alerts.SilenceTarget{
-			{Source: "demo", AlertmanagerURL: "http://am-a:9093"},
-			{Source: "edge", AlertmanagerURL: "http://am-b:9093"},
+			{
+				Source:          "demo",
+				AlertmanagerURL: "http://am-a:9093",
+				Labels:          map[string]string{"alertname": "HighCPU"},
+				Members:         2,
+			},
+			{
+				Source:          "edge",
+				AlertmanagerURL: "http://am-b:9093",
+				Labels:          map[string]string{"alertname": "HighCPU"},
+				Members:         1,
+			},
 		},
 	}}
 	silencer := newFakeSilencer()
@@ -255,5 +281,184 @@ func TestConfigAdvertisesTheSilenceWindow(t *testing.T) {
 	}
 	if !payload.SilenceEnabled {
 		t.Error("silenceEnabled = false with a silencer configured")
+	}
+}
+
+// twoTargetsDisagreeing is the case the fold exists for: a group whose members
+// live on two Alertmanagers and agree on more than the grouping key, but agree
+// on different things at each one.
+func twoTargetsDisagreeing() alerts.SilenceScope {
+	return alerts.SilenceScope{
+		Labels: map[string]string{"alertname": "HighCPU"},
+		Targets: []alerts.SilenceTarget{
+			{
+				Source:          "demo",
+				AlertmanagerURL: "http://am-a:9093",
+				Labels:          map[string]string{"alertname": "HighCPU", "cluster": "a"},
+				Members:         3,
+			},
+			{
+				Source:          "edge",
+				AlertmanagerURL: "http://am-b:9093",
+				Labels:          map[string]string{"alertname": "HighCPU", "cluster": "b"},
+				Members:         2,
+			},
+		},
+	}
+}
+
+func TestSilenceGroupWritesEachAlertmanagerItsOwnNarrowerMatch(t *testing.T) {
+	store := &fakeStore{silenceScope: twoTargetsDisagreeing()}
+	silencer := newFakeSilencer()
+	handler := New(silenceConfig(), store, operator(), silencer)
+
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"}}`
+	if response := postSilence(handler, "/api/v1/groups/silence", body); response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusCreated, response.Body)
+	}
+
+	// A single shared match would drop `cluster` and silence both clusters at
+	// both Alertmanagers, which is more than the group covers.
+	for url, cluster := range map[string]string{"http://am-a:9093": "a", "http://am-b:9093": "b"} {
+		silence, ok := silencer.created[url]
+		if !ok {
+			t.Fatalf("no silence reached %s", url)
+		}
+		found := ""
+		for _, matcher := range silence.Matchers {
+			if matcher.Name == "cluster" {
+				found = matcher.Value
+			}
+		}
+		if found != cluster {
+			t.Errorf("%s matched cluster=%q, want %q", url, found, cluster)
+		}
+	}
+}
+
+func TestSilenceGroupRecordsWhoAskedAndUntilWhen(t *testing.T) {
+	store := &fakeStore{silenceScope: twoTargetsDisagreeing()}
+	handler := New(silenceConfig(), store, operator(), newFakeSilencer())
+
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"},"comment":"maintenance"}`
+	if response := postSilence(handler, "/api/v1/groups/silence", body); response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusCreated, response.Body)
+	}
+	if len(store.recorded) != 2 {
+		t.Fatalf("recorded = %d silences, want one per target", len(store.recorded))
+	}
+	for _, record := range store.recorded {
+		if record.CreatedBy != "ada@example.com" {
+			t.Errorf("createdBy = %q, want the signed-in operator", record.CreatedBy)
+		}
+		if record.Comment != "maintenance" {
+			t.Errorf("comment = %q, want the operator's own words", record.Comment)
+		}
+		if !record.EndsAt.After(record.StartsAt) {
+			t.Errorf("silence %s does not end after it starts", record.SilenceID)
+		}
+		// The match is per target, so the record has to be too, or the console
+		// would later explain the silence with somebody else's matchers.
+		if record.Matchers["alertname"] != "HighCPU" || record.Matchers["cluster"] == "" {
+			t.Errorf("recorded matchers = %v, want this target's own match", record.Matchers)
+		}
+	}
+}
+
+func TestSilenceGroupFailingToRecordStillReportsTheSilenceItCreated(t *testing.T) {
+	store := &fakeStore{silenceScope: oneTarget(), recordErr: errors.New("database is down")}
+	handler := New(silenceConfig(), store, operator(), newFakeSilencer())
+
+	// The silence exists on the Alertmanager either way. Reporting a failure
+	// would tell the operator to try again against something already silenced.
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"}}`
+	if response := postSilence(handler, "/api/v1/groups/silence", body); response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusCreated, response.Body)
+	}
+}
+
+func TestPreviewGroupSilenceAnswersWhatWouldActuallyMatch(t *testing.T) {
+	store := &fakeStore{silenceScope: twoTargetsDisagreeing()}
+	handler := New(silenceConfig(), store, operator(), newFakeSilencer())
+
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"}}`
+	response := postSilence(handler, "/api/v1/groups/silence/preview", body)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusOK, response.Body)
+	}
+	var payload struct {
+		Matchers    map[string]string `json:"matchers"`
+		MemberCount int               `json:"memberCount"`
+		Targets     []struct {
+			Source   string            `json:"source"`
+			Matchers map[string]string `json:"matchers"`
+			Members  int               `json:"members"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.MemberCount != 5 {
+		t.Errorf("memberCount = %d, want every in-scope member", payload.MemberCount)
+	}
+	if len(payload.Targets) != 2 {
+		t.Fatalf("targets = %#v, want one per alertmanager", payload.Targets)
+	}
+	// The common match is what the dialog shows on one line; each target's own
+	// match is at least this narrow, and the dialog spells out the difference.
+	if len(payload.Matchers) != 1 || payload.Matchers["alertname"] != "HighCPU" {
+		t.Errorf("matchers = %v, want what every target agrees on", payload.Matchers)
+	}
+}
+
+func TestPreviewGroupSilenceNeedsOperatorRights(t *testing.T) {
+	store := &fakeStore{silenceScope: oneTarget()}
+	viewer := fakeAuthenticator{principal: auth.Principal{Subject: "v", Roles: []string{"viewer"}}}
+	handler := New(silenceConfig(), store, viewer, newFakeSilencer())
+
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"}}`
+	// A preview names the labels of alerts the caller may not act on; it runs
+	// the same gate the silence itself does.
+	if response := postSilence(handler, "/api/v1/groups/silence/preview", body); response.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
+func TestSilenceGroupRefusesWhenTheMatchMovedSinceThePreview(t *testing.T) {
+	store := &fakeStore{silenceScope: twoTargetsDisagreeing()}
+	silencer := newFakeSilencer()
+	handler := New(silenceConfig(), store, operator(), silencer)
+
+	// The console read `alertname` plus `cluster`; a member joined that does
+	// not carry `cluster`, so the silence would now be broader than what was
+	// confirmed. Refusing is the whole point of echoing the match back.
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"},` +
+		`"expectedMatchers":{"alertname":"HighCPU","cluster":"a"}}`
+	response := postSilence(handler, "/api/v1/groups/silence", body)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusConflict, response.Body)
+	}
+	if len(silencer.created) != 0 {
+		t.Error("a silence was written despite the scope having moved")
+	}
+	var payload struct {
+		Matchers map[string]string `json:"matchers"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Matchers["alertname"] != "HighCPU" {
+		t.Errorf("conflict returned %v, want the match the operator now has to review", payload.Matchers)
+	}
+}
+
+func TestSilenceGroupAcceptsAMatchThatHasNotMoved(t *testing.T) {
+	store := &fakeStore{silenceScope: twoTargetsDisagreeing()}
+	handler := New(silenceConfig(), store, operator(), newFakeSilencer())
+
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"},` +
+		`"expectedMatchers":{"alertname":"HighCPU"}}`
+	if response := postSilence(handler, "/api/v1/groups/silence", body); response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusCreated, response.Body)
 	}
 }

@@ -36,6 +36,7 @@ type Store interface {
 	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
 	SilenceScopeForAlert(context.Context, auth.Principal, int64) (alerts.SilenceScope, error)
 	SilenceScopeForGroup(context.Context, auth.Principal, []string, map[string]string) (alerts.SilenceScope, error)
+	RecordSilence(context.Context, alerts.SilenceRecord) error
 	StreamEvents(context.Context, auth.Principal, int64, int) (alerts.StreamBatch, error)
 	ReadPreferences(context.Context, auth.Principal) (preferences.Preferences, error)
 	WritePreferences(context.Context, auth.Principal, preferences.Preferences) error
@@ -69,6 +70,7 @@ func New(
 	mux.Handle("POST /api/v1/alerts/{id}/acknowledge", api.requireAuthentication(http.HandlerFunc(api.acknowledgeAlert)))
 	mux.Handle("POST /api/v1/alerts/{id}/silence", api.requireAuthentication(http.HandlerFunc(api.silenceAlert)))
 	mux.Handle("POST /api/v1/groups/silence", api.requireAuthentication(http.HandlerFunc(api.silenceGroup)))
+	mux.Handle("POST /api/v1/groups/silence/preview", api.requireAuthentication(http.HandlerFunc(api.previewGroupSilence)))
 	mux.Handle("GET /api/v1/stream", api.requireAuthentication(http.HandlerFunc(api.streamAlerts)))
 	mux.Handle("GET /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.getPreferences)))
 	mux.Handle("PUT /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.putPreferences)))
@@ -136,9 +138,20 @@ func (api *API) getAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"alert":   newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
-		"history": detail.History,
+		"alert":    newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
+		"history":  detail.History,
+		"silences": silenceRecordsResponse(detail.Silences),
 	})
+}
+
+// silenceRecordsResponse never emits null: the console distinguishes "no
+// promview-created silence explains this" from "the field is missing", and a
+// null would make those read the same.
+func silenceRecordsResponse(records []alerts.SilenceRecord) []alerts.SilenceRecord {
+	if records == nil {
+		return []alerts.SilenceRecord{}
+	}
+	return records
 }
 
 func (api *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
@@ -179,8 +192,9 @@ func (api *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"alert":   newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
-		"history": detail.History,
+		"alert":    newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
+		"history":  detail.History,
+		"silences": silenceRecordsResponse(detail.Silences),
 	})
 }
 
@@ -273,6 +287,7 @@ func (api *API) listAlertGroups(w http.ResponseWriter, r *http.Request, principa
 			Key:              group.Key,
 			Total:            group.Total,
 			Acknowledged:     group.Acknowledged,
+			Silenced:         group.Silenced,
 			SeverityCounts:   group.SeverityCounts,
 			WorstSeverity:    group.WorstSeverity,
 			LatestLastSeen:   group.LatestLastSeen,
@@ -511,6 +526,10 @@ type alertResponse struct {
 	// scanning the list needs to see that an alert is inside a maintenance
 	// window without opening it.
 	Suppressed bool `json:"suppressed"`
+	// SilencedBy names the silences currently matching. Suppressed with an
+	// empty list means inhibited instead, and the console says which: an
+	// inhibition lifts itself, a silence was somebody's decision.
+	SilencedBy []string `json:"silencedBy"`
 }
 
 type alertDetailResponse struct {
@@ -539,6 +558,7 @@ type alertGroupResponse struct {
 	Key              map[string]string `json:"key"`
 	Total            int64             `json:"total"`
 	Acknowledged     int64             `json:"acknowledged"`
+	Silenced         int64             `json:"silenced"`
 	SeverityCounts   map[string]int64  `json:"severityCounts"`
 	WorstSeverity    string            `json:"worstSeverity"`
 	LatestLastSeen   time.Time         `json:"latestLastSeen"`
@@ -550,6 +570,10 @@ func newAlertResponse(alert alerts.Alert) alertResponse {
 	severity := alert.Labels["severity"]
 	if severity == "" {
 		severity = "warning"
+	}
+	silencedBy := alert.SilencedBy
+	if silencedBy == nil {
+		silencedBy = []string{}
 	}
 	return alertResponse{
 		ID:           strconv.FormatInt(alert.ID, 10),
@@ -567,6 +591,7 @@ func newAlertResponse(alert alerts.Alert) alertResponse {
 		LastSeen:     alert.LastSeen,
 		RepeatCount:  alert.RepeatCount,
 		Suppressed:   alert.Suppressed,
+		SilencedBy:   silencedBy,
 	}
 }
 
@@ -600,14 +625,28 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		return alerts.Query{}, errors.New("status must be firing, resolved, or expired")
 	}
 
+	// Absent leaves suppressed alerts in the result. Hiding them by default
+	// would make an alert vanish because somebody else silenced it, which is
+	// the failure mode silencing is supposed to be an alternative to.
+	var suppressed *bool
+	switch raw := values.Get("suppressed"); raw {
+	case "":
+	case "true", "false":
+		value := raw == "true"
+		suppressed = &value
+	default:
+		return alerts.Query{}, errors.New("suppressed must be true or false")
+	}
+
 	query := alerts.Query{
-		Limit:    limit,
-		Source:   strings.TrimSpace(values.Get("source")),
-		Status:   status,
-		Severity: strings.TrimSpace(values.Get("severity")),
-		Team:     strings.TrimSpace(values.Get("team")),
-		Sort:     values.Get("sort"),
-		Order:    values.Get("order"),
+		Limit:      limit,
+		Source:     strings.TrimSpace(values.Get("source")),
+		Status:     status,
+		Severity:   strings.TrimSpace(values.Get("severity")),
+		Team:       strings.TrimSpace(values.Get("team")),
+		Suppressed: suppressed,
+		Sort:       values.Get("sort"),
+		Order:      values.Get("order"),
 	}
 	if query.Sort != "" && !isAlertSort(query.Sort) {
 		return alerts.Query{}, errors.New("sort is invalid")

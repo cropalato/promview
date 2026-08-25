@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -46,15 +47,16 @@ func (store *Store) ReconcileSource(
 	missing map[string]bool,
 	now time.Time,
 ) (ReconcileResult, error) {
-	suppressedByFingerprint := make(map[string]bool, len(live))
+	liveByFingerprint := make(map[string]alertmanager.LiveAlert, len(live))
 	for _, alert := range live {
-		suppressedByFingerprint[alert.Fingerprint] = alert.Suppressed
+		alert.SilencedBy = sortedCopy(alert.SilencedBy)
+		liveByFingerprint[alert.Fingerprint] = alert
 	}
 
 	var result ReconcileResult
 	err := pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT id, fingerprint, labels, annotations, occurrence, suppressed
+			SELECT id, fingerprint, labels, annotations, occurrence, suppressed, silenced_by
 			FROM alerts
 			WHERE source_slug = $1 AND source_status = $2
 			FOR UPDATE SKIP LOCKED
@@ -69,12 +71,13 @@ func (store *Store) ReconcileSource(
 			annotations map[string]string
 			occurrence  int
 			suppressed  bool
+			silencedBy  []string
 		}
 		var stored []storedAlert
 		for rows.Next() {
 			var item storedAlert
 			var labelsJSON, annotationsJSON []byte
-			if err := rows.Scan(&item.id, &item.fingerprint, &labelsJSON, &annotationsJSON, &item.occurrence, &item.suppressed); err != nil {
+			if err := rows.Scan(&item.id, &item.fingerprint, &labelsJSON, &annotationsJSON, &item.occurrence, &item.suppressed, &item.silencedBy); err != nil {
 				rows.Close()
 				return fmt.Errorf("scan alert for reconciliation: %w", err)
 			}
@@ -110,7 +113,8 @@ func (store *Store) ReconcileSource(
 					UPDATE alerts SET
 						source_status = $1,
 						ends_at = COALESCE(ends_at, $2),
-						suppressed = false
+						suppressed = false,
+						silenced_by = '{}'
 					WHERE id = $3
 				`, alerts.StatusResolved, occurredAt, item.id); err != nil {
 					return fmt.Errorf("resolve alert %d: %w", item.id, err)
@@ -127,18 +131,32 @@ func (store *Store) ReconcileSource(
 				continue
 			}
 
-			suppressed, present := suppressedByFingerprint[item.fingerprint]
-			if !present || suppressed == item.suppressed {
+			current, present := liveByFingerprint[item.fingerprint]
+			if !present {
+				continue
+			}
+			stateChanged := current.Suppressed != item.suppressed
+			if !stateChanged && sameStrings(current.SilencedBy, item.silencedBy) {
+				continue
+			}
+			if _, err := tx.Exec(ctx,
+				"UPDATE alerts SET suppressed = $1, silenced_by = $2 WHERE id = $3",
+				current.Suppressed, current.SilencedBy, item.id,
+			); err != nil {
+				return fmt.Errorf("update suppression for alert %d: %w", item.id, err)
+			}
+			if !stateChanged {
+				// The alert was already suppressed and stays suppressed; only
+				// which silence covers it moved. That is bookkeeping, not news,
+				// and pushing it down the stream would wake every open console
+				// every time an operator re-silences a maintenance window.
 				continue
 			}
 			incoming.Status = alerts.StatusFiring
-			if _, err := tx.Exec(ctx, "UPDATE alerts SET suppressed = $1 WHERE id = $2", suppressed, item.id); err != nil {
-				return fmt.Errorf("update suppression for alert %d: %w", item.id, err)
-			}
 			if err := insertStreamEvent(ctx, tx, "alert.updated", item.id, incoming, nil); err != nil {
 				return err
 			}
-			if suppressed {
+			if current.Suppressed {
 				result.Suppressed++
 			} else {
 				result.Released++
@@ -198,4 +216,20 @@ func (store *Store) FiringFingerprints(ctx context.Context, sourceSlug string) (
 		return nil, fmt.Errorf("iterate firing fingerprints: %w", err)
 	}
 	return fingerprints, nil
+}
+
+// sortedCopy returns the ids in a stable order so a stored set and a freshly
+// read one compare by value rather than by whatever order the Alertmanager
+// happened to serialise them in.
+func sortedCopy(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	sorted := slices.Clone(values)
+	slices.Sort(sorted)
+	return sorted
+}
+
+func sameStrings(left, right []string) bool {
+	return slices.Equal(left, right)
 }

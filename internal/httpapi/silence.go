@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -44,10 +45,21 @@ type silenceRequest struct {
 }
 
 type groupSilenceRequest struct {
-	GroupBy         []string          `json:"groupBy"`
-	Key             map[string]string `json:"key"`
-	DurationSeconds int64             `json:"durationSeconds"`
-	Comment         string            `json:"comment"`
+	GroupBy []string          `json:"groupBy"`
+	Key     map[string]string `json:"key"`
+	// ExpectedMatchers is the match the console showed before confirming. The
+	// resolved match is narrower than the grouping key and depends on which
+	// members are firing right now, so a member joining between the preview and
+	// the confirm would silence more than the operator read. Sending back what
+	// was read turns that race into a 409 instead of a surprise.
+	ExpectedMatchers map[string]string `json:"expectedMatchers"`
+	DurationSeconds  int64             `json:"durationSeconds"`
+	Comment          string            `json:"comment"`
+}
+
+type groupSilencePreviewRequest struct {
+	GroupBy []string          `json:"groupBy"`
+	Key     map[string]string `json:"key"`
 }
 
 func (api *API) silenceAlert(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +100,71 @@ func (api *API) silenceGroup(w http.ResponseWriter, r *http.Request) {
 	if !api.writeScopeError(w, err) {
 		return
 	}
+	if body.ExpectedMatchers != nil && !sameLabels(body.ExpectedMatchers, scope.Labels) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":    "the group changed since it was previewed; review the new match and confirm again",
+			"matchers": scope.Labels,
+			"targets":  silenceTargetsResponse(scope.Targets),
+		})
+		return
+	}
 	api.createSilences(w, r, principal, scope, body.DurationSeconds, body.Comment)
+}
+
+// previewGroupSilence answers what a group silence would actually match. The
+// console cannot work this out for itself: the match is the labels the firing
+// members agree on, which only the store knows, and confirming a dialog that
+// showed the grouping key instead would understate what is about to be hidden.
+func (api *API) previewGroupSilence(w http.ResponseWriter, r *http.Request) {
+	principal, ok := api.silenceRequestPrincipal(w, r)
+	if !ok {
+		return
+	}
+	var body groupSilencePreviewRequest
+	if !decodeSilenceBody(w, r, &body) {
+		return
+	}
+	if len(body.GroupBy) == 0 || len(body.Key) == 0 {
+		writeError(w, http.StatusBadRequest, "groupBy and key are required")
+		return
+	}
+	scope, err := api.store.SilenceScopeForGroup(r.Context(), principal, body.GroupBy, body.Key)
+	if !api.writeScopeError(w, err) {
+		return
+	}
+	members := 0
+	for _, target := range scope.Targets {
+		members += target.Members
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"matchers":    scope.Labels,
+		"memberCount": members,
+		"targets":     silenceTargetsResponse(scope.Targets),
+	})
+}
+
+func silenceTargetsResponse(targets []alerts.SilenceTarget) []map[string]any {
+	response := make([]map[string]any, 0, len(targets))
+	for _, target := range targets {
+		response = append(response, map[string]any{
+			"source":   target.Source,
+			"matchers": target.Labels,
+			"members":  target.Members,
+		})
+	}
+	return response
+}
+
+func sameLabels(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for name, value := range left {
+		if other, ok := right[name]; !ok || other != value {
+			return false
+		}
+	}
+	return true
 }
 
 // silenceRequestPrincipal runs the checks every silence shares: who is asking,
@@ -165,27 +241,57 @@ func (api *API) createSilences(
 		return
 	}
 	startsAt := time.Now().UTC()
-	silence := alertmanager.Silence{
-		Matchers:  alertmanager.MatchersFromLabels(scope.Labels),
-		StartsAt:  startsAt,
-		EndsAt:    startsAt.Add(window),
-		CreatedBy: silenceAuthor(principal),
-		Comment:   comment,
-	}
+	endsAt := startsAt.Add(window)
+	author := silenceAuthor(principal)
 
 	results := make([]alerts.SilenceResult, 0, len(scope.Targets))
 	created := 0
 	for _, target := range scope.Targets {
+		// One silence body per target: each Alertmanager gets the narrowest
+		// match covering its own members, which is usually narrower than what
+		// the targets have in common. See alerts.SilenceTarget.
+		silence := alertmanager.Silence{
+			Matchers:  alertmanager.MatchersFromLabels(target.Labels),
+			StartsAt:  startsAt,
+			EndsAt:    endsAt,
+			CreatedBy: author,
+			Comment:   comment,
+		}
 		id, err := api.silencer.CreateSilence(r.Context(), target.AlertmanagerURL, target.AlertmanagerToken, silence)
 		if err != nil {
 			// One Alertmanager refusing must not hide that the others accepted;
 			// an operator who thinks a group is handled when half of it is still
 			// firing is worse off than one told exactly which half failed.
-			results = append(results, alerts.SilenceResult{Source: target.Source, Error: err.Error()})
+			results = append(results, alerts.SilenceResult{
+				Source:   target.Source,
+				Matchers: target.Labels,
+				Members:  target.Members,
+				Error:    err.Error(),
+			})
 			continue
 		}
 		created++
-		results = append(results, alerts.SilenceResult{Source: target.Source, SilenceID: id})
+		results = append(results, alerts.SilenceResult{
+			Source:    target.Source,
+			SilenceID: id,
+			Matchers:  target.Labels,
+			Members:   target.Members,
+		})
+		// Alertmanager expires the silence and forgets why it existed. Recording
+		// it here is what still answers "who silenced this" afterwards, and a
+		// failure to record must not turn a silence that worked into an error.
+		if err := api.store.RecordSilence(r.Context(), alerts.SilenceRecord{
+			Source:    target.Source,
+			SilenceID: id,
+			Matchers:  target.Labels,
+			CreatedBy: author,
+			Comment:   comment,
+			StartsAt:  startsAt,
+			EndsAt:    endsAt,
+		}); err != nil {
+			slog.Error("could not record a created silence",
+				"source", target.Source, "silence", id, "error", err)
+		}
 	}
 
 	status := http.StatusCreated
@@ -196,9 +302,9 @@ func (api *API) createSilences(
 		status = http.StatusMultiStatus
 	}
 	writeJSON(w, status, map[string]any{
-		"endsAt":    silence.EndsAt.Format(time.RFC3339),
-		"createdBy": silence.CreatedBy,
-		"matchers":  silence.Matchers,
+		"endsAt":    endsAt.Format(time.RFC3339),
+		"createdBy": author,
+		"matchers":  alertmanager.MatchersFromLabels(scope.Labels),
 		"results":   results,
 	})
 }
