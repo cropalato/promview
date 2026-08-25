@@ -740,4 +740,49 @@ describe('AlertGroupTable sortable headers', () => {
     expect(onOpenAlert).toHaveBeenCalledWith('42');
     expect(onExpand).not.toHaveBeenCalled();
   });
+  it('explains the silence control, which carries no words of its own', () => {
+    render(
+      <AlertGroupTable
+        groups={[group()]}
+        children={{}}
+        onExpand={noop}
+        onCollapse={noop}
+        onLoadMoreChildren={noop}
+        onSilenceGroup={vi.fn()}
+      />,
+    );
+
+    const control = screen.getByRole('button', {
+      name: 'Silence alertname=Cardinality, source=yul',
+    });
+    // A glyph nobody has met teaches nobody on its own. The hover text has to
+    // say what silencing does rather than name the verb again, and the button
+    // must keep an accessible name now that the word is gone from it.
+    expect(control).toHaveAttribute(
+      'title',
+      'Silence alertname=Cardinality, source=yul — stop its alerts notifying for a set time',
+    );
+    expect(control).toHaveTextContent('');
+  });
+
+  it('silences a group without expanding the row it sits in', () => {
+    const onSilenceGroup = vi.fn();
+    const onExpand = vi.fn();
+    render(
+      <AlertGroupTable
+        groups={[group()]}
+        children={{}}
+        onExpand={onExpand}
+        onCollapse={noop}
+        onLoadMoreChildren={noop}
+        onSilenceGroup={onSilenceGroup}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Silence / }));
+    expect(onSilenceGroup).toHaveBeenCalledTimes(1);
+    // Silencing a group and opening it are different intentions, and the click
+    // lands on both without the handler stopping it.
+    expect(onExpand).not.toHaveBeenCalled();
+  });
 });

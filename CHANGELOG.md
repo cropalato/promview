@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Changed
+
+- **console:** the group row's silence control is a round moon button rather than a text button. A crescent instead of the slashed bell the domain usually reaches for: that bell already belongs to the browser-notification toggle, and one glyph standing for both a local preference and a shared Alertmanager silence is worse than an unfamiliar one standing for a single thing. A moon also reads as quiet for a while, which is what a silence is — matched, time-bounded, expiring — where a mute reads as off for good. The hover text now names the group and says what silencing does, since the word is no longer written on the control, and it matches the name a screen reader announces.
+
 ## [0.1.0-alpha.27] - 2026-08-25
 
 ### Fixed

@@ -1310,8 +1310,43 @@ kbd {
 }
 
 .group-heading .sev-tag,
-.group-heading .group-count {
+.group-heading .group-count,
+.group-heading .group-silence {
   flex: none;
+}
+
+/* A round icon button, sized against the count pill beside it: the control is
+   an aside to the group's name, not a peer of it, and the old text button read
+   as the row's main action. The glyph alone carries no meaning to someone
+   meeting it for the first time, so the title and the accessible name both
+   spell it out. */
+.group-silence {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--panel-raise);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.group-silence svg {
+  width: 13px;
+  height: 13px;
+}
+
+.group-silence:hover {
+  background: var(--panel);
+  border-color: var(--text-faint);
+  color: var(--text);
 }
 
 .group-count {

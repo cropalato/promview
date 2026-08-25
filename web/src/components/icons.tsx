@@ -149,6 +149,22 @@ export function BellOffIcon({ className }: IconProps): JSX.Element {
   );
 }
 
+/**
+ * Crescent for silencing a group. A moon rather than the slashed bell the
+ * domain usually reaches for: that bell is spoken for by the browser-
+ * notification toggle, and one glyph meaning both a local preference and a
+ * shared Alertmanager silence is worse than an unfamiliar one meaning a
+ * single thing. Quiet for a while is also what a silence is — matched,
+ * time-bounded, expiring — where a mute reads as off for good.
+ */
+export function MoonIcon({ className }: IconProps): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" {...a11y(className)}>
+      <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Dismiss glyph for the detail drawer/sheet. */
 export function CloseIcon({ className }: IconProps): JSX.Element {
   return (

@@ -8,7 +8,7 @@ import type { AlertSummary } from '../alerts/types';
 import type { GroupChildren } from '../hooks/useGroupChildren';
 import { groupId } from '../hooks/useGroupChildren';
 import { EmptyState } from './EmptyState';
-import { ChevronIcon, SeverityIcon } from './icons';
+import { ChevronIcon, MoonIcon, SeverityIcon } from './icons';
 import { ColumnHeader } from './AlertTable';
 import type { AlertPagination } from './AlertTable';
 
@@ -262,15 +262,20 @@ function GroupRows({
               // it are different intentions, and the click lands on both.
               <button
                 type="button"
-                className="button group-silence"
+                className="group-silence"
                 aria-label={`Silence ${describeGroupKey(group.key)}`}
-                title="Silence this group"
+                // The word is gone from the control, so the tooltip carries it
+                // instead, and says what silencing does rather than repeating
+                // the verb: an icon nobody has met before has to explain
+                // itself. It matches the accessible name a screen reader
+                // already announces.
+                title={`Silence ${describeGroupKey(group.key)} — stop its alerts notifying for a set time`}
                 onClick={(event) => {
                   event.stopPropagation();
                   onSilenceGroup(group);
                 }}
               >
-                Silence
+                <MoonIcon />
               </button>
             ) : null}
           </span>
