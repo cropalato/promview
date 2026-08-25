@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.30] - 2026-08-25
+
 ### Fixed
 
 - **server:** promview refuses to start when the database has migrations it has not applied, naming them. A binary newer than its schema does not degrade gracefully: the alert queries name columns that do not exist yet, so every read answers 500 and the console is simply down. Upgrading the image without running `promview migrate` produced exactly that, and nothing said so. Crash-looping with `unapplied: 000015_silence_provenance.up.sql` is strictly better than serving errors that name nothing.
