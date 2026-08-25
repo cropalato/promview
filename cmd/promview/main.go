@@ -62,6 +62,21 @@ func run() error {
 		}
 	}
 
+	// A binary newer than its schema does not half-work: the alert queries name
+	// columns the database does not have, so every read answers 500 and the
+	// console is down. Serving that is worse than not starting, because a
+	// process that refuses to boot names its own cause and a 500 does not.
+	pending, err := postgres.PendingMigrations(ctx, pool, cfg.MigrationsDir)
+	if err != nil {
+		return fmt.Errorf("check applied migrations: %w", err)
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf(
+			"database schema is behind this binary; run `promview migrate` first (unapplied: %s)",
+			strings.Join(pending, ", "),
+		)
+	}
+
 	store := postgres.New(pool)
 	if cfg.BootstrapSourceSlug != "" {
 		if err := store.BootstrapSource(ctx, sources.Source{
