@@ -6,6 +6,12 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **server:** promview refuses to start when the database has migrations it has not applied, naming them. A binary newer than its schema does not degrade gracefully: the alert queries name columns that do not exist yet, so every read answers 500 and the console is simply down. Upgrading the image without running `promview migrate` produced exactly that, and nothing said so. Crash-looping with `unapplied: 000015_silence_provenance.up.sql` is strictly better than serving errors that name nothing.
+- **api:** a 500 records its cause. Handlers took the error the store returned, answered with a generic message and threw the error away, so an operator had no way to tell a schema mismatch from a dead connection pool — the response is deliberately uninformative, and the log was too. The client still learns nothing it should not; the log now carries the method, the path and the error.
+- **silence:** a console newer than its server can silence again. The group silence body gained `expectedMatchers`, and the endpoint's decoder rejects unknown fields, so a desktop client that had updated ahead of its server failed every silence with "request body is invalid". The server now advertises `silencePreviewSupported` and the console only asks for a scope preview, or sends the field, where that is present; otherwise it silences on the grouping key as it always did and says plainly that it could not confirm the exact match. It also no longer echoes back the grouping key when a preview failed, which the server could only ever disagree with — a guaranteed 409 on a matched pair.
+
 ## [0.1.0-alpha.29] - 2026-08-25
 
 ### Fixed
