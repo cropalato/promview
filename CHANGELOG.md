@@ -6,6 +6,17 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **silence:** silencing a group now matches on every label its firing members agree on, not just the two or three keys they were grouped by. A group keyed on `alertname` alone used to write `alertname="HighCPU"` and hide that rule everywhere, for every cluster and team, including alerts nobody had seen yet. The match is resolved per Alertmanager rather than once per request: a group spanning two of them usually differs between them on exactly the label worth matching on, and a single shared match would drop it and silence both places. The confirmation dialog now asks the server what the silence would actually match before offering to write it, and echoes that match back on confirm so a member joining in between is refused rather than silently widening the scope.
+
+### Added
+
+- **silence:** promview re-reads a source right after writing a silence to it, instead of leaving the console to wait for the next reconcile pass. An operator who silenced an alert and saw it still listed as plainly firing for up to a minute had no way to tell a slow console from a silence that never landed. The re-read syncs suppression and nothing else: it carries no missing set, so it can never conclude an alert has ended, and it never touches the counters the ordinary pass uses to decide that. It is skipped entirely where reconciliation is disabled, since promview does not read suppression from anywhere in that configuration.
+- **console:** silenced alerts are visible as silenced. Rows are dimmed and chipped rather than hidden, group rows say how many of their members are held back, and a segmented control switches between all alerts, unsilenced only, and silenced only — stored with the rest of the layout preferences. It defaults to showing them: an alert vanishing because somebody else silenced it is the failure silencing is meant to replace, not cause.
+- **console:** the detail drawer says why an alert is not notifying. A silence Promview created names its author, expiry and comment; a silence made straight on the Alertmanager is reported as exactly that rather than given an invented author; and an inhibition is called an inhibition, because nobody chose it and it lifts itself when its parent alert clears.
+- **api:** `POST /api/v1/groups/silence/preview` answers what a group silence would match, and `GET /api/v1/alerts` accepts `suppressed=true|false`. Alert payloads carry `silencedBy`, group payloads carry `silenced`, and the alert detail envelope carries a `silences` list.
+
 ## [0.1.0-alpha.28] - 2026-08-25
 
 ### Changed
