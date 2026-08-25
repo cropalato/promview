@@ -462,3 +462,39 @@ func TestSilenceGroupAcceptsAMatchThatHasNotMoved(t *testing.T) {
 		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusCreated, response.Body)
 	}
 }
+
+func TestSilenceGroupAcceptsABodyWithNoExpectedMatchers(t *testing.T) {
+	store := &fakeStore{silenceScope: twoTargetsDisagreeing()}
+	silencer := newFakeSilencer()
+	handler := New(silenceConfig(), store, operator(), silencer)
+
+	// A console that could not resolve the match sends no guard rather than
+	// echoing back the grouping key. Asking the server to compare its own
+	// folded match against something it never produced could only ever
+	// disagree, which would make silencing permanently impossible.
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"}}`
+	if response := postSilence(handler, "/api/v1/groups/silence", body); response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusCreated, response.Body)
+	}
+	if len(silencer.created) != 2 {
+		t.Errorf("silences created = %d, want one per alertmanager", len(silencer.created))
+	}
+}
+
+func TestConfigAdvertisesThatTheServerCanResolveASilenceScope(t *testing.T) {
+	handler := New(silenceConfig(), &fakeStore{}, operator(), newFakeSilencer())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	// A console cannot probe for the endpoint: an older server rejects the
+	// whole request rather than ignoring the field it does not know. The
+	// capability has to be advertised or it cannot be used safely.
+	if payload["silencePreviewSupported"] != true {
+		t.Errorf("silencePreviewSupported = %v, want true", payload["silencePreviewSupported"])
+	}
+}
