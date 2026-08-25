@@ -78,10 +78,10 @@ impl ApiProxy {
         resolve(&self.base, path)
     }
 
-    /// A clone of the client for a long-lived read. It shares the cookie jar,
-    /// which is the point: the stream is authenticated the same way everything
-    /// else is.
-    pub fn stream_client(&self) -> reqwest::Client {
+    /// A clone of the client for readers outside the page's request path — the
+    /// stream and the tray. It shares the cookie jar, which is the point: they
+    /// are authenticated the same way everything else is.
+    pub fn http_client(&self) -> reqwest::Client {
         self.http.clone()
     }
 

@@ -71,6 +71,10 @@ pub fn run() {
         }
     };
 
+    // Cloned before the builder takes ownership: the tray reads the token on
+    // every poll, so it needs the same handle sign-in writes to.
+    let tray_credentials = Arc::clone(&credentials);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(proxy)
@@ -146,8 +150,12 @@ pub fn run() {
             // been opened yet. A failed read leaves the last known counts on
             // screen and says so in the tooltip rather than blanking to zero,
             // which would read as "nothing is firing".
-            let client = Client::new(config.server_url.clone(), Duration::from_secs(10))
-                .map_err(std::io::Error::other)?;
+            let client = Client::new(
+                app.state::<ApiProxy>().http_client(),
+                config.server_url.clone(),
+                Duration::from_secs(10),
+                Arc::clone(&tray_credentials),
+            );
             let fallback = Duration::from_secs(config.poll_interval_secs);
             let activity: Arc<StreamActivity> = Arc::clone(&app.state::<Arc<StreamActivity>>());
             tauri::async_runtime::spawn(async move {

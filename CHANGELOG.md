@@ -9,6 +9,7 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 ### Fixed
 
 - **desktop:** trust the operating system's certificate store. reqwest was built against `rustls-tls`, which compiles in the Mozilla root set and never consults the platform's own, so a server behind a private or corporate CA — the ordinary case for an internal console — failed the TLS handshake. It surfaced as `error sending request for url (...)`, which reads like the server is unreachable rather than untrusted, and no environment variable could correct it because the roots were baked into the binary. `rustls-tls-native-roots` keeps rustls and loads the machine's own roots, so a certificate the rest of the system already accepts is accepted here too; `SSL_CERT_FILE` and `SSL_CERT_DIR` now work for pointing at a bundle kept outside the system store.
+- **desktop:** authenticate the tray's alert count read. The tray built a client of its own with neither the session token nor the cookie jar, so against a server that requires a session every poll came back 401 while the console — which goes through the proxy — listed the alerts perfectly well. The tooltip then reported that the server could not be reached, sending anyone who read it after the network instead of the sign-in they were missing. The tray now shares the proxy's client, and reads the token on each poll rather than capturing one at startup: it outlives signing in, so a token taken before there was one would never arrive.
 
 ## [0.1.0-alpha.26] - 2026-08-23
 
