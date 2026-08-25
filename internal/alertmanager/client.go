@@ -26,6 +26,12 @@ rather than worked around.
 type LiveAlert struct {
 	Fingerprint string
 	Suppressed  bool
+	// SilencedBy holds the ids of the silences currently matching, empty when
+	// none do. A suppressed alert with no silence ids is inhibited instead, and
+	// the two are worth telling apart: an inhibition lifts itself when its
+	// parent alert clears, while a silence has an author and an expiry somebody
+	// chose and may want to revisit.
+	SilencedBy []string
 }
 
 // Client reads the alerts an Alertmanager currently holds.
@@ -63,7 +69,8 @@ func (client *Client) LiveAlerts(ctx context.Context, baseURL string) ([]LiveAle
 	var payload []struct {
 		Fingerprint string `json:"fingerprint"`
 		Status      struct {
-			State string `json:"state"`
+			State      string   `json:"state"`
+			SilencedBy []string `json:"silencedBy"`
 		} `json:"status"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
@@ -77,9 +84,14 @@ func (client *Client) LiveAlerts(ctx context.Context, baseURL string) ([]LiveAle
 			// and guessing would risk resolving the wrong alert.
 			return nil, errors.New("alertmanager returned an alert without a fingerprint")
 		}
+		silencedBy := item.Status.SilencedBy
+		if silencedBy == nil {
+			silencedBy = []string{}
+		}
 		live = append(live, LiveAlert{
 			Fingerprint: item.Fingerprint,
 			Suppressed:  item.Status.State == "suppressed",
+			SilencedBy:  silencedBy,
 		})
 	}
 	return live, nil
