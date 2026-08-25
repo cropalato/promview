@@ -147,6 +147,7 @@ describe('fetchAlerts', () => {
             severity: 'critical',
           },
           suppressed: false,
+          silencedBy: [],
           lastSeen: '2026-08-14T11:00:00Z',
         },
       ],
@@ -278,5 +279,20 @@ describe('parseAlertsResponse', () => {
     expect(() =>
       parseAlertsResponse(apiResponse({ alerts: [apiAlert({ labels: { team: 7 } })] })),
     ).toThrowError(/labels\.team must be a string/i);
+  });
+});
+
+describe('silenced alerts in the query', () => {
+  it('leaves them in the list unless asked otherwise', () => {
+    // Hiding by default would make an alert disappear because somebody else
+    // silenced it, which is the failure silencing exists to replace.
+    expect(buildAlertsUrl({})).not.toContain('suppressed');
+  });
+
+  it('asks the server rather than filtering the loaded rows', () => {
+    // The counts, the severity strip and the group aggregates all have to
+    // agree with what is on screen, and only the server can make them agree.
+    expect(buildAlertsUrl({ suppressed: false })).toContain('suppressed=false');
+    expect(buildAlertsUrl({ suppressed: true })).toContain('suppressed=true');
   });
 });

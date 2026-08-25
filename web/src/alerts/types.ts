@@ -37,6 +37,13 @@ export interface AlertSummary {
   labels: Record<string, string>;
   /** A silence or inhibition is holding this alert back at the source. */
   suppressed: boolean;
+  /**
+   * Ids of the silences currently matching. Suppressed with none of these
+   * means an inhibition is holding it back instead, which the console shows
+   * differently: an inhibition lifts itself when its parent clears, a silence
+   * was somebody's decision and has an expiry.
+   */
+  silencedBy: string[];
   /** When the source last reported the alert, which is what expiry measures. */
   lastSeen: string;
 }

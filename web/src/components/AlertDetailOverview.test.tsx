@@ -22,6 +22,8 @@ function detail(overrides: Partial<AlertDetail> = {}): AlertDetail {
     lastSeen: '2026-08-14T11:00:00Z',
     repeatCount: 3,
     occurrence: 2,
+    suppressed: false,
+    silencedBy: [],
     acknowledged: false,
     acknowledgedBy: '',
     acknowledgedAt: null,
@@ -233,5 +235,51 @@ describe('AlertDetailOverview', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove acknowledgement' }));
 
     await waitFor(() => expect(onAcknowledge).toHaveBeenCalledWith(false));
+  });
+});
+
+describe('why an alert is not notifying', () => {
+  it('names the author and expiry of a silence Promview created', () => {
+    render(
+      <AlertDetailOverview
+        detail={detail({ suppressed: true, silencedBy: ['sil-1'] })}
+        silences={[
+          {
+            source: 'am-eu',
+            silenceId: 'sil-1',
+            matchers: { alertname: 'HighErrorRate' },
+            createdBy: 'ada@example.com',
+            comment: 'disk swap',
+            startsAt: '2026-08-14T10:00:00Z',
+            endsAt: '2026-08-14T14:00:00Z',
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('silenced')).toBeInTheDocument();
+    expect(screen.getByText(/ada@example.com/)).toBeInTheDocument();
+    expect(screen.getByText(/disk swap/)).toBeInTheDocument();
+  });
+
+  it('admits it knows nothing about a silence made outside Promview', () => {
+    // The silence is real and still suppressing; inventing an author for it
+    // would be worse than saying where it came from.
+    render(<AlertDetailOverview detail={detail({ suppressed: true, silencedBy: ['foreign'] })} />);
+    expect(screen.getByText('silenced')).toBeInTheDocument();
+    expect(screen.getByText(/created outside Promview/)).toBeInTheDocument();
+  });
+
+  it('calls an inhibition an inhibition rather than a silence', () => {
+    // Nobody chose it and it lifts itself when its parent clears; presenting it
+    // as a silence would send an operator hunting for a decision nobody made.
+    render(<AlertDetailOverview detail={detail({ suppressed: true, silencedBy: [] })} />);
+    expect(screen.getByText('inhibited')).toBeInTheDocument();
+    expect(screen.queryByText('silenced')).not.toBeInTheDocument();
+  });
+
+  it('says plainly when nothing is holding the alert back', () => {
+    render(<AlertDetailOverview detail={detail()} />);
+    expect(screen.getByText('Suppressed')).toBeInTheDocument();
+    expect(screen.queryByText('silenced')).not.toBeInTheDocument();
   });
 });

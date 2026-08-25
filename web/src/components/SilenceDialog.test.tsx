@@ -8,7 +8,11 @@ function ok(results: SilenceResponse['results']): SilenceResponse {
 }
 
 function renderDialog(overrides: Partial<Parameters<typeof SilenceDialog>[0]> = {}) {
-  const onConfirm = vi.fn().mockResolvedValue(ok([{ source: 'demo', silenceId: 'abc' }]));
+  const onConfirm = vi
+    .fn()
+    .mockResolvedValue(
+      ok([{ source: 'demo', silenceId: 'abc', matchers: { alertname: 'HighCPU' }, members: 1 }]),
+    );
   const onClose = vi.fn();
   render(
     <SilenceDialog
@@ -40,7 +44,12 @@ describe('SilenceDialog', () => {
     expect(screen.getByLabelText('Duration')).toHaveValue('7200');
 
     fireEvent.click(screen.getByRole('button', { name: 'Silence' }));
-    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith(7200, ''));
+    await waitFor(() =>
+      expect(onConfirm).toHaveBeenCalledWith(7200, '', {
+        alertname: 'HighCPU',
+        instance: 'web-01',
+      }),
+    );
   });
 
   it('sends the chosen window and comment', async () => {
@@ -49,7 +58,12 @@ describe('SilenceDialog', () => {
     fireEvent.change(screen.getByLabelText('Comment'), { target: { value: '  db upgrade  ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Silence' }));
 
-    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith(1800, 'db upgrade'));
+    await waitFor(() =>
+      expect(onConfirm).toHaveBeenCalledWith(1800, 'db upgrade', {
+        alertname: 'HighCPU',
+        instance: 'web-01',
+      }),
+    );
   });
 
   it('offers no window past the deployment maximum', () => {
@@ -61,8 +75,8 @@ describe('SilenceDialog', () => {
   it('reports a partial application per Alertmanager rather than as done', async () => {
     const onConfirm = vi.fn().mockResolvedValue(
       ok([
-        { source: 'demo', silenceId: 'abc' },
-        { source: 'edge', error: 'HTTP 401' },
+        { source: 'demo', silenceId: 'abc', matchers: { alertname: 'HighCPU' }, members: 5 },
+        { source: 'edge', error: 'HTTP 401', matchers: { alertname: 'HighCPU' }, members: 4 },
       ]),
     );
     render(
@@ -117,5 +131,91 @@ describe('SilenceDialog', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveAttribute('aria-modal', 'true');
     expect(dialog).toHaveAccessibleName(/HighCPU/);
+  });
+});
+
+describe('resolving what a group silence actually matches', () => {
+  it('replaces the grouping key with the match the server resolved', async () => {
+    const resolve = vi.fn().mockResolvedValue({
+      matchers: { alertname: 'HighCPU', cluster: 'prod', team: 'platform' },
+      memberCount: 12,
+      targets: [
+        {
+          source: 'demo',
+          matchers: { alertname: 'HighCPU', cluster: 'prod', team: 'platform' },
+          members: 12,
+        },
+      ],
+    });
+    const onConfirm = vi.fn().mockResolvedValue(ok([]));
+    render(
+      <SilenceDialog
+        subject="HighCPU"
+        matchers={{ alertname: 'HighCPU' }}
+        memberCount={12}
+        resolve={resolve}
+        defaultSeconds={7200}
+        maxSeconds={30 * 24 * 60 * 60}
+        onConfirm={onConfirm}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Silencing on `alertname` alone would hide the same rule for every
+    // cluster and team, including alerts nobody has seen yet.
+    await waitFor(() => expect(screen.getByText('cluster')).toBeInTheDocument());
+    expect(screen.getByText('prod')).toBeInTheDocument();
+    expect(screen.getByText('platform')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Silence' }));
+    await waitFor(() =>
+      expect(onConfirm).toHaveBeenCalledWith(7200, '', {
+        alertname: 'HighCPU',
+        cluster: 'prod',
+        team: 'platform',
+      }),
+    );
+  });
+
+  it('spells out the Alertmanagers whose match is narrower still', async () => {
+    const resolve = vi.fn().mockResolvedValue({
+      matchers: { alertname: 'HighCPU' },
+      memberCount: 5,
+      targets: [
+        { source: 'demo', matchers: { alertname: 'HighCPU', cluster: 'a' }, members: 3 },
+        { source: 'edge', matchers: { alertname: 'HighCPU', cluster: 'b' }, members: 2 },
+      ],
+    });
+    render(
+      <SilenceDialog
+        subject="HighCPU"
+        matchers={{ alertname: 'HighCPU' }}
+        resolve={resolve}
+        defaultSeconds={7200}
+        maxSeconds={30 * 24 * 60 * 60}
+        onConfirm={vi.fn().mockResolvedValue(ok([]))}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Showing only the common match would name a broader scope than what
+    // actually gets written to each Alertmanager.
+    await waitFor(() => expect(screen.getByText(/cluster="a"/)).toBeInTheDocument());
+    expect(screen.getByText(/cluster="b"/)).toBeInTheDocument();
+  });
+
+  it('will not let a silence be confirmed while the match is still unknown', () => {
+    render(
+      <SilenceDialog
+        subject="HighCPU"
+        matchers={{ alertname: 'HighCPU' }}
+        resolve={() => new Promise(() => {})}
+        defaultSeconds={7200}
+        maxSeconds={30 * 24 * 60 * 60}
+        onConfirm={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Silence' })).toBeDisabled();
   });
 });

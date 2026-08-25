@@ -13,11 +13,15 @@ import { apiFetch } from '../config/transport';
 
 export const ALERT_SILENCE_URL = (id: string) => `/api/v1/alerts/${encodeURIComponent(id)}/silence`;
 export const GROUP_SILENCE_URL = '/api/v1/groups/silence';
+export const GROUP_SILENCE_PREVIEW_URL = '/api/v1/groups/silence/preview';
 
 /** What happened at one Alertmanager. A group can span several. */
 export interface SilenceResult {
   source: string;
   silenceId?: string;
+  /** The exact match written here, which can differ between Alertmanagers. */
+  matchers: Record<string, string>;
+  members: number;
   error?: string;
 }
 
@@ -27,6 +31,28 @@ export interface SilenceResponse {
   results: SilenceResult[];
 }
 
+/**
+ * What a group silence would actually match, resolved by the server.
+ *
+ * The console cannot work this out: the match is every label the group's
+ * firing members agree on, which is narrower than the grouping key and is only
+ * knowable from the members themselves. Showing the key instead would
+ * understate what is about to be hidden — a group keyed on `alertname` alone
+ * would read as "silence this alert here" while silencing it everywhere.
+ */
+export interface SilenceTargetPreview {
+  source: string;
+  matchers: Record<string, string>;
+  members: number;
+}
+
+export interface SilencePreview {
+  /** What every target agrees on; each target's own match is at least this narrow. */
+  matchers: Record<string, string>;
+  memberCount: number;
+  targets: SilenceTargetPreview[];
+}
+
 export interface SilenceRequest {
   durationSeconds: number;
   comment: string;
@@ -34,12 +60,24 @@ export interface SilenceRequest {
 
 export class SilenceError extends Error {
   readonly status: number;
+  /**
+   * The match the server resolved, when it refused because the group moved
+   * under the operator. Carrying it back lets the dialog show the new scope
+   * instead of asking them to start again blind.
+   */
+  readonly matchers?: Record<string, string>;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, matchers?: Record<string, string>) {
     super(message);
     this.name = 'SilenceError';
     this.status = status;
+    this.matchers = matchers;
   }
+}
+
+/** True when the group changed between the preview and the confirmation. */
+export function isSilenceConflict(error: unknown): boolean {
+  return error instanceof SilenceError && error.status === 409;
 }
 
 /** Duration choices offered in the dialog, in seconds. */
@@ -120,7 +158,7 @@ async function postSilence(
       typeof (payload as { error?: unknown }).error === 'string'
         ? (payload as { error: string }).error
         : `Silence failed (HTTP ${response.status})`;
-    throw new SilenceError(message, response.status);
+    throw new SilenceError(message, response.status, parseMatchers(payload));
   }
   return parseSilenceResponse(payload);
 }
@@ -140,6 +178,9 @@ export function parseSilenceResponse(payload: unknown): SilenceResponse {
           {
             source: typeof item.source === 'string' ? item.source : 'unknown',
             silenceId: typeof item.silenceId === 'string' ? item.silenceId : undefined,
+            matchers: labelRecord(item.matchers),
+            members:
+              typeof item.members === 'number' && Number.isFinite(item.members) ? item.members : 0,
             error: typeof item.error === 'string' ? item.error : undefined,
           },
         ];
@@ -164,7 +205,99 @@ export function silenceGroup(
   groupBy: readonly string[],
   key: Record<string, string>,
   request: SilenceRequest,
+  expectedMatchers?: Record<string, string>,
   fetchImpl: FetchLike = apiFetch,
 ): Promise<SilenceResponse> {
-  return postSilence(GROUP_SILENCE_URL, { groupBy: [...groupBy], key, ...request }, fetchImpl);
+  return postSilence(
+    GROUP_SILENCE_URL,
+    { groupBy: [...groupBy], key, expectedMatchers, ...request },
+    fetchImpl,
+  );
+}
+
+/** Asks the server what a group silence would match, before offering to write it. */
+export async function previewGroupSilence(
+  groupBy: readonly string[],
+  key: Record<string, string>,
+  fetchImpl: FetchLike = apiFetch,
+): Promise<SilencePreview> {
+  let response: Response;
+  try {
+    response = await fetchImpl(apiUrl(GROUP_SILENCE_PREVIEW_URL), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groupBy: [...groupBy], key }),
+    });
+  } catch {
+    throw new SilenceError('Unable to reach the Promview API', 0);
+  }
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    const message =
+      typeof payload === 'object' &&
+      payload !== null &&
+      typeof (payload as { error?: unknown }).error === 'string'
+        ? (payload as { error: string }).error
+        : `Silence preview failed (HTTP ${response.status})`;
+    throw new SilenceError(message, response.status);
+  }
+  return parseSilencePreview(payload);
+}
+
+export function parseSilencePreview(payload: unknown): SilencePreview {
+  const raw = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<
+    string,
+    unknown
+  >;
+  const targets = Array.isArray(raw.targets)
+    ? raw.targets.flatMap((entry): SilenceTargetPreview[] => {
+        if (typeof entry !== 'object' || entry === null) {
+          return [];
+        }
+        const item = entry as Record<string, unknown>;
+        return [
+          {
+            source: typeof item.source === 'string' ? item.source : 'unknown',
+            matchers: labelRecord(item.matchers),
+            members:
+              typeof item.members === 'number' && Number.isFinite(item.members) ? item.members : 0,
+          },
+        ];
+      })
+    : [];
+  return {
+    matchers: labelRecord(raw.matchers),
+    memberCount:
+      typeof raw.memberCount === 'number' && Number.isFinite(raw.memberCount) ? raw.memberCount : 0,
+    targets,
+  };
+}
+
+function labelRecord(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  for (const [name, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === 'string') {
+      result[name] = entry;
+    }
+  }
+  return result;
+}
+
+function parseMatchers(payload: unknown): Record<string, string> | undefined {
+  if (typeof payload !== 'object' || payload === null) {
+    return undefined;
+  }
+  const matchers = (payload as Record<string, unknown>).matchers;
+  if (typeof matchers !== 'object' || matchers === null || Array.isArray(matchers)) {
+    return undefined;
+  }
+  return labelRecord(matchers);
 }

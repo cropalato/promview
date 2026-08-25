@@ -18,8 +18,8 @@ import { AlertDetailDrawer } from './components/AlertDetailDrawer';
 import { AlertTable } from './components/AlertTable';
 import { AlertGroupTable } from './components/AlertGroupTable';
 import { SilenceDialog } from './components/SilenceDialog';
-import { silenceAlert, silenceGroup } from './alerts/silence';
-import type { SilenceResponse } from './alerts/silence';
+import { previewGroupSilence, silenceAlert, silenceGroup } from './alerts/silence';
+import type { SilencePreview, SilenceResponse } from './alerts/silence';
 import { ViewMenu } from './components/ViewMenu';
 import { resolveColumns } from './alerts/columns';
 import { FilterBar } from './components/FilterBar';
@@ -34,6 +34,8 @@ import { useAlertRoute } from './hooks/useAlertRoute';
 import { useAlerts } from './hooks/useAlerts';
 import { usePreferences } from './hooks/usePreferences';
 import { useResolvedDensity } from './hooks/useResolvedDensity';
+import { suppressedFilter } from './preferences/store';
+import type { SilencedVisibility } from './preferences/store';
 import { applyTheme } from './preferences/theme';
 import type { Theme } from './preferences/theme';
 import { useAlertGroups } from './hooks/useAlertGroups';
@@ -126,7 +128,12 @@ export default function App({ navigate }: AppProps = {}) {
     subject: string;
     matchers: Record<string, string>;
     memberCount?: number;
-    submit: (durationSeconds: number, comment: string) => Promise<SilenceResponse>;
+    resolve?: () => Promise<SilencePreview>;
+    submit: (
+      durationSeconds: number,
+      comment: string,
+      expectedMatchers: Record<string, string>,
+    ) => Promise<SilenceResponse>;
   } | null>(null);
   const closeSilence = useCallback(() => setSilenceTarget(null), []);
 
@@ -137,6 +144,7 @@ export default function App({ navigate }: AppProps = {}) {
       subject: alert.labels.alertname ?? `alert ${alert.id}`,
       matchers: alert.labels,
       memberCount: 1,
+      // No resolve step: one alert's labels are already the exact match.
       submit: (durationSeconds, comment) => silenceAlert(alert.id, { durationSeconds, comment }),
     });
   }, []);
@@ -155,8 +163,13 @@ export default function App({ navigate }: AppProps = {}) {
       subject: Object.values(group.key).join(' · '),
       matchers,
       memberCount: group.total,
-      submit: (durationSeconds, comment) =>
-        silenceGroup(groupBy, group.key, { durationSeconds, comment }),
+      // The key is the coarsest thing the silence could match on, not what it
+      // will: the server widens it back out to every label the firing members
+      // agree on. Only the server can know that, so the dialog asks before it
+      // shows the operator anything to confirm.
+      resolve: () => previewGroupSilence(groupBy, group.key),
+      submit: (durationSeconds, comment, expectedMatchers) =>
+        silenceGroup(groupBy, group.key, { durationSeconds, comment }, expectedMatchers),
     });
   }, []);
 
@@ -175,13 +188,24 @@ export default function App({ navigate }: AppProps = {}) {
     setFilterError(null);
   };
 
+  // Layout preferences follow the operator; they are only fetched once the
+  // console is unlocked, since an unauthenticated request would just 401.
+  const { preferences, update: updatePreferences } = usePreferences(
+    consoleUnlocked,
+    authMode === 'oidc',
+  );
+
   const alertsQuery = useMemo(
     () => ({
       match: appliedMatchers.map(serializeMatcher),
       sort: sort?.field,
       order: sort?.order,
+      // Applied server-side rather than by filtering the loaded rows: the
+      // counts, the severity strip and the group aggregates all have to agree
+      // with what is on screen, and only the server can make them.
+      suppressed: suppressedFilter(preferences.silencedVisibility),
     }),
-    [appliedMatchers, sort],
+    [appliedMatchers, sort, preferences.silencedVisibility],
   );
 
   const {
@@ -191,12 +215,6 @@ export default function App({ navigate }: AppProps = {}) {
     scheduleLiveRefresh,
   } = useAlerts(consoleUnlocked, alertsQuery, { onUnauthorized: expireSession });
 
-  // Layout preferences follow the operator; they are only fetched once the
-  // console is unlocked, since an unauthenticated request would just 401.
-  const { preferences, update: updatePreferences } = usePreferences(
-    consoleUnlocked,
-    authMode === 'oidc',
-  );
   const columns = resolveColumns(preferences.columns.map((column) => column.id));
   // Resized widths live in the browser and follow the column, not the view:
   // the flat and grouped tables share them by column id.
@@ -488,6 +506,12 @@ export default function App({ navigate }: AppProps = {}) {
                     onChange={changeFilter}
                     onApply={applyFilter}
                   />
+                  <SilenceFilter
+                    value={preferences.silencedVisibility}
+                    onChange={(next) =>
+                      updatePreferences({ ...preferences, silencedVisibility: next })
+                    }
+                  />
                   <ViewMenu
                     preferences={preferences}
                     onChange={updatePreferences}
@@ -593,6 +617,7 @@ export default function App({ navigate }: AppProps = {}) {
           subject={silenceTarget.subject}
           matchers={silenceTarget.matchers}
           memberCount={silenceTarget.memberCount}
+          resolve={silenceTarget.resolve}
           defaultSeconds={config.silenceDefaultSeconds}
           maxSeconds={config.silenceMaxSeconds}
           onConfirm={silenceTarget.submit}
@@ -605,6 +630,49 @@ export default function App({ navigate }: AppProps = {}) {
         theme={theme}
         onThemeChange={handleThemeChange}
       />
+    </div>
+  );
+}
+
+/**
+ * What the list does with alerts a silence or inhibition is holding back.
+ *
+ * A segmented control rather than a checkbox because there are three useful
+ * answers, not two: keep them (the default, dimmed and chipped), get them out
+ * of the way while working an incident, and review only what is currently
+ * being held back. The middle one is the dangerous one, so it is never where
+ * the console starts.
+ */
+function SilenceFilter({
+  value,
+  onChange,
+}: {
+  value: SilencedVisibility;
+  onChange: (next: SilencedVisibility) => void;
+}) {
+  const options: { id: SilencedVisibility; label: string; title: string }[] = [
+    { id: 'show', label: 'All', title: 'Show silenced alerts alongside the rest' },
+    {
+      id: 'hide',
+      label: 'Unsilenced',
+      title: 'Hide alerts a silence or inhibition is holding back',
+    },
+    { id: 'only', label: 'Silenced', title: 'Show only alerts being held back right now' },
+  ];
+  return (
+    <div className="silence-filter" role="group" aria-label="Silenced alerts">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          className={`silence-filter-option${value === option.id ? ' is-active' : ''}`}
+          aria-pressed={value === option.id}
+          title={option.title}
+          onClick={() => onChange(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }

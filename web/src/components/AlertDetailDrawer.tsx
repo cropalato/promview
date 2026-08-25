@@ -171,6 +171,7 @@ export function AlertDetailDrawer({
               {activeTab === 'overview' ? (
                 <AlertDetailOverview
                   detail={ready.alert}
+                  silences={ready.silences}
                   onAcknowledge={onAcknowledge}
                   onFilterLabel={onFilterLabel}
                   onSilence={onSilence}
