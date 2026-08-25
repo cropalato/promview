@@ -39,6 +39,10 @@ describe('loadRuntimeConfig', () => {
       silenceEnabled: false,
       silenceDefaultSeconds: 2 * 60 * 60,
       silenceMaxSeconds: 30 * 24 * 60 * 60,
+      // Likewise absent: a server that cannot resolve a group silence's real
+      // match rejects the field outright rather than ignoring it, so the
+      // console must not send one.
+      silencePreviewSupported: false,
     });
   });
 
@@ -51,6 +55,10 @@ describe('loadRuntimeConfig', () => {
       silenceEnabled: false,
       silenceDefaultSeconds: 2 * 60 * 60,
       silenceMaxSeconds: 30 * 24 * 60 * 60,
+      // Likewise absent: a server that cannot resolve a group silence's real
+      // match rejects the field outright rather than ignoring it, so the
+      // console must not send one.
+      silencePreviewSupported: false,
     });
   });
 
@@ -131,5 +139,29 @@ describe('parseRuntimeConfig', () => {
     expect(() => parseRuntimeConfig({ authMode: 'ldap', productName: 'Promview' })).toThrowError(
       /unsupported auth mode/i,
     );
+  });
+});
+
+describe('silence preview capability', () => {
+  it('reads an older server as unable to resolve a group silence', async () => {
+    // The endpoint's absence is not something the console can probe for: an
+    // older server rejects the whole request rather than ignoring the field.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ authMode: 'open', silenceEnabled: true }));
+    await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
+      silencePreviewSupported: false,
+    });
+  });
+
+  it('takes the server at its word when it says it can', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ authMode: 'open', silenceEnabled: true, silencePreviewSupported: true }),
+      );
+    await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
+      silencePreviewSupported: true,
+    });
   });
 });

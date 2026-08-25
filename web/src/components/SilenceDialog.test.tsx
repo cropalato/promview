@@ -44,12 +44,8 @@ describe('SilenceDialog', () => {
     expect(screen.getByLabelText('Duration')).toHaveValue('7200');
 
     fireEvent.click(screen.getByRole('button', { name: 'Silence' }));
-    await waitFor(() =>
-      expect(onConfirm).toHaveBeenCalledWith(7200, '', {
-        alertname: 'HighCPU',
-        instance: 'web-01',
-      }),
-    );
+    // No resolve step ran, so there is no server-resolved match to echo back.
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith(7200, '', undefined));
   });
 
   it('sends the chosen window and comment', async () => {
@@ -58,12 +54,7 @@ describe('SilenceDialog', () => {
     fireEvent.change(screen.getByLabelText('Comment'), { target: { value: '  db upgrade  ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Silence' }));
 
-    await waitFor(() =>
-      expect(onConfirm).toHaveBeenCalledWith(1800, 'db upgrade', {
-        alertname: 'HighCPU',
-        instance: 'web-01',
-      }),
-    );
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith(1800, 'db upgrade', undefined));
   });
 
   it('offers no window past the deployment maximum', () => {

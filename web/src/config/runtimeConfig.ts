@@ -20,6 +20,15 @@ export interface RuntimeConfig {
   silenceEnabled: boolean;
   silenceDefaultSeconds: number;
   silenceMaxSeconds: number;
+  /**
+   * Whether the server can resolve what a group silence would actually match.
+   * A console ships and updates independently of the server behind it, so it
+   * cannot assume the endpoint exists just because it knows the name: an older
+   * server rejects the whole request rather than ignoring the field it does not
+   * know. Absent reads as unsupported, and the console silences on the grouping
+   * key as it always did.
+   */
+  silencePreviewSupported: boolean;
 }
 
 export const RUNTIME_CONFIG_URL = '/api/v1/config';
@@ -83,8 +92,14 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
     throw new RuntimeConfigError('Configuration response was malformed');
   }
 
-  const { authMode, productName, silenceEnabled, silenceDefaultSeconds, silenceMaxSeconds } =
-    body as Record<string, unknown>;
+  const {
+    authMode,
+    productName,
+    silenceEnabled,
+    silenceDefaultSeconds,
+    silenceMaxSeconds,
+    silencePreviewSupported,
+  } = body as Record<string, unknown>;
   if (typeof authMode !== 'string' || !AUTH_MODES.includes(authMode as AuthMode)) {
     throw new RuntimeConfigError(`Unsupported auth mode: ${String(authMode)}`);
   }
@@ -99,6 +114,7 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
     // A backend that does not report the field predates silencing and cannot
     // serve it, so absent reads as off rather than as enabled.
     silenceEnabled: silenceEnabled === true,
+    silencePreviewSupported: silencePreviewSupported === true,
     silenceMaxSeconds: max,
     // Never offer a default the server would refuse.
     silenceDefaultSeconds: Math.min(

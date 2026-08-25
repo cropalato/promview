@@ -20,12 +20,24 @@ interface SilenceDialogProps {
    * single alert, whose labels are already exact.
    */
   resolve?: () => Promise<SilencePreview>;
+  /**
+   * Set when `matchers` is known to be broader than what will actually be
+   * written and the console cannot find out — an older server with no preview
+   * endpoint. The dialog says so rather than presenting the grouping key as
+   * though it were the match, because the difference is the whole scope.
+   */
+  scopeUnconfirmed?: boolean;
   defaultSeconds: number;
   maxSeconds: number;
   onConfirm: (
     durationSeconds: number,
     comment: string,
-    expectedMatchers: Record<string, string>,
+    /**
+     * The match the server resolved, or undefined when it never did. Undefined
+     * is not "no opinion": it means there is nothing honest to compare against,
+     * so the caller must not ask the server to check one.
+     */
+    expectedMatchers: Record<string, string> | undefined,
   ) => Promise<SilenceResponse>;
   onClose: () => void;
 }
@@ -46,6 +58,7 @@ export function SilenceDialog({
   matchers,
   memberCount,
   resolve,
+  scopeUnconfirmed = false,
   defaultSeconds,
   maxSeconds,
   onConfirm,
@@ -117,7 +130,10 @@ export function SilenceDialog({
   const handleConfirm = () => {
     setPending(true);
     setError(null);
-    onConfirm(duration, comment.trim(), shownMatchers)
+    // Only a match the server resolved is worth echoing back. Sending the
+    // grouping key instead would ask the server to compare its own folded
+    // match against something it never produced, which can only ever disagree.
+    onConfirm(duration, comment.trim(), preview?.matchers)
       .then((response) => {
         setPending(false);
         setResult(response);
@@ -175,6 +191,14 @@ export function SilenceDialog({
             {resolving ? (
               <p className="silence-note" role="status">
                 Working out exactly what this matches…
+              </p>
+            ) : null}
+
+            {scopeUnconfirmed && !resolving ? (
+              <p className="silence-warning">
+                This server cannot report the exact match. The silence will match the labels above
+                and nothing more, so it may cover alerts beyond this group — including ones that
+                have not fired yet.
               </p>
             ) : null}
 

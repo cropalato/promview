@@ -462,6 +462,12 @@ func (api *API) getConfig(w http.ResponseWriter, _ *http.Request) {
 		"silenceDefaultSeconds": int64(api.config.SilenceDefaultDuration / time.Second),
 		"silenceMaxSeconds":     int64(api.config.SilenceMaxDuration / time.Second),
 		"silenceEnabled":        api.silencer != nil,
+		// A console ships and updates independently of the server behind it, so
+		// it cannot assume an endpoint exists just because it knows the name.
+		// Absent means an older server: the console then silences on the
+		// grouping key as it always did, rather than sending a field that
+		// server's strict decoder would reject outright.
+		"silencePreviewSupported": true,
 	})
 }
 

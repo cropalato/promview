@@ -129,10 +129,11 @@ export default function App({ navigate }: AppProps = {}) {
     matchers: Record<string, string>;
     memberCount?: number;
     resolve?: () => Promise<SilencePreview>;
+    scopeUnconfirmed?: boolean;
     submit: (
       durationSeconds: number,
       comment: string,
-      expectedMatchers: Record<string, string>,
+      expectedMatchers: Record<string, string> | undefined,
     ) => Promise<SilenceResponse>;
   } | null>(null);
   const closeSilence = useCallback(() => setSilenceTarget(null), []);
@@ -149,29 +150,36 @@ export default function App({ navigate }: AppProps = {}) {
     });
   }, []);
 
-  const openGroupSilence = useCallback((group: AlertGroupSummary, groupBy: readonly string[]) => {
-    // `source` names a promview source rather than an alert label, so the
-    // server drops it from the matchers; showing it here would promise a
-    // constraint the silence does not carry.
-    const matchers: Record<string, string> = {};
-    for (const [name, value] of Object.entries(group.key)) {
-      if (name !== 'source') {
-        matchers[name] = value;
+  const openGroupSilence = useCallback(
+    (group: AlertGroupSummary, groupBy: readonly string[], previewSupported: boolean) => {
+      // `source` names a promview source rather than an alert label, so the
+      // server drops it from the matchers; showing it here would promise a
+      // constraint the silence does not carry.
+      const matchers: Record<string, string> = {};
+      for (const [name, value] of Object.entries(group.key)) {
+        if (name !== 'source') {
+          matchers[name] = value;
+        }
       }
-    }
-    setSilenceTarget({
-      subject: Object.values(group.key).join(' · '),
-      matchers,
-      memberCount: group.total,
-      // The key is the coarsest thing the silence could match on, not what it
-      // will: the server widens it back out to every label the firing members
-      // agree on. Only the server can know that, so the dialog asks before it
-      // shows the operator anything to confirm.
-      resolve: () => previewGroupSilence(groupBy, group.key),
-      submit: (durationSeconds, comment, expectedMatchers) =>
-        silenceGroup(groupBy, group.key, { durationSeconds, comment }, expectedMatchers),
-    });
-  }, []);
+      setSilenceTarget({
+        subject: Object.values(group.key).join(' · '),
+        matchers,
+        memberCount: group.total,
+        // The key is the coarsest thing the silence could match on, not what it
+        // will: the server widens it back out to every label the firing members
+        // agree on. Only the server can know that, so the dialog asks before it
+        // shows the operator anything to confirm.
+        // Only where the server can answer. An older one has no such endpoint and
+        // rejects the whole request rather than ignoring a field it does not
+        // know, so asking would break silencing outright instead of degrading.
+        resolve: previewSupported ? () => previewGroupSilence(groupBy, group.key) : undefined,
+        scopeUnconfirmed: !previewSupported,
+        submit: (durationSeconds, comment, expectedMatchers) =>
+          silenceGroup(groupBy, group.key, { durationSeconds, comment }, expectedMatchers),
+      });
+    },
+    [],
+  );
 
   const clearFilter = useCallback(() => {
     setFilterDraft('');
@@ -549,7 +557,12 @@ export default function App({ navigate }: AppProps = {}) {
                       // allowed to. In open mode every reader is an anonymous
                       // viewer, so the control would only ever answer 403.
                       silenceAvailable
-                        ? (group) => openGroupSilence(group, preferences.grouping.keys)
+                        ? (group) =>
+                            openGroupSilence(
+                              group,
+                              preferences.grouping.keys,
+                              config?.silencePreviewSupported === true,
+                            )
                         : undefined
                     }
                     pagination={{
@@ -618,6 +631,7 @@ export default function App({ navigate }: AppProps = {}) {
           matchers={silenceTarget.matchers}
           memberCount={silenceTarget.memberCount}
           resolve={silenceTarget.resolve}
+          scopeUnconfirmed={silenceTarget.scopeUnconfirmed}
           defaultSeconds={config.silenceDefaultSeconds}
           maxSeconds={config.silenceMaxSeconds}
           onConfirm={silenceTarget.submit}
