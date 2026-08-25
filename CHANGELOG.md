@@ -6,9 +6,15 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.28] - 2026-08-25
+
 ### Changed
 
 - **console:** the group row's silence control is a round moon button rather than a text button. A crescent instead of the slashed bell the domain usually reaches for: that bell already belongs to the browser-notification toggle, and one glyph standing for both a local preference and a shared Alertmanager silence is worse than an unfamiliar one standing for a single thing. A moon also reads as quiet for a while, which is what a silence is — matched, time-bounded, expiring — where a mute reads as off for good. The hover text now names the group and says what silencing does, since the word is no longer written on the control, and it matches the name a screen reader announces.
+
+### Build System
+
+- **web:** name esbuild's install script as allowed. npm 12 blocks package install scripts unless a project names them, and esbuild has one — it links the platform binary vite compiles through. Blocked, `npm ci` still reports success and the failure surfaces later as a vite build that cannot find an esbuild binary, which does not name its cause. CI takes the npm bundled with Node 22 and never blocked; this is for developing on a newer one.
 
 ## [0.1.0-alpha.27] - 2026-08-25
 
