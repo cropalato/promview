@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.29] - 2026-08-25
+
 ### Fixed
 
 - **silence:** silencing a group now matches on every label its firing members agree on, not just the two or three keys they were grouped by. A group keyed on `alertname` alone used to write `alertname="HighCPU"` and hide that rule everywhere, for every cluster and team, including alerts nobody had seen yet. The match is resolved per Alertmanager rather than once per request: a group spanning two of them usually differs between them on exactly the label worth matching on, and a single shared match would drop it and silence both places. The confirmation dialog now asks the server what the silence would actually match before offering to write it, and echoes that match back on confirm so a member joining in between is refused rather than silently widening the scope.
