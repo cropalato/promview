@@ -172,7 +172,7 @@ func sameLabels(left, right map[string]string) bool {
 func (api *API) silenceRequestPrincipal(w http.ResponseWriter, r *http.Request) (auth.Principal, bool) {
 	principal, ok := requestPrincipal(r)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "principal is unavailable")
+		writeServerError(w, r, "principal is unavailable", nil)
 		return auth.Principal{}, false
 	}
 	if api.silencer == nil {
