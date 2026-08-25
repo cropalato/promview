@@ -61,6 +61,31 @@ gap before the first load either way. Moving stream ownership into the core
 entirely would remove the caveat, at the cost of the core needing its own
 snapshot cursor.
 
+### Servers behind a private CA
+
+The core trusts the machine's own certificate store, via reqwest's
+`rustls-tls-native-roots`. An internal Promview behind a corporate or private CA
+is reached on the strength of a certificate the rest of the workstation already
+accepts, with nothing to configure.
+
+This is worth stating because the alternative was the default and was wrong here.
+Built against plain `rustls-tls`, reqwest carries a compiled-in copy of the
+Mozilla root set and never consults the platform's, so a private CA failed the
+handshake and reported it as:
+
+```
+error sending request for url (https://promview.internal/api/v1/alerts?...)
+```
+
+which reads as a server that is down rather than one that is untrusted — and no
+environment variable could correct it, because the roots were inside the binary.
+If a client ever reports a host as unreachable that `curl` reaches from the same
+machine, suspect the trust store before the network.
+
+To point at a bundle kept outside the system store, `SSL_CERT_FILE` and
+`SSL_CERT_DIR` are honoured (through `rustls-native-certs`, which probes them the
+way OpenSSL does).
+
 ## Signing in
 
 The tray's **Sign in…** opens the _system_ browser, not a window of ours. The
@@ -141,6 +166,25 @@ PROMVIEW_SERVER_URL=http://localhost:8080 npm --prefix desktop run dev
 `make verify-desktop` runs `cargo fmt --check`, `clippy -D warnings`, `test`, and
 `build`; it is part of `make verify` and has its own CI job.
 
+### Build it through the Tauri CLI, not bare cargo
+
+```sh
+npm --prefix desktop run build                        # what CI does
+cargo build --release --features tauri/custom-protocol # the same thing by hand
+```
+
+A plain `cargo build --release` compiles and links and produces a binary that
+does not work. `tauri`'s build script sets `dev = !has_feature("custom-protocol")`,
+so without that feature the shell loads `devUrl` — `http://localhost:5173` —
+rather than the console embedded from `web/dist`. With no Vite server there, the
+window shows **Could not connect to localhost: Connection refused** while stderr
+looks perfectly healthy: the tray polls, the server answers, nothing reports an
+error. The dev-mode binary is about 100KB smaller, which is the quickest way to
+tell the two apart.
+
+The `cargo build` in `make verify-desktop` is a compile check and correct as one.
+It is not a way to produce a client you can run.
+
 ### A Linux rendering note
 
 On some GPU and compositor combinations WebKitGTK fails to allocate its buffers
@@ -157,6 +201,9 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 npm --prefix desktop run dev
 | ----------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PROMVIEW_SERVER_URL`         | `http://localhost:8080` | Server to talk to. Must be absolute http/https, may carry a path prefix, must not carry a query or fragment.                                                                                         |
 | `PROMVIEW_POLL_INTERVAL_SECS` | `60`                    | Fallback tray refresh, for before a stream is open and while one is down. The stream is what makes the tray prompt. Minimum 5, because a tight loop against a shared server costs everyone using it. |
+
+`SSL_CERT_FILE` and `SSL_CERT_DIR` are read too, for a certificate bundle kept
+outside the system trust store; see [Servers behind a private CA](#servers-behind-a-private-ca).
 
 Environment variables are the walking skeleton's answer. A settings surface and
 multiple server profiles are later work in the plan.
