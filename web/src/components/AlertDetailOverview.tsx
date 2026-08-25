@@ -1,5 +1,6 @@
+import type { ReactNode } from 'react';
 import { safeExternalUrl } from '../alerts/detail';
-import type { AlertDetail } from '../alerts/detail';
+import type { AlertDetail, AlertSilenceRecord } from '../alerts/detail';
 import type { LabelMatcher } from '../alerts/filter';
 import { formatTimestamp } from '../alerts/format';
 import { AcknowledgeButton } from './AcknowledgeButton';
@@ -8,6 +9,12 @@ import { ExternalLinkIcon, SeverityIcon } from './icons';
 
 interface AlertDetailOverviewProps {
   detail: AlertDetail;
+  /**
+   * The silences promview created that are holding this alert back. Empty
+   * where the alert is suppressed by a silence made elsewhere, or by an
+   * inhibition, and the drawer says which rather than guessing an author.
+   */
+  silences?: readonly AlertSilenceRecord[];
   /**
    * Runs the acknowledge toggle. The Actions section renders only when both
    * this handler and the server-provided per-alert permission are present.
@@ -37,6 +44,7 @@ function byKey([a]: [string, string], [b]: [string, string]): number {
  */
 export function AlertDetailOverview({
   detail,
+  silences = [],
   onAcknowledge,
   onSilence,
   onFilterLabel,
@@ -74,6 +82,10 @@ export function AlertDetailOverview({
               <span className="detail-mono">No</span>
             )}
           </dd>
+        </div>
+        <div className="detail-fact">
+          <dt>Suppressed</dt>
+          <dd>{suppressionNote(detail, silences)}</dd>
         </div>
         <div className="detail-fact">
           <dt>Source</dt>
@@ -242,5 +254,55 @@ function ExternalRef({ label, value }: { label: string; value: string }) {
         )}
       </dd>
     </div>
+  );
+}
+
+/**
+ * Says why an alert is not notifying, and how confidently.
+ *
+ * Four cases, and collapsing them would hide the one that matters: not
+ * suppressed at all; held by an inhibition, which nobody chose and which lifts
+ * itself; held by a silence promview created, where the author, expiry and
+ * reason are known; and held by a silence made straight on the Alertmanager,
+ * which is just as real and about which promview honestly knows nothing but
+ * the id.
+ */
+function suppressionNote(detail: AlertDetail, silences: readonly AlertSilenceRecord[]): ReactNode {
+  if (!detail.suppressed) {
+    return <span className="detail-mono">No</span>;
+  }
+  if (detail.silencedBy.length === 0) {
+    return (
+      <>
+        <span className="state-chip state-suppressed state-inhibited">inhibited</span>{' '}
+        <span className="detail-mono">Held back by an inhibition rule, not a silence.</span>
+      </>
+    );
+  }
+  const known = new Map(silences.map((record) => [record.silenceId, record]));
+  return (
+    <>
+      <span className="state-chip state-suppressed">silenced</span>
+      <ul className="detail-silences">
+        {detail.silencedBy.map((id) => {
+          const record = known.get(id);
+          return (
+            <li key={id}>
+              <span className="detail-mono detail-break">{id}</span>
+              {record === undefined ? (
+                // Created outside promview: the silence is real, the reasoning
+                // is not ours to report.
+                <span> — created outside Promview</span>
+              ) : (
+                <span>
+                  {` — by ${record.createdBy || 'unknown'} until ${formatTimestamp(record.endsAt)}`}
+                  {record.comment === '' ? '' : `: ${record.comment}`}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }

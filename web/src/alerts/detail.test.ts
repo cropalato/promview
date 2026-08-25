@@ -138,12 +138,15 @@ describe('fetchAlertDetail', () => {
         lastSeen: '2026-08-14T11:00:00Z',
         repeatCount: 3,
         occurrence: 2,
+        suppressed: false,
+        silencedBy: [],
         acknowledged: false,
         acknowledgedBy: '',
         acknowledgedAt: null,
         actions: { canAcknowledge: false, canSilence: false },
         rawData: { status: 'firing', labels: { alertname: 'HighErrorRate' } },
       },
+      silences: [],
       history: [
         {
           id: 11,

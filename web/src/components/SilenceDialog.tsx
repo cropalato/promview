@@ -1,17 +1,32 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { formatDuration, silenceDurationOptions } from '../alerts/silence';
-import type { SilenceResponse } from '../alerts/silence';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { formatDuration, isSilenceConflict, silenceDurationOptions } from '../alerts/silence';
+import type { SilencePreview, SilenceResponse } from '../alerts/silence';
 
 interface SilenceDialogProps {
   /** What is about to be silenced, in the operator's words. */
   subject: string;
-  /** The exact labels the silence will match on, shown before confirming. */
+  /**
+   * The labels the caller already knows the silence matches on. For one alert
+   * that is its full label set and is the final answer; for a group it is only
+   * the grouping key, and `resolve` replaces it with what the server works out.
+   */
   matchers: Record<string, string>;
   /** How many alerts the silence covers, when the caller knows. */
   memberCount?: number;
+  /**
+   * Asks the server what the silence would actually match. Present for groups,
+   * where the match is every label the firing members agree on and so is
+   * narrower than the key — a fact only the server can establish. Absent for a
+   * single alert, whose labels are already exact.
+   */
+  resolve?: () => Promise<SilencePreview>;
   defaultSeconds: number;
   maxSeconds: number;
-  onConfirm: (durationSeconds: number, comment: string) => Promise<SilenceResponse>;
+  onConfirm: (
+    durationSeconds: number,
+    comment: string,
+    expectedMatchers: Record<string, string>,
+  ) => Promise<SilenceResponse>;
   onClose: () => void;
 }
 
@@ -30,6 +45,7 @@ export function SilenceDialog({
   subject,
   matchers,
   memberCount,
+  resolve,
   defaultSeconds,
   maxSeconds,
   onConfirm,
@@ -40,13 +56,51 @@ export function SilenceDialog({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SilenceResponse | null>(null);
+  const [preview, setPreview] = useState<SilencePreview | null>(null);
+  const [resolving, setResolving] = useState(resolve !== undefined);
   const titleId = useId();
   const durationId = useId();
   const commentId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const options = silenceDurationOptions(defaultSeconds, maxSeconds);
-  const entries = Object.entries(matchers).sort(([left], [right]) => left.localeCompare(right));
+  // Until the server answers, the key is all there is to show. It is a superset
+  // of the real match, so the dialog is never claiming a narrower scope than
+  // what would be written.
+  const shownMatchers = preview?.matchers ?? matchers;
+  const shownCount = preview?.memberCount ?? memberCount;
+  const entries = Object.entries(shownMatchers).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  // A group spanning two Alertmanagers is silenced with one match per target,
+  // and those can differ. Showing only what they have in common would name a
+  // broader scope than what is written, so the differences are spelled out.
+  const varyingTargets =
+    preview !== null && preview.targets.length > 1
+      ? preview.targets.filter(
+          (target) => Object.keys(target.matchers).length !== Object.keys(preview.matchers).length,
+        )
+      : [];
+
+  const runResolve = useCallback(() => {
+    if (resolve === undefined) {
+      return;
+    }
+    setResolving(true);
+    resolve()
+      .then((resolved) => {
+        setPreview(resolved);
+        setResolving(false);
+      })
+      .catch((cause: unknown) => {
+        setResolving(false);
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
+  }, [resolve]);
+
+  useEffect(() => {
+    runResolve();
+  }, [runResolve]);
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -63,7 +117,7 @@ export function SilenceDialog({
   const handleConfirm = () => {
     setPending(true);
     setError(null);
-    onConfirm(duration, comment.trim())
+    onConfirm(duration, comment.trim(), shownMatchers)
       .then((response) => {
         setPending(false);
         setResult(response);
@@ -71,6 +125,12 @@ export function SilenceDialog({
       .catch((cause: unknown) => {
         setPending(false);
         setError(cause instanceof Error ? cause.message : String(cause));
+        if (isSilenceConflict(cause)) {
+          // The group moved between the preview and the confirm, so what was
+          // read is no longer what would be written. Re-resolve rather than
+          // leaving a stale match on screen for the operator to confirm again.
+          runResolve();
+        }
       });
   };
 
@@ -96,8 +156,8 @@ export function SilenceDialog({
           <>
             <p className="silence-copy">
               Alertmanager will stop notifying for
-              {memberCount !== undefined
-                ? ` ${memberCount} alert${memberCount === 1 ? '' : 's'}`
+              {shownCount !== undefined
+                ? ` ${shownCount} alert${shownCount === 1 ? '' : 's'}`
                 : ''}{' '}
               matching:
             </p>
@@ -111,6 +171,33 @@ export function SilenceDialog({
                 </div>
               ))}
             </dl>
+
+            {resolving ? (
+              <p className="silence-note" role="status">
+                Working out exactly what this matches…
+              </p>
+            ) : null}
+
+            {varyingTargets.length > 0 ? (
+              <div className="silence-targets">
+                <p className="silence-copy">
+                  These Alertmanagers get a narrower match of their own:
+                </p>
+                <ul>
+                  {varyingTargets.map((target) => (
+                    <li key={target.source}>
+                      <span className="silence-result-source">{target.source}</span>
+                      <span className="cell-mono">
+                        {Object.entries(target.matchers)
+                          .sort(([left], [right]) => left.localeCompare(right))
+                          .map(([name, value]) => `${name}="${value}"`)
+                          .join(', ')}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             <label className="silence-field" htmlFor={durationId}>
               <span>Duration</span>
@@ -158,7 +245,7 @@ export function SilenceDialog({
                 type="button"
                 className="button button-primary"
                 onClick={handleConfirm}
-                disabled={pending}
+                disabled={pending || resolving}
                 aria-busy={pending}
               >
                 {pending ? 'Silencing…' : 'Silence'}

@@ -78,6 +78,13 @@ export interface AlertsQuery {
   severity?: string;
   team?: string;
   /**
+   * Restricts to alerts a silence or inhibition is holding back, or excludes
+   * them. Leaving it unset keeps them in the list, which is the console's
+   * default: an alert vanishing because somebody else silenced it is the
+   * failure silencing is meant to avoid, not cause.
+   */
+  suppressed?: boolean;
+  /**
    * Serialized label matchers (`severity=critical`, `team!=infra`), sent as
    * repeated `match` parameters. All matchers must hold for an alert to
    * appear.
@@ -121,6 +128,8 @@ export interface AlertGroupSummary {
   /** Members matching the current filters and the reader's own access. */
   total: number;
   acknowledged: number;
+  /** Members a silence or inhibition is holding back. */
+  silenced: number;
   severityCounts: Record<string, number>;
   worstSeverity: Severity;
   /** Preserves the server's severity text when it falls outside the buckets. */
@@ -164,6 +173,9 @@ export function buildAlertsUrl(query: AlertsQuery = {}): string {
   }
   if (query.team !== undefined && query.team !== '') {
     params.set('team', query.team);
+  }
+  if (query.suppressed !== undefined) {
+    params.set('suppressed', query.suppressed ? 'true' : 'false');
   }
   for (const matcher of query.match ?? []) {
     if (matcher !== '') {
@@ -268,6 +280,9 @@ function parseAlertGroup(value: unknown, index: number): AlertGroupSummary {
     key: stringRecord(raw.key, `groups[${index}].key`),
     total: requiredNumber(raw.total, `groups[${index}].total`),
     acknowledged: requiredNumber(raw.acknowledged, `groups[${index}].acknowledged`),
+    // Servers before silence visibility omit the field; absent means "none
+    // known", never a parse failure.
+    silenced: typeof raw.silenced === 'number' && Number.isFinite(raw.silenced) ? raw.silenced : 0,
     severityCounts: numberRecord(raw.severityCounts, `groups[${index}].severityCounts`),
     worstSeverity: severity,
     worstSeverityLabel: severityLabelFor(severityRaw, severity),
@@ -316,6 +331,9 @@ function parseAlert(value: unknown, index: number): AlertSummary {
     notes: 0,
     labels,
     suppressed: raw.suppressed === true,
+    silencedBy: Array.isArray(raw.silencedBy)
+      ? raw.silencedBy.filter((entry): entry is string => typeof entry === 'string')
+      : [],
     lastSeen: typeof raw.lastSeen === 'string' ? raw.lastSeen : '',
   };
 }

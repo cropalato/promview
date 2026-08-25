@@ -21,6 +21,7 @@ const alert: AlertSummary = {
   notes: 0,
   labels: { alertname: 'Cardinality', prometheus_cluster: 'yul', name: 'windows_service_status' },
   suppressed: false,
+  silencedBy: [],
   lastSeen: new Date().toISOString(),
 };
 

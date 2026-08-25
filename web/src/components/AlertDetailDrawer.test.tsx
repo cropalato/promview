@@ -6,6 +6,7 @@ import { AlertDetailDrawer } from './AlertDetailDrawer';
 
 function detailResult(overrides: Record<string, unknown> = {}): AlertDetailResult {
   return {
+    silences: [],
     alert: {
       id: '42',
       fingerprint: 'fp-42',
@@ -23,6 +24,8 @@ function detailResult(overrides: Record<string, unknown> = {}): AlertDetailResul
       firstSeen: '2026-08-14T10:00:00Z',
       lastSeen: '2026-08-14T11:00:00Z',
       repeatCount: 3,
+      suppressed: false,
+      silencedBy: [],
       occurrence: 2,
       acknowledged: false,
       acknowledgedBy: '',

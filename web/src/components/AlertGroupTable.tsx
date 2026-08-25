@@ -237,7 +237,9 @@ function GroupRows({
   return (
     <>
       <tr
-        className={`group-row${expanded ? ' group-row-expanded' : ''}`}
+        className={`group-row${expanded ? ' group-row-expanded' : ''}${
+          group.silenced === group.total && group.total > 0 ? ' row-suppressed' : ''
+        }`}
         aria-expanded={expandable ? expanded : undefined}
         aria-level={1}
         tabIndex={expandable || openable ? 0 : undefined}
@@ -293,6 +295,21 @@ function GroupRows({
               >
                 {group.acknowledged > 0 ? `${group.acknowledged}/${group.total}` : '—'}
               </span>
+              {/* Without this a fully silenced group is indistinguishable from
+                  a fully firing one, which is the pair an operator most needs
+                  to tell apart while deciding what still needs attention. */}
+              {group.silenced > 0 ? (
+                <span
+                  className={`state-chip state-suppressed${
+                    group.silenced === group.total ? ' is-total' : ''
+                  }`}
+                  aria-label={`${group.silenced} of ${group.total} silenced`}
+                >
+                  {group.silenced === group.total
+                    ? 'silenced'
+                    : `${group.silenced}/${group.total} silenced`}
+                </span>
+              ) : null}
             </span>
           ) : null}
         </th>

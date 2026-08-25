@@ -227,7 +227,14 @@ function AlertRow({
   onSelect?: (alert: AlertSummary) => void;
 }) {
   const selectable = onSelect !== undefined;
-  const className = [selectable ? 'row-selectable' : '', selected ? 'row-selected' : '']
+  // Dimmed rather than hidden. A silenced alert is still firing, and an
+  // operator scanning the list has to be able to see that somebody chose to
+  // hold it back - which is not the same as it not being there.
+  const className = [
+    selectable ? 'row-selectable' : '',
+    selected ? 'row-selected' : '',
+    alert.suppressed ? 'row-suppressed' : '',
+  ]
     .filter((part) => part !== '')
     .join(' ');
 
@@ -279,8 +286,23 @@ function AlertCell({ alert, column }: { alert: AlertSummary; column: ColumnDefin
       <td className={className === '' ? undefined : className}>
         <span className={`state-chip state-${alert.state}`}>{alert.state}</span>
         {/* Silenced sits beside the state rather than replacing it: the alert
-            is still firing, it is just being held back at the source. */}
-        {alert.suppressed ? <span className="state-chip state-suppressed">silenced</span> : null}
+            is still firing, it is just being held back at the source. An
+            inhibition is not a silence and does not claim to be: nobody chose
+            it and it lifts itself when its parent alert clears. */}
+        {alert.suppressed ? (
+          <span
+            className={`state-chip state-suppressed${
+              alert.silencedBy.length === 0 ? ' state-inhibited' : ''
+            }`}
+            title={
+              alert.silencedBy.length === 0
+                ? 'Held back by an inhibition rule, not a silence'
+                : `Silenced by ${alert.silencedBy.join(', ')}`
+            }
+          >
+            {alert.silencedBy.length === 0 ? 'inhibited' : 'silenced'}
+          </span>
+        ) : null}
       </td>
     );
   }

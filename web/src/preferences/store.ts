@@ -57,11 +57,40 @@ export interface NotificationPreference {
   matchers: NotificationMatcher[];
 }
 
+/**
+ * What the list does with alerts a silence or inhibition is holding back.
+ *
+ * `hide` is offered but is not the default: an alert vanishing because
+ * somebody else silenced it is the failure silencing is meant to replace, not
+ * cause. `only` is the review view — what is currently being held back, and
+ * until when.
+ */
+export type SilencedVisibility = 'show' | 'hide' | 'only';
+
+const SILENCED_VISIBILITIES: readonly SilencedVisibility[] = ['show', 'hide', 'only'];
+
+export function isSilencedVisibility(value: unknown): value is SilencedVisibility {
+  return typeof value === 'string' && SILENCED_VISIBILITIES.includes(value as SilencedVisibility);
+}
+
+/** The `suppressed` query parameter a visibility implies, if any. */
+export function suppressedFilter(value: SilencedVisibility): boolean | undefined {
+  switch (value) {
+    case 'hide':
+      return false;
+    case 'only':
+      return true;
+    default:
+      return undefined;
+  }
+}
+
 export interface Preferences {
   columns: ColumnPreference[];
   density: Density;
   grouping: GroupingPreference;
   theme: Theme;
+  silencedVisibility: SilencedVisibility;
   notifications: NotificationPreference;
 }
 
@@ -71,6 +100,10 @@ export function defaultPreferences(): Preferences {
     density: 'auto',
     grouping: { enabled: true, keys: [...DEFAULT_GROUP_KEYS] },
     theme: 'system',
+    // Shown, dimmed and chipped rather than hidden. An operator has to be able
+    // to see that an alert is firing and being held back; those are different
+    // facts from it not being there.
+    silencedVisibility: 'show',
     // Off, carrying the selector the console hardcoded before this was
     // configurable, so opting in does what it always did.
     notifications: { enabled: false, matchers: [{ name: 'severity', op: '=', value: 'critical' }] },
@@ -151,6 +184,9 @@ export function parsePreferences(value: unknown): Preferences {
     density: isDensity(raw.density) ? raw.density : defaults.density,
     grouping,
     theme: isTheme(raw.theme) ? raw.theme : defaults.theme,
+    silencedVisibility: isSilencedVisibility(raw.silencedVisibility)
+      ? raw.silencedVisibility
+      : defaults.silencedVisibility,
     notifications: parseNotifications(raw.notifications, defaults.notifications),
   };
 }

@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   formatDuration,
+  isSilenceConflict,
+  parseSilencePreview,
   parseSilenceResponse,
+  previewGroupSilence,
   silenceAlert,
   silenceDurationOptions,
   silenceGroup,
@@ -72,7 +75,9 @@ describe('silenceAlert', () => {
       durationSeconds: 7200,
       comment: 'maintenance',
     });
-    expect(result.results).toEqual([{ source: 'demo', silenceId: 'abc', error: undefined }]);
+    expect(result.results).toEqual([
+      { source: 'demo', silenceId: 'abc', matchers: {}, members: 0, error: undefined },
+    ]);
   });
 
   it('surfaces the server error rather than a bare status', async () => {
@@ -160,6 +165,7 @@ describe('injected transport', () => {
       ['alertname'],
       { alertname: 'X' },
       { durationSeconds: 7200, comment: '' },
+      undefined,
       injected,
     );
 
@@ -190,7 +196,84 @@ describe('parseSilenceResponse', () => {
     expect(parseSilenceResponse(null).results).toEqual([]);
     expect(parseSilenceResponse({ results: 'nope' }).results).toEqual([]);
     expect(parseSilenceResponse({ results: [null, 7, { source: 'demo' }] }).results).toEqual([
-      { source: 'demo', silenceId: undefined, error: undefined },
+      { source: 'demo', silenceId: undefined, matchers: {}, members: 0, error: undefined },
     ]);
+  });
+});
+
+describe('previewGroupSilence', () => {
+  it('asks the server what the silence would actually match', async () => {
+    fetchMock().mockResolvedValue(
+      jsonResponse(
+        {
+          matchers: { alertname: 'HighCPU', cluster: 'prod' },
+          memberCount: 12,
+          targets: [
+            {
+              source: 'demo',
+              matchers: { alertname: 'HighCPU', cluster: 'prod', instance: 'web-01' },
+              members: 12,
+            },
+          ],
+        },
+        200,
+      ),
+    );
+
+    const preview = await previewGroupSilence(['alertname'], { alertname: 'HighCPU' });
+
+    const [url, init] = fetchMock().mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/v1/groups/silence/preview');
+    expect(JSON.parse(String(init.body))).toEqual({
+      groupBy: ['alertname'],
+      key: { alertname: 'HighCPU' },
+    });
+    // The key is `alertname` alone; what gets silenced is narrower, and the
+    // dialog has to show that rather than the key it started from.
+    expect(preview.matchers).toEqual({ alertname: 'HighCPU', cluster: 'prod' });
+    expect(preview.memberCount).toBe(12);
+    expect(preview.targets[0]?.matchers.instance).toBe('web-01');
+  });
+
+  it('survives a malformed preview rather than blocking the dialog', () => {
+    expect(parseSilencePreview(null)).toEqual({ matchers: {}, memberCount: 0, targets: [] });
+    expect(parseSilencePreview({ matchers: 'nope', targets: 7 }).targets).toEqual([]);
+  });
+});
+
+describe('a group that moved between the preview and the confirmation', () => {
+  it('carries the new match back so the operator can review it', async () => {
+    fetchMock().mockResolvedValue(
+      jsonResponse({ error: 'the group changed', matchers: { alertname: 'HighCPU' } }, 409),
+    );
+
+    // Silencing more than what was read on screen is the failure this guards.
+    try {
+      await silenceGroup(
+        ['alertname'],
+        { alertname: 'HighCPU' },
+        { durationSeconds: 7200, comment: '' },
+        { alertname: 'HighCPU', cluster: 'a' },
+      );
+      throw new Error('expected a conflict');
+    } catch (error) {
+      expect(isSilenceConflict(error)).toBe(true);
+      expect((error as SilenceError).matchers).toEqual({ alertname: 'HighCPU' });
+    }
+  });
+
+  it('sends the match it showed so the server can compare', async () => {
+    fetchMock().mockResolvedValue(jsonResponse({ endsAt: '', createdBy: 'ada', results: [] }));
+    await silenceGroup(
+      ['alertname'],
+      { alertname: 'HighCPU' },
+      { durationSeconds: 7200, comment: '' },
+      { alertname: 'HighCPU', cluster: 'a' },
+    );
+    const [, init] = fetchMock().mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).expectedMatchers).toEqual({
+      alertname: 'HighCPU',
+      cluster: 'a',
+    });
   });
 });

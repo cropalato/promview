@@ -11,6 +11,7 @@ function group(overrides: Partial<AlertGroupSummary> = {}): AlertGroupSummary {
     key: { alertname: 'Cardinality', source: 'yul' },
     total: 52,
     acknowledged: 3,
+    silenced: 0,
     severityCounts: { critical: 1, warning: 51 },
     worstSeverity: 'critical',
     latestLastSeen: new Date().toISOString(),
@@ -34,6 +35,7 @@ function member(id: string, instance: string): AlertSummary {
     notes: 0,
     labels: { alertname: 'Cardinality', instance },
     suppressed: false,
+    silencedBy: [],
     lastSeen: new Date().toISOString(),
   };
 }
@@ -784,5 +786,37 @@ describe('AlertGroupTable sortable headers', () => {
     // Silencing a group and opening it are different intentions, and the click
     // lands on both without the handler stopping it.
     expect(onExpand).not.toHaveBeenCalled();
+  });
+});
+
+function renderGroups(groups: AlertGroupSummary[]) {
+  render(
+    <AlertGroupTable
+      groups={groups}
+      children={{}}
+      onExpand={noop}
+      onCollapse={noop}
+      onLoadMoreChildren={noop}
+    />,
+  );
+}
+
+describe('silenced groups', () => {
+  it('says how much of a group is being held back', () => {
+    renderGroups([group({ total: 52, silenced: 7 })]);
+    // Without the fraction a mostly-silenced group reads exactly like a
+    // mostly-firing one, which is the pair an operator has to tell apart.
+    expect(screen.getByText('7/52 silenced')).toBeInTheDocument();
+  });
+
+  it('marks a wholly silenced group without hiding it', () => {
+    renderGroups([group({ total: 4, silenced: 4 })]);
+    expect(screen.getByText('silenced')).toBeInTheDocument();
+    expect(screen.getByText('Cardinality')).toBeInTheDocument();
+  });
+
+  it('stays out of the way when nothing is silenced', () => {
+    renderGroups([group({ silenced: 0 })]);
+    expect(screen.queryByText(/silenced/)).not.toBeInTheDocument();
   });
 });

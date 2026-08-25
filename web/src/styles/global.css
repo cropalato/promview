@@ -1506,6 +1506,19 @@ kbd {
   border-color: color-mix(in srgb, var(--warning) 45%, var(--border-strong));
 }
 
+/* An inhibition is not a silence: nobody chose it and it lifts itself when its
+   parent alert clears. Dashed so the two never read as the same decision. */
+.state-inhibited {
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+  border-style: dashed;
+}
+
+/* Every member held back, not just some: the group needs no fraction. */
+.state-suppressed.is-total {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
 /* Expired is quieter than firing but not as settled as resolved: the source went
    quiet rather than reporting a resolution, so it reads as unresolved-unknown. */
 .state-expired {
@@ -1901,6 +1914,82 @@ kbd {
 
 .silence-result-source {
   color: var(--text);
+}
+
+/* Targets whose match is narrower than what the group has in common. Showing
+   only the common match would name a broader scope than what gets written. */
+.silence-targets ul {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.silence-targets li {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+/* Dimmed, never hidden: a silenced alert is still firing, and an operator has
+   to be able to see that somebody chose to hold it back. Opacity alone would
+   carry the whole message, so the chip beside the state carries it too. */
+.alert-table tbody tr.row-suppressed td,
+.alert-table tbody tr.row-suppressed th {
+  opacity: 0.55;
+}
+
+.alert-table tbody tr.row-suppressed:hover td,
+.alert-table tbody tr.row-suppressed:hover th {
+  opacity: 1;
+}
+
+/* Which alerts the list is showing, next to the filter it complements. */
+.silence-filter {
+  flex: none;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.silence-filter-option {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.silence-filter-option + .silence-filter-option {
+  border-left: 1px solid var(--border);
+}
+
+.silence-filter-option:hover {
+  color: var(--text);
+}
+
+.silence-filter-option.is-active {
+  color: var(--text);
+  background: var(--surface-raised, var(--border));
+}
+
+/* Provenance for each silence holding the open alert back. */
+.detail-silences {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* Alert detail drawer: right-side non-modal panel on desktop */

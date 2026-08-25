@@ -52,6 +52,10 @@ export interface AlertDetail {
   acknowledgedBy: string;
   /** Acknowledgement timestamp; null when not acknowledged. */
   acknowledgedAt: string | null;
+  /** A silence or inhibition is holding this alert back at the source. */
+  suppressed: boolean;
+  /** Ids of the silences currently matching; empty means inhibited instead. */
+  silencedBy: string[];
   /** Server-provided actions the caller may run against this alert. */
   actions: AlertActions;
   /** Source payload as delivered by Alertmanager; rendered as plain JSON. */
@@ -72,10 +76,29 @@ export interface AlertHistoryEvent {
   occurredAt: string;
 }
 
+/**
+ * A silence promview created itself, kept after Alertmanager expired it.
+ *
+ * Only promview's own silences appear here. One made straight on the
+ * Alertmanager is just as real and just as suppressing, and the drawer says so
+ * rather than inventing an author for it.
+ */
+export interface AlertSilenceRecord {
+  source: string;
+  silenceId: string;
+  matchers: Record<string, string>;
+  createdBy: string;
+  comment: string;
+  startsAt: string;
+  endsAt: string;
+}
+
 /** The validated detail endpoint payload. */
 export interface AlertDetailResult {
   alert: AlertDetail;
   history: AlertHistoryEvent[];
+  /** Provenance for the silences named in `alert.silencedBy`, where known. */
+  silences: AlertSilenceRecord[];
 }
 
 /** Human labels for the lifecycle event types the API emits today. */
@@ -213,7 +236,48 @@ export function parseAlertDetailResponse(body: unknown): AlertDetailResult {
   return {
     alert: parseAlertDetail(record.alert),
     history: historyValue === null || historyValue === undefined ? [] : parseHistory(historyValue),
+    silences: parseSilences(record.silences),
   };
+}
+
+/**
+ * Silence provenance never fails the whole detail. A malformed or absent entry
+ * costs an explanation; refusing to render the alert costs the operator the
+ * alert itself, which is the worse trade.
+ */
+function parseSilences(value: unknown): AlertSilenceRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry): AlertSilenceRecord[] => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return [];
+    }
+    const raw = entry as Record<string, unknown>;
+    const silenceId = optionalString(raw.silenceId);
+    if (silenceId === '') {
+      return [];
+    }
+    const matchers: Record<string, string> = {};
+    if (typeof raw.matchers === 'object' && raw.matchers !== null && !Array.isArray(raw.matchers)) {
+      for (const [name, item] of Object.entries(raw.matchers as Record<string, unknown>)) {
+        if (typeof item === 'string') {
+          matchers[name] = item;
+        }
+      }
+    }
+    return [
+      {
+        source: optionalString(raw.source),
+        silenceId,
+        matchers,
+        createdBy: optionalString(raw.createdBy),
+        comment: optionalString(raw.comment),
+        startsAt: optionalString(raw.startsAt),
+        endsAt: optionalString(raw.endsAt),
+      },
+    ];
+  });
 }
 
 function parseAlertDetail(value: unknown): AlertDetail {
@@ -248,6 +312,10 @@ function parseAlertDetail(value: unknown): AlertDetail {
     lastSeen: requiredString(raw.lastSeen, 'alert.lastSeen'),
     repeatCount: requiredNumber(raw.repeatCount, 'alert.repeatCount'),
     occurrence: requiredNumber(raw.occurrence, 'alert.occurrence'),
+    suppressed: raw.suppressed === true,
+    silencedBy: Array.isArray(raw.silencedBy)
+      ? raw.silencedBy.filter((entry): entry is string => typeof entry === 'string')
+      : [],
     acknowledged: raw.acknowledged === true,
     acknowledgedBy: optionalString(raw.acknowledgedBy),
     acknowledgedAt:
