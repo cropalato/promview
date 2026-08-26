@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.31] - 2026-08-26
+
 ### Fixed
 
 - **desktop:** the installers are named after the release they are. `tauri.conf.json` carried a fixed `0.1.0`, and that is what named every bundle, so alpha.29 and alpha.30 both shipped as `Promview_0.1.0_amd64.deb` and could only be told apart by download date. Only the Arch package escaped it, because that job derives its version separately. The release workflow now stamps the tag in rather than committing it, so no release needs a commit that only moves a number.
