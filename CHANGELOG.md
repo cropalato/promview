@@ -6,6 +6,15 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **desktop:** the installers are named after the release they are. `tauri.conf.json` carried a fixed `0.1.0`, and that is what named every bundle, so alpha.29 and alpha.30 both shipped as `Promview_0.1.0_amd64.deb` and could only be told apart by download date. Only the Arch package escaped it, because that job derives its version separately. The release workflow now stamps the tag in rather than committing it, so no release needs a commit that only moves a number.
+- **desktop:** the RPM carries a version RPM allows. A hyphen is illegal in the Version field — it separates name, version and release — and Tauri does not sanitize one, so stamping `0.1.0-alpha.30` there produced a package whose own metadata could not be parsed back. Version now holds `0.1.0` and Release holds `0.alpha.30`, the convention that also sorts a pre-release below the final version instead of above it. MSI takes a four-number product version derived the same way.
+
+### Build System
+
+- **release:** the desktop bundles can be built without a tag. CI compiles the Tauri crate but never packages it, and MSI and NSIS exist only on a Windows runner, so a packaging change was first exercised by the release that depended on it. A manual run now produces the installers and nothing else; publishing stays tag-only.
+
 ## [0.1.0-alpha.30] - 2026-08-25
 
 ### Fixed
