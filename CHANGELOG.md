@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.32] - 2026-08-26
+
 ### Added
 
 - **chart:** scraping configures itself. Where the Prometheus Operator's CRD exists the chart renders a `ServiceMonitor`; where it does not, it falls back to `prometheus.io/scrape` pod annotations. The two are mutually exclusive, so a pod is never scraped twice under two job names, and enabling one cannot leave a cluster with neither. The metrics port joins the Service so a ServiceMonitor can select it — the Ingress routes to the port named `http`, so another named port is not somewhere it can send traffic. Note that Prometheus selects ServiceMonitors by a label its own installation chooses; set `metrics.serviceMonitor.labels` to match, or the object is created and quietly ignored.
