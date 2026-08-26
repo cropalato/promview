@@ -28,6 +28,49 @@ Sessions, OIDC transactions, alerts, and resumable stream events are stored in P
 - Configure CPU and memory requests and limits from observed workload data.
 - Back up PostgreSQL before upgrades. Helm rollback does not reverse database migrations.
 
+## Upgrading
+
+The chart is packaged with its `version` and `appVersion` set to the same release
+tag, and the Deployment resolves its image as `default .Chart.AppVersion
+.Values.image.tag`. Unless a deployment overrides `image.tag`, **the chart version
+it pins is the application version it runs.** Upgrading is therefore a single
+change: move the pinned chart version.
+
+Where that pin lives depends on how the chart is applied. A `helm upgrade` names it
+with `--version`; a GitOps repository holding a `helmfile.yaml`, an Argo CD
+`Application`, or a Flux `HelmRelease` holds it in the manifest. Publishing a
+release does not reach a cluster on its own — whatever holds the pin has to be
+bumped, and a pin left behind is why a cluster can sit several releases back
+without anything reporting a problem.
+
+Apply the upgrade through Helm, not by editing the running Deployment. The
+migration Job is a `pre-install,pre-upgrade` hook, so Helm runs it to completion
+before the Deployment rolls; changing the image on a live Deployment bypasses the
+hook entirely, and the new binary then starts against the old schema. Promview
+refuses to serve in that state rather than answering errors it cannot explain:
+
+```
+ERROR promview stopped error="database schema is behind this binary; run `promview migrate` first (unapplied: 000015_silence_provenance.up.sql)"
+```
+
+Recovering from that needs migrations run as their own workload, because the
+application pod will not stay up long enough to exec into. Re-running the upgrade
+through Helm is usually enough, since the hook Job is independent of the
+Deployment:
+
+```sh
+helm upgrade promview oci://ghcr.io/cropalato/charts/promview \
+  --namespace promview --reuse-values --version <release>
+```
+
+Name the version explicitly. `--reuse-values` alone reinstates the version the
+release already recorded, which runs the migration Job on the *old* image and
+leaves the schema exactly where it was.
+
+The guard only refuses the serve path. `promview migrate`, `promview source`, and
+`promview access` still run against a schema behind the binary, so the tools for
+repairing one are never the thing it locks away.
+
 ## Quick Start
 
 ```sh
@@ -37,7 +80,7 @@ kubectl --namespace promview create secret generic promview-database \
 
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.11
+  --version 0.1.0-alpha.30
 ```
 
 Alert staleness is configured through chart values, which render into the application
