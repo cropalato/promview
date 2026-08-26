@@ -34,6 +34,12 @@ default `metrics.annotations` ask it to do.
 | `promview_silence_writes_total` | counter | `alertmanager`, `result` | Whether silences are reaching the Alertmanager at all. |
 | `promview_silence_records_total` | counter | `result` | A provenance write that fails does not fail the silence, so this is the only place its failure is visible. |
 | `promview_build_info` | gauge | `version` | Always 1. Confirms which build is actually running. |
+| `promview_stream_clients` | gauge | — | Event-stream connections open right now. The multiplier on everything below. |
+| `promview_stream_polls_total` | counter | — | Database reads made for stream clients. This *is* the polling load. |
+| `promview_stream_events_sent_total` | counter | — | Events actually delivered. Interesting against the polls. |
+| `promview_db_connections` | gauge | `state` | `acquired`, `idle`, `total`, `max`, sampled at scrape time. |
+| `promview_db_acquire_waits_total` | counter | — | Acquisitions that had to wait. The saturation signal. |
+| `promview_db_acquire_duration_seconds_total` | counter | — | Cumulative wait, so `rate()` reads as contention. |
 
 Go runtime and process collectors are registered alongside them.
 
@@ -60,6 +66,31 @@ stuck syncing suppression without ever confirming an ending still looks stale he
 Route this somewhere that does not need Promview to read it. Alertmanager notifies
 through its own receivers regardless, so this works today — it is worth being
 deliberate about rather than accidental.
+
+### What the stream metrics are for
+
+`docs/kubernetes.md` says to measure PostgreSQL connection and event-stream load
+before scaling past one replica. These are how.
+
+Each connected console runs a loop that reads the event stream on a 500ms timer, and
+re-authenticates every 15 seconds — under OIDC that is another database round trip. So
+one idle console costs roughly **two queries a second**, and twenty of them left open
+is ~40 queries a second before anybody has done anything.
+
+Measured on a running server with two clients connected and nothing happening: 22 polls
+delivered 0 events. That ratio is the number worth watching.
+
+```promql
+rate(promview_stream_events_sent_total[5m]) / rate(promview_stream_polls_total[5m])
+```
+
+A ratio near zero says the polling is almost entirely waste, which is the argument for
+replacing the timer with PostgreSQL `LISTEN`/`NOTIFY`. It is a change worth making on
+evidence rather than on instinct, and this is the evidence.
+
+`promview_db_acquire_waits_total` is the other half. A pool under pressure answers
+slowly long before it answers with an error, so waiting shows up here well before
+anything surfaces as a 500.
 
 ## Cardinality
 

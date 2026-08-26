@@ -86,6 +86,9 @@ func run() error {
 	// Promview is what an operator looks at when something else breaks, so its
 	// own failures are the ones most likely to go unseen. See internal/metrics.
 	instruments := metrics.New(version)
+	// Every open console polls the database on a timer, so the pool is the
+	// ceiling this scales against long before anything else is.
+	instruments.WatchPool(poolSnapshot(pool))
 
 	store := countingStore{Store: postgres.New(pool), metrics: instruments}
 	if cfg.BootstrapSourceSlug != "" {
@@ -140,7 +143,12 @@ func run() error {
 	server := &http.Server{
 		Addr: cfg.ListenAddress,
 		Handler: httpapi.NewObserved(
-			instruments.ObserveRequest,
+			httpapi.Observers{
+				Request:      instruments.ObserveRequest,
+				StreamOpened: instruments.StreamOpened,
+				StreamClosed: instruments.StreamClosed,
+				StreamPolled: instruments.StreamPolled,
+			},
 			cfg, store, authenticator, apiSilencer, authenticationHandler,
 		),
 		ReadHeaderTimeout: 5 * time.Second,

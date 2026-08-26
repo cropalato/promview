@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/cropalato/promview/internal/alertmanager"
 	"github.com/cropalato/promview/internal/alerts"
 	"github.com/cropalato/promview/internal/metrics"
@@ -55,4 +57,25 @@ func (store countingStore) RecordSilence(ctx context.Context, record alerts.Sile
 	// unexplainable later.
 	store.metrics.SilenceRecorded(err)
 	return err
+}
+
+// poolSnapshot adapts the driver's own statistics onto the shape internal/metrics
+// asks for.
+//
+// The mapping lives here rather than there so the metrics package stays ignorant
+// of how promview stores anything: it is the wiring that already knows both
+// sides, and the alternative is a package that reports on the database having to
+// import the database.
+func poolSnapshot(pool *pgxpool.Pool) func() metrics.PoolSnapshot {
+	return func() metrics.PoolSnapshot {
+		stat := pool.Stat()
+		return metrics.PoolSnapshot{
+			Acquired:      stat.AcquiredConns(),
+			Idle:          stat.IdleConns(),
+			Total:         stat.TotalConns(),
+			Max:           stat.MaxConns(),
+			EmptyAcquires: stat.EmptyAcquireCount(),
+			AcquireWait:   stat.AcquireDuration(),
+		}
+	}
 }

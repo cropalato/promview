@@ -51,12 +51,27 @@ type API struct {
 	// silencer is nil in a deployment that cannot write to an Alertmanager; the
 	// silence routes then answer 501 rather than 404, so the console can tell
 	// "not built" from "not configured here".
-	silencer Silencer
+	silencer  Silencer
+	observers Observers
 }
 
-// Observer records one served request. Route is the pattern that matched, not
-// the path that arrived.
-type Observer func(route, method string, status int, elapsed time.Duration)
+// Observers are the hooks a caller can supply to watch the transport work.
+//
+// A struct rather than parameters because the set grows: it started as one
+// request hook, and adding each new one positionally would have every existing
+// call site naming things it does not care about. Any field may be nil.
+type Observers struct {
+	// Request records one served request. Route is the pattern that matched,
+	// not the path that arrived.
+	Request func(route, method string, status int, elapsed time.Duration)
+	// StreamOpened and StreamClosed bracket one event-stream connection.
+	StreamOpened func()
+	StreamClosed func()
+	// StreamPolled records one database read made for a stream client, and how
+	// many events it returned. Every open console does this on a timer, so it
+	// is the polling load rather than a sign of activity.
+	StreamPolled func(events int)
+}
 
 func New(
 	cfg config.Config,
@@ -65,25 +80,25 @@ func New(
 	silencer Silencer,
 	authenticationHandlers ...http.Handler,
 ) http.Handler {
-	return NewObserved(nil, cfg, store, authenticator, silencer, authenticationHandlers...)
+	return NewObserved(Observers{}, cfg, store, authenticator, silencer, authenticationHandlers...)
 }
 
-// NewObserved is New with request instrumentation. It is a separate
-// constructor rather than another parameter because observation is the one
-// thing a caller can reasonably not want, and threading a nil through every
-// existing call site would make every one of them mention it.
+// NewObserved is New with instrumentation. It is a separate constructor rather
+// than another parameter because observation is the one thing a caller can
+// reasonably not want, and threading an empty struct through every existing
+// call site would make every one of them mention it.
 //
-// A nil observer returns the bare mux, so an uninstrumented deployment pays
-// nothing at all - not even a wrapper.
+// Observers with no request hook returns the bare mux, so an uninstrumented
+// deployment pays nothing at all - not even a wrapper.
 func NewObserved(
-	observe Observer,
+	observers Observers,
 	cfg config.Config,
 	store Store,
 	authenticator auth.Authenticator,
 	silencer Silencer,
 	authenticationHandlers ...http.Handler,
 ) http.Handler {
-	api := &API{config: cfg, store: store, authenticator: authenticator, silencer: silencer}
+	api := &API{config: cfg, store: store, authenticator: authenticator, silencer: silencer, observers: observers}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/config", api.getConfig)
 	mux.Handle("GET /api/v1/me", api.requireAuthentication(http.HandlerFunc(api.getMe)))
@@ -116,10 +131,10 @@ func NewObserved(
 	mux.HandleFunc("GET /health/live", api.live)
 	mux.HandleFunc("GET /health/ready", api.ready)
 	mux.Handle("GET /", spaHandler(cfg.WebDirectory))
-	if observe == nil {
+	if observers.Request == nil {
 		return mux
 	}
-	return observeRequests(mux, observe)
+	return observeRequests(mux, observers.Request)
 }
 
 // observeRequests times each request and reports it against the route that
@@ -130,7 +145,7 @@ func NewObserved(
 // is not the one out here, so by the time this sees it again the field is still
 // empty. Routing twice costs a trie lookup and buys a label that cannot carry
 // an alert id.
-func observeRequests(mux *http.ServeMux, observe Observer) http.Handler {
+func observeRequests(mux *http.ServeMux, observe func(string, string, int, time.Duration)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := mux.Handler(r)
 		if pattern == "" {
@@ -454,6 +469,14 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if api.observers.StreamOpened != nil {
+		api.observers.StreamOpened()
+		// Deferred rather than counted at each exit: this loop returns from
+		// seven places, and the one that gets forgotten is the one that leaks
+		// the gauge upward until it looks like a connection nobody closed.
+		defer api.observers.StreamClosed()
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -480,6 +503,9 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 		batch, err := api.store.StreamEvents(r.Context(), principal, afterID, 100)
 		if err != nil {
 			return
+		}
+		if api.observers.StreamPolled != nil {
+			api.observers.StreamPolled(len(batch.Events))
 		}
 		for _, event := range batch.Events {
 			payload := map[string]any{

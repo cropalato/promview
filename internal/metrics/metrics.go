@@ -33,6 +33,25 @@ const (
 	ReasonUntrusted  = "untrusted"
 )
 
+// PoolSnapshot is a database pool's state at one instant.
+//
+// A plain struct rather than the driver's own, so this package stays ignorant
+// of how promview stores anything. The adapter that fills it lives with the
+// wiring, which is the only place that already knows.
+type PoolSnapshot struct {
+	Acquired int32
+	Idle     int32
+	Total    int32
+	Max      int32
+	// EmptyAcquires counts acquisitions that had to wait for a free connection.
+	// It is the saturation signal: a pool under pressure answers slowly long
+	// before it answers with an error.
+	EmptyAcquires int64
+	// AcquireWait is the cumulative time spent waiting, so a rate() over it
+	// reads as contention rather than as a single unhelpful total.
+	AcquireWait time.Duration
+}
+
 // Metrics is promview's own instrumentation.
 //
 // Every method is safe to call on a nil receiver, so a caller that was not
@@ -49,6 +68,10 @@ type Metrics struct {
 
 	silenceWrites  *prometheus.CounterVec
 	silenceRecords *prometheus.CounterVec
+
+	streamClients    prometheus.Gauge
+	streamPolls      prometheus.Counter
+	streamEventsSent prometheus.Counter
 }
 
 // New builds the collectors on a registry of their own.
@@ -95,6 +118,24 @@ func New(version string) *Metrics {
 			Name: "promview_silence_records_total",
 			Help: "Attempts to record a created silence's provenance, by outcome.",
 		}, []string{"result"}),
+		streamClients: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "promview_stream_clients",
+			Help: "Event-stream connections currently open.",
+		}),
+		streamPolls: prometheus.NewCounter(prometheus.CounterOpts{
+			// Each open console polls the database on a timer, so this is the
+			// load itself rather than a proxy for it: it rises with the number
+			// of consoles somebody left open, not with anything they did.
+			Name: "promview_stream_polls_total",
+			Help: "Database reads made on behalf of event-stream clients.",
+		}),
+		streamEventsSent: prometheus.NewCounter(prometheus.CounterOpts{
+			// Against the polls above this gives the useful ratio. Polling that
+			// almost never finds anything is work being paid for continuously,
+			// and the number is what would justify replacing it.
+			Name: "promview_stream_events_sent_total",
+			Help: "Events delivered to event-stream clients.",
+		}),
 	}
 
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -112,6 +153,9 @@ func New(version string) *Metrics {
 		m.reconcileLastSuccess,
 		m.silenceWrites,
 		m.silenceRecords,
+		m.streamClients,
+		m.streamPolls,
+		m.streamEventsSent,
 		buildInfo,
 	)
 	return m
@@ -184,4 +228,85 @@ func resultOf(err error) string {
 		return "error"
 	}
 	return "ok"
+}
+
+// StreamOpened and StreamClosed track connections currently held open.
+func (m *Metrics) StreamOpened() {
+	if m == nil {
+		return
+	}
+	m.streamClients.Inc()
+}
+
+func (m *Metrics) StreamClosed() {
+	if m == nil {
+		return
+	}
+	m.streamClients.Dec()
+}
+
+// StreamPolled records one read made for a stream client, and what it found.
+func (m *Metrics) StreamPolled(events int) {
+	if m == nil {
+		return
+	}
+	m.streamPolls.Inc()
+	if events > 0 {
+		m.streamEventsSent.Add(float64(events))
+	}
+}
+
+// WatchPool reports a database pool's state, read at scrape time.
+//
+// Sampled on collection rather than on a timer of its own: a background
+// goroutine would have to pick an interval, and every interval is either stale
+// when it matters or busy when it does not. A pool's state is cheap to ask for
+// and only interesting at the moment somebody asks.
+func (m *Metrics) WatchPool(snapshot func() PoolSnapshot) {
+	if m == nil || snapshot == nil {
+		return
+	}
+	m.registry.MustRegister(&poolCollector{snapshot: snapshot})
+}
+
+type poolCollector struct {
+	snapshot func() PoolSnapshot
+}
+
+var (
+	poolConnections = prometheus.NewDesc(
+		"promview_db_connections",
+		"Database pool connections, by state.",
+		[]string{"state"}, nil,
+	)
+	poolEmptyAcquires = prometheus.NewDesc(
+		"promview_db_acquire_waits_total",
+		"Acquisitions that had to wait for a free connection.",
+		nil, nil,
+	)
+	poolAcquireWait = prometheus.NewDesc(
+		"promview_db_acquire_duration_seconds_total",
+		"Cumulative time spent waiting to acquire a connection.",
+		nil, nil,
+	)
+)
+
+func (c *poolCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- poolConnections
+	ch <- poolEmptyAcquires
+	ch <- poolAcquireWait
+}
+
+func (c *poolCollector) Collect(ch chan<- prometheus.Metric) {
+	stat := c.snapshot()
+	for state, value := range map[string]float64{
+		"acquired": float64(stat.Acquired),
+		"idle":     float64(stat.Idle),
+		"total":    float64(stat.Total),
+		"max":      float64(stat.Max),
+	} {
+		ch <- prometheus.MustNewConstMetric(poolConnections, prometheus.GaugeValue, value, state)
+	}
+	ch <- prometheus.MustNewConstMetric(poolEmptyAcquires, prometheus.CounterValue, float64(stat.EmptyAcquires))
+	ch <- prometheus.MustNewConstMetric(poolAcquireWait, prometheus.CounterValue, stat.AcquireWait.Seconds())
 }
