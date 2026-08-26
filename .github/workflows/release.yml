@@ -4,6 +4,17 @@ on:
   push:
     tags:
       - "v*"
+  # The desktop bundles are the one thing no other workflow builds: CI compiles
+  # the Tauri crate but never packages it, and MSI and NSIS only exist on a
+  # Windows runner. Without a way to run this deliberately, the first time a
+  # packaging change is exercised is the release that depends on it. Publishing
+  # stays tag-only; a manual run produces artifacts and nothing else.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp into the desktop bundles"
+        required: false
+        default: "0.0.0-dispatch.0"
 
 permissions:
   # contents: write so the desktop installers can be attached to a release.
@@ -16,6 +27,8 @@ env:
 
 jobs:
   publish:
+    # A manual run exists to exercise packaging, not to ship anything.
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -108,7 +121,94 @@ jobs:
         working-directory: web
       - run: npm ci
         working-directory: desktop
-      - run: npm run build
+
+      # tauri.conf.json carries a fixed version so a working copy builds without
+      # a tag. Leaving it there would name every installer after that version,
+      # which is how alpha.29 and alpha.30 shipped as indistinguishable files.
+      # The release version is stamped in here instead of committed, so no
+      # release needs a commit that only moves a number.
+      - name: Resolve the release version
+        id: version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${DISPATCH_VERSION}"
+          fi
+          core="${version%%-*}"
+          if [ "${core}" = "${version}" ]; then
+            # A final release: nothing to encode anywhere.
+            wix="${core}"
+            rpm_release="1"
+          else
+            pre="${version#*-}"
+            # MSI product versions are four numbers, so the pre-release has to
+            # arrive as one. Its trailing counter is what actually distinguishes
+            # two alphas; a pre-release without one contributes zero.
+            build="${pre##*.}"
+            case "${build}" in ''|*[!0-9]*) build=0 ;; esac
+            wix="${core}.${build}"
+            # RPM forbids a hyphen in Version - it is the name-version-release
+            # separator - so the pre-release belongs in Release. The leading 0
+            # is the Fedora convention that sorts a pre-release below the final
+            # version rather than above it.
+            rpm_release="0.${pre}"
+          fi
+          {
+            echo "version=${version}"
+            echo "core=${core}"
+            echo "wix=${wix}"
+            echo "rpm_release=${rpm_release}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "version=${version} wix=${wix} rpm=${core}-${rpm_release}"
+
+      - name: Stamp the version into the bundle configuration
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          WIX_VERSION: ${{ steps.version.outputs.wix }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = "desktop/src-tauri/tauri.conf.json";
+            const config = JSON.parse(fs.readFileSync(path, "utf8"));
+            config.version = process.env.APP_VERSION;
+            config.bundle = config.bundle || {};
+            config.bundle.windows = config.bundle.windows || {};
+            config.bundle.windows.wix = config.bundle.windows.wix || {};
+            config.bundle.windows.wix.version = process.env.WIX_VERSION;
+            fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+          '
+
+      # Linux builds the deb from the stamped configuration; Windows builds the
+      # NSIS and MSI installers. Tauri skips the targets that do not belong to
+      # the host, so one command covers both.
+      - run: npm run build -- --bundles ${{ matrix.os == 'ubuntu-latest' && 'deb' || 'nsis,msi' }}
+        working-directory: desktop
+
+      # The RPM is built separately because it is the one format that cannot
+      # carry the version as written. Overriding the two fields here rather
+      # than in the stamped file keeps the deb and the installers on the exact
+      # release version.
+      - name: Bundle the RPM with an RPM-legal version
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          RPM_CORE: ${{ steps.version.outputs.core }}
+          RPM_RELEASE: ${{ steps.version.outputs.rpm_release }}
+        run: |
+          set -eu
+          config=$(node -e '
+            console.log(JSON.stringify({
+              version: process.env.RPM_CORE,
+              bundle: { linux: { rpm: { release: process.env.RPM_RELEASE } } },
+            }));
+          ')
+          npx tauri build --bundles rpm --config "${config}"
         working-directory: desktop
 
       - uses: actions/upload-artifact@v4
@@ -138,6 +238,8 @@ jobs:
           path: bundles
 
       - name: Build the package
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
           set -eu
           pacman -Sy --noconfirm --needed libarchive
@@ -147,8 +249,13 @@ jobs:
           cp desktop/packaging/arch/PKGBUILD /work/
           cp bundles/deb/*.deb /work/promview-desktop.deb
           # The tag is the version; strip the leading v and any pre-release
-          # suffix pacman would reject in pkgver.
-          version="${GITHUB_REF_NAME#v}"
+          # suffix pacman would reject in pkgver. A manual run has no tag, so
+          # it takes the version it was given, like the bundles it repackages.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${DISPATCH_VERSION}"
+          fi
           sed -i "s/^pkgver=.*/pkgver=${version//-/_}/" /work/PKGBUILD
           chown -R builder /work
           su builder -c "cd /work && makepkg --nodeps --noconfirm"
@@ -162,6 +269,7 @@ jobs:
 
   # A separate job so the two builds cannot race to create the same release.
   release:
+    if: github.ref_type == 'tag'
     needs: [publish, desktop, desktop-arch]
     runs-on: ubuntu-latest
     steps:
