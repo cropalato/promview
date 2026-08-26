@@ -81,6 +81,22 @@ silence:
   defaultDuration: 2h
   maxDuration: 720h
 
+# Promview reports on itself: request outcomes, whether reconciliation is still
+# running, and whether silences reach their Alertmanager. See docs/metrics.md.
+#
+# The endpoint is a listener of its own and is never added to the Service or the
+# Ingress, so enabling it does not expose anything publicly. Prometheus is
+# expected to scrape the pod, which the annotations below ask it to do.
+metrics:
+  enabled: true
+  port: 9090
+  # Set podAnnotations yourself if your Prometheus discovers by a different
+  # convention, or use a ServiceMonitor pointing at the pod.
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: /metrics
+
 migration:
   enabled: true
   backoffLimit: 3

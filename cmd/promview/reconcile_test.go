@@ -73,7 +73,7 @@ func TestReconcilerRequiresConsecutiveAbsences(t *testing.T) {
 		firing:  map[string][]string{"yul": {"present", "gone"}},
 	}
 	client := &fakeAlertmanager{live: []alertmanager.LiveAlert{{Fingerprint: "present"}}}
-	r := newReconciler(store, client)
+	r := newReconciler(store, client, nil)
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 
 	// One absent reading is not evidence: a request can be dropped, and an
@@ -104,7 +104,7 @@ func TestReconcilerForgetsAnAlertThatComesBack(t *testing.T) {
 		{{Fingerprint: "flapping"}},
 		{},
 	}}
-	r := newReconciler(store, client)
+	r := newReconciler(store, client, nil)
 	now := time.Now().UTC()
 
 	for i := 0; i < 3; i++ {
@@ -127,7 +127,7 @@ func TestReconcilerNeverResolvesOnAnEmptyAlertmanager(t *testing.T) {
 		firing:  map[string][]string{"yul": {"a", "b", "c"}},
 	}
 	client := &fakeAlertmanager{live: nil}
-	r := newReconciler(store, client)
+	r := newReconciler(store, client, nil)
 	now := time.Now().UTC()
 
 	for pass := 0; pass < 5; pass++ {
@@ -153,7 +153,7 @@ func TestReconcilerResumesResolvingOnceTheAlertmanagerReportsAgain(t *testing.T)
 		{{Fingerprint: "a"}}, // back, "gone" genuinely absent
 		{{Fingerprint: "a"}}, // second consecutive absence
 	}}
-	r := newReconciler(store, client)
+	r := newReconciler(store, client, nil)
 	now := time.Now().UTC()
 
 	for pass := 0; pass < 3; pass++ {
@@ -174,7 +174,7 @@ func TestReconcilerLeavesASourceAloneWhenItCannotBeRead(t *testing.T) {
 		firing:  map[string][]string{"yul": {"a"}},
 	}
 	client := &fakeAlertmanager{err: errors.New("connection refused")}
-	r := newReconciler(store, client)
+	r := newReconciler(store, client, nil)
 
 	r.reconcileOnce(context.Background(), time.Now().UTC())
 
@@ -191,7 +191,7 @@ func TestReconcilerPassesSuppressionThrough(t *testing.T) {
 		firing:  map[string][]string{"yul": {"silenced"}},
 	}
 	client := &fakeAlertmanager{live: []alertmanager.LiveAlert{{Fingerprint: "silenced", Suppressed: true}}}
-	r := newReconciler(store, client)
+	r := newReconciler(store, client, nil)
 
 	r.reconcileOnce(context.Background(), time.Now().UTC())
 
@@ -204,7 +204,7 @@ func TestRunReconciliationSkipsWhenDisabled(t *testing.T) {
 	store := &fakeReconcileStore{}
 	done := make(chan struct{})
 	go func() {
-		runReconciliation(context.Background(), store, &fakeAlertmanager{}, 0)
+		runReconciliation(context.Background(), store, &fakeAlertmanager{}, nil, 0)
 		close(done)
 	}()
 	select {

@@ -12,7 +12,13 @@ RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY --from=web-build /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/promview ./cmd/promview
+# Stamped so the running binary can say what it is. Without it promview_build_info
+# reports "dev" everywhere and "did the rollout land" stays unanswerable from
+# outside the cluster.
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /out/promview ./cmd/promview
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates \

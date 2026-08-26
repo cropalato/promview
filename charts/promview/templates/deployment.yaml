@@ -14,6 +14,11 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.metrics.enabled }}
+        {{- with .Values.metrics.annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -42,6 +47,15 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            # Deliberately not on the Service or the Ingress. The labels name
+            # sources and teams, and this is commonly reachable from the
+            # internet; a port nothing publishes cannot leak them by being
+            # forgotten. Prometheus scrapes the pod directly.
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "promview.fullname" . }}

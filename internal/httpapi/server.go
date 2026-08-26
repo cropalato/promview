@@ -54,7 +54,29 @@ type API struct {
 	silencer Silencer
 }
 
+// Observer records one served request. Route is the pattern that matched, not
+// the path that arrived.
+type Observer func(route, method string, status int, elapsed time.Duration)
+
 func New(
+	cfg config.Config,
+	store Store,
+	authenticator auth.Authenticator,
+	silencer Silencer,
+	authenticationHandlers ...http.Handler,
+) http.Handler {
+	return NewObserved(nil, cfg, store, authenticator, silencer, authenticationHandlers...)
+}
+
+// NewObserved is New with request instrumentation. It is a separate
+// constructor rather than another parameter because observation is the one
+// thing a caller can reasonably not want, and threading a nil through every
+// existing call site would make every one of them mention it.
+//
+// A nil observer returns the bare mux, so an uninstrumented deployment pays
+// nothing at all - not even a wrapper.
+func NewObserved(
+	observe Observer,
 	cfg config.Config,
 	store Store,
 	authenticator auth.Authenticator,
@@ -94,7 +116,63 @@ func New(
 	mux.HandleFunc("GET /health/live", api.live)
 	mux.HandleFunc("GET /health/ready", api.ready)
 	mux.Handle("GET /", spaHandler(cfg.WebDirectory))
-	return mux
+	if observe == nil {
+		return mux
+	}
+	return observeRequests(mux, observe)
+}
+
+// observeRequests times each request and reports it against the route that
+// matched.
+//
+// The pattern is asked of the mux before serving rather than read from the
+// request afterwards: ServeMux sets Pattern on the request it hands down, which
+// is not the one out here, so by the time this sees it again the field is still
+// empty. Routing twice costs a trie lookup and buys a label that cannot carry
+// an alert id.
+func observeRequests(mux *http.ServeMux, observe Observer) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pattern := mux.Handler(r)
+		if pattern == "" {
+			// Nothing matched. Reporting the path instead would make every
+			// stray request its own time series.
+			pattern = "unmatched"
+		}
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		started := time.Now()
+		mux.ServeHTTP(recorder, r)
+		observe(pattern, r.Method, recorder.status, time.Since(started))
+	})
+}
+
+// statusRecorder remembers the status code on its way out.
+//
+// It forwards Flush because /api/v1/stream is a long-lived SSE response: a
+// wrapper that swallowed Flush would leave every event sitting in a buffer, and
+// the console would look connected while receiving nothing.
+type statusRecorder struct {
+	http.ResponseWriter
+	status  int
+	written bool
+}
+
+func (recorder *statusRecorder) WriteHeader(status int) {
+	if !recorder.written {
+		recorder.status = status
+		recorder.written = true
+	}
+	recorder.ResponseWriter.WriteHeader(status)
+}
+
+func (recorder *statusRecorder) Write(b []byte) (int, error) {
+	recorder.written = true
+	return recorder.ResponseWriter.Write(b)
+}
+
+func (recorder *statusRecorder) Flush() {
+	if flusher, ok := recorder.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 type principalContextKey struct{}

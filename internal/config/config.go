@@ -11,7 +11,12 @@ import (
 )
 
 type Config struct {
-	ListenAddress        string
+	ListenAddress string
+	// MetricsAddress is a listener of its own, never a route on the public one.
+	// The labels name sources and teams, and promview is commonly reachable
+	// from the internet; a port the ingress does not publish cannot leak them
+	// by being forgotten. Empty disables the endpoint.
+	MetricsAddress       string
 	DatabaseURL          string
 	AuthMode             string
 	WebDirectory         string
@@ -52,6 +57,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		ListenAddress:        envOrDefault("PROMVIEW_LISTEN_ADDRESS", ":8080"),
+		MetricsAddress:       envOrDefault("PROMVIEW_METRICS_ADDRESS", ":9090"),
 		DatabaseURL:          os.Getenv("PROMVIEW_DATABASE_URL"),
 		AuthMode:             envOrDefault("PROMVIEW_AUTH_MODE", "open"),
 		WebDirectory:         envOrDefault("PROMVIEW_WEB_DIRECTORY", "web/dist"),

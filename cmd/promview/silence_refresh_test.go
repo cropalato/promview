@@ -111,7 +111,7 @@ func TestSilenceRefreshSyncsSuppressionWithoutResolvingAnything(t *testing.T) {
 	withFastDelays(t, 2)
 	store := &refreshStore{sources: map[string]string{"demo": "http://am-a:9093"}}
 	client := &refreshClient{}
-	refresher := newSilenceRefresher(store, client)
+	refresher := newSilenceRefresher(store, client, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go refresher.run(ctx)
@@ -140,7 +140,7 @@ func TestSilenceRefreshCoversEverySourceBehindOneAlertmanager(t *testing.T) {
 		"twin":  "http://am-a:9093",
 		"other": "http://am-b:9093",
 	}}
-	refresher := newSilenceRefresher(store, &refreshClient{})
+	refresher := newSilenceRefresher(store, &refreshClient{}, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go refresher.run(ctx)
@@ -167,7 +167,7 @@ func TestSilenceRefreshRunsOneRefreshPerSourceAtATime(t *testing.T) {
 	withFastDelays(t, 3)
 	store := &refreshStore{sources: map[string]string{"demo": "http://am-a:9093"}}
 	client := &refreshClient{}
-	refresher := newSilenceRefresher(store, client)
+	refresher := newSilenceRefresher(store, client, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go refresher.run(ctx)
@@ -192,7 +192,7 @@ func TestSilenceRefreshSurvivesAnUnreadableAlertmanager(t *testing.T) {
 	withFastDelays(t, 2)
 	store := &refreshStore{sources: map[string]string{"demo": "http://am-a:9093"}}
 	client := &refreshClient{err: errors.New("connection refused")}
-	refresher := newSilenceRefresher(store, client)
+	refresher := newSilenceRefresher(store, client, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go refresher.run(ctx)
@@ -211,7 +211,7 @@ func TestSilenceRefreshIgnoresASourceItCannotReach(t *testing.T) {
 	withFastDelays(t, 1)
 	store := &refreshStore{sources: map[string]string{"demo": "http://am-a:9093"}}
 	client := &refreshClient{}
-	refresher := newSilenceRefresher(store, client)
+	refresher := newSilenceRefresher(store, client, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go refresher.run(ctx)
@@ -229,7 +229,7 @@ func TestRefreshingSilencerOnlyRefreshesAfterAWriteThatLanded(t *testing.T) {
 	withFastDelays(t, 1)
 	store := &refreshStore{sources: map[string]string{"demo": "http://am-a:9093"}}
 	client := &refreshClient{}
-	refresher := newSilenceRefresher(store, client)
+	refresher := newSilenceRefresher(store, client, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go refresher.run(ctx)
@@ -257,7 +257,7 @@ func TestRefreshingSilencerOnlyRefreshesAfterAWriteThatLanded(t *testing.T) {
 func TestRefreshingSilencerDoesNotBlockOnTheRefresh(t *testing.T) {
 	withFastDelays(t, 1)
 	store := &refreshStore{sources: map[string]string{"demo": "http://am-a:9093"}}
-	refresher := newSilenceRefresher(store, &refreshClient{})
+	refresher := newSilenceRefresher(store, &refreshClient{}, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// Deliberately not running the refresher: a queued request nobody is
