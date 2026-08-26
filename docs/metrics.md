@@ -32,7 +32,7 @@ actually has:
 
 | Cluster | What is rendered |
 | --- | --- |
-| Prometheus Operator CRD present | a `ServiceMonitor` |
+| Prometheus Operator CRD present | a `ServiceMonitor` and a `PrometheusRule` |
 | No operator | `prometheus.io/scrape` pod annotations |
 
 The two are mutually exclusive, so a pod is never scraped twice under two job names.
@@ -91,11 +91,24 @@ finished hours ago still sitting in the console, which nobody reads as a Promvie
 fault. Only a pass that could have resolved something counts as a success, so a source
 stuck syncing suppression without ever confirming an ending still looks stale here.
 
+**The chart ships this rule**, as a `PrometheusRule`, wherever the Prometheus Operator
+CRD exists — the same gate as the ServiceMonitor:
+
 ```yaml
 - alert: PromviewReconciliationStalled
   expr: time() - promview_reconcile_last_success_timestamp_seconds > 900
   for: 5m
 ```
+
+Fifteen minutes is fifteen missed passes at the default reconcile interval — long
+enough that a restart or a brief Alertmanager outage does not page anybody. Tune it
+with `metrics.prometheusRule.reconcileStaleAfter`, in seconds, since the comparison is
+arithmetic rather than a duration.
+
+It is the only rule shipped by default. A rule on the 5xx rate or on request latency
+depends on what a given deployment considers normal, and a chart guessing at those
+produces alerts that get silenced rather than fixed. Add your own through
+`metrics.prometheusRule.additionalRules`, which are appended to the same group.
 
 Route this somewhere that does not need Promview to read it. Alertmanager notifies
 through its own receivers regardless, so this works today — it is worth being

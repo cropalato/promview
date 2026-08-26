@@ -1,0 +1,48 @@
+{{- if include "promview.prometheusRuleEnabled" . }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "promview.fullname" . }}
+  labels:
+    {{- include "promview.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: {{ include "promview.fullname" . }}
+      rules:
+        # One rule by default, because it is the one failure promview cannot
+        # report any other way.
+        #
+        # Reconciliation is what learns an alert ended while it was silenced.
+        # When the loop stops it emits no errors - it simply stops - and the
+        # only symptom is alerts that finished hours ago still sitting in the
+        # console, which nobody reads as a promview fault. Everything else
+        # promview does fails loudly enough to notice; this does not.
+        #
+        # Deliberately not shipped alongside a rule on the 5xx rate or on
+        # request latency. Those thresholds depend on what a deployment
+        # considers normal, and a chart guessing at them produces alerts that
+        # get silenced rather than fixed. Add them through additionalRules.
+        - alert: PromviewReconciliationStalled
+          expr: >-
+            time() - promview_reconcile_last_success_timestamp_seconds
+            > {{ .Values.metrics.prometheusRule.reconcileStaleAfter }}
+          for: {{ .Values.metrics.prometheusRule.for }}
+          labels:
+            severity: {{ .Values.metrics.prometheusRule.severity }}
+          annotations:
+            summary: Promview has stopped reconciling {{ "{{ $labels.source }}" }}
+            description: >-
+              Promview has not completed a reconciliation pass for source
+              {{ "{{ $labels.source }}" }} in
+              {{ "{{ $value | humanizeDuration }}" }}. It is no longer learning
+              that alerts ended while they were silenced, so the console will
+              show alerts that are already over. Check the promview logs for
+              whether its Alertmanager is unreachable or its database is
+              refusing writes.
+        {{- with .Values.metrics.prometheusRule.additionalRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}
