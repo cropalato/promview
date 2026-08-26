@@ -107,6 +107,24 @@ metrics:
     relabelings: []
     metricRelabelings: []
 
+  # An alert on the one failure promview cannot report itself. See the template
+  # for why this specific rule and not a fuller set.
+  prometheusRule:
+    enabled: true
+    # Prometheus selects PrometheusRules by label the same way it selects
+    # ServiceMonitors, and the selector belongs to whoever installed it.
+    labels: {}
+    # Seconds without a successful reconciliation pass before alerting. The
+    # comparison is arithmetic, so this is a number rather than a duration.
+    # Fifteen minutes is fifteen missed passes at the default interval - long
+    # enough that a restart or a brief outage does not page anyone.
+    reconcileStaleAfter: 900
+    for: 5m
+    severity: warning
+    # Appended to the same group, so a deployment can add its own without
+    # needing a second PrometheusRule object.
+    additionalRules: []
+
   # Extra pod annotations. The prometheus.io/* trio is added by the Deployment
   # itself, with the port taken from metrics.port above, and only when no
   # ServiceMonitor is rendered - two discovery paths at once would scrape the

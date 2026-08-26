@@ -95,3 +95,14 @@ operator would get.
 true
 {{- end -}}
 {{- end -}}
+
+{{/*
+Whether a PrometheusRule will actually be rendered. Gated on the same CRD as the
+ServiceMonitor, for the same reason: a cluster without the operator would
+otherwise be handed a manifest its API server rejects.
+*/}}
+{{- define "promview.prometheusRuleEnabled" -}}
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") -}}
+true
+{{- end -}}
+{{- end -}}
