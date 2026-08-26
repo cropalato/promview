@@ -117,3 +117,97 @@ func TestTheHandlerServesWhatWasRecorded(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamClientsReturnToZero(t *testing.T) {
+	m := New("test")
+	m.StreamOpened()
+	m.StreamOpened()
+	if got := testutil.ToFloat64(m.streamClients); got != 2 {
+		t.Fatalf("clients = %v, want 2", got)
+	}
+	m.StreamClosed()
+	m.StreamClosed()
+	// A gauge that only ever rises reads as connections nobody closed, which is
+	// indistinguishable from a leak in the thing being measured.
+	if got := testutil.ToFloat64(m.streamClients); got != 0 {
+		t.Errorf("clients = %v after every client left, want 0", got)
+	}
+}
+
+func TestPollsAndEventsAdvanceIndependently(t *testing.T) {
+	m := New("test")
+	m.StreamPolled(0)
+	m.StreamPolled(0)
+	m.StreamPolled(3)
+
+	// The ratio between these is the point: polling that almost never finds
+	// anything is continuous work being paid for, and only both numbers
+	// together say so.
+	if got := testutil.ToFloat64(m.streamPolls); got != 3 {
+		t.Errorf("polls = %v, want 3", got)
+	}
+	if got := testutil.ToFloat64(m.streamEventsSent); got != 3 {
+		t.Errorf("events = %v, want 3", got)
+	}
+}
+
+func TestPoolIsSampledAtScrapeRatherThanCached(t *testing.T) {
+	m := New("test")
+	current := PoolSnapshot{Acquired: 2, Idle: 3, Total: 5, Max: 10, EmptyAcquires: 7, AcquireWait: 250 * time.Millisecond}
+	m.WatchPool(func() PoolSnapshot { return current })
+
+	expected := `
+# HELP promview_db_connections Database pool connections, by state.
+# TYPE promview_db_connections gauge
+promview_db_connections{state="acquired"} 2
+promview_db_connections{state="idle"} 3
+promview_db_connections{state="max"} 10
+promview_db_connections{state="total"} 5
+`
+	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "promview_db_connections"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read on collection, so a scrape reflects the pool now rather than
+	// whenever some background timer last happened to look.
+	current.Acquired = 9
+	expected = `
+# HELP promview_db_connections Database pool connections, by state.
+# TYPE promview_db_connections gauge
+promview_db_connections{state="acquired"} 9
+promview_db_connections{state="idle"} 3
+promview_db_connections{state="max"} 10
+promview_db_connections{state="total"} 5
+`
+	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected), "promview_db_connections"); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestPoolSaturationIsReported(t *testing.T) {
+	m := New("test")
+	m.WatchPool(func() PoolSnapshot {
+		return PoolSnapshot{EmptyAcquires: 12, AcquireWait: 1500 * time.Millisecond}
+	})
+	// A pool under pressure answers slowly long before it answers with an
+	// error, so waiting is the signal worth having.
+	expected := `
+# HELP promview_db_acquire_waits_total Acquisitions that had to wait for a free connection.
+# TYPE promview_db_acquire_waits_total counter
+promview_db_acquire_waits_total 12
+# HELP promview_db_acquire_duration_seconds_total Cumulative time spent waiting to acquire a connection.
+# TYPE promview_db_acquire_duration_seconds_total counter
+promview_db_acquire_duration_seconds_total 1.5
+`
+	if err := testutil.GatherAndCompare(m.Gatherer(), strings.NewReader(expected),
+		"promview_db_acquire_waits_total", "promview_db_acquire_duration_seconds_total"); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestWatchPoolIgnoresAMissingSource(t *testing.T) {
+	m := New("test")
+	m.WatchPool(nil)
+	var nilMetrics *Metrics
+	nilMetrics.WatchPool(func() PoolSnapshot { return PoolSnapshot{} })
+}

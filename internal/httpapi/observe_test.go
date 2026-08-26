@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,9 +14,11 @@ type observation struct {
 	status int
 }
 
-func recordingObserver(into *[]observation) Observer {
-	return func(route, method string, status int, _ time.Duration) {
-		*into = append(*into, observation{route: route, method: method, status: status})
+func recordingObserver(into *[]observation) Observers {
+	return Observers{
+		Request: func(route, method string, status int, _ time.Duration) {
+			*into = append(*into, observation{route: route, method: method, status: status})
+		},
 	}
 }
 
@@ -111,5 +114,61 @@ func TestNewWithoutAnObserverIsNotWrapped(t *testing.T) {
 	// An uninstrumented deployment should pay nothing, not even a wrapper.
 	if _, ok := New(silenceConfig(), &fakeStore{}, operator(), newFakeSilencer()).(*http.ServeMux); !ok {
 		t.Error("New returned a wrapped handler when no observer was given")
+	}
+}
+
+// countingObservers tracks the stream hooks without a registry.
+type countingObservers struct {
+	opened, closed, polls, events int
+}
+
+func (c *countingObservers) observers() Observers {
+	return Observers{
+		Request:      func(string, string, int, time.Duration) {},
+		StreamOpened: func() { c.opened++ },
+		StreamClosed: func() { c.closed++ },
+		StreamPolled: func(events int) { c.polls++; c.events += events },
+	}
+}
+
+func TestAStreamThatEndsEarlyStillClosesItsCount(t *testing.T) {
+	counts := &countingObservers{}
+	// A cursor that will not parse: the handler answers 400 and returns before
+	// the loop begins. Every early return has to unwind the gauge, or a client
+	// that never really connected is counted forever.
+	handler := NewObserved(counts.observers(), silenceConfig(), &fakeStore{}, operator(), newFakeSilencer())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream?cursor=not-a-number", nil)
+	request.Header.Set("Authorization", "Bearer session-token")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	if counts.opened != counts.closed {
+		t.Errorf("opened %d, closed %d; the gauge would drift upward by the difference",
+			counts.opened, counts.closed)
+	}
+}
+
+func TestAStreamCountsItsPollsAndReleasesTheClient(t *testing.T) {
+	counts := &countingObservers{}
+	store := &fakeStore{}
+	handler := NewObserved(counts.observers(), silenceConfig(), store, operator(), newFakeSilencer())
+
+	// fakeStore cancels the request context on its first StreamEvents call, so
+	// the loop polls once and then unwinds the way a disconnect would.
+	ctx, cancel := context.WithCancel(context.Background())
+	store.cancel = cancel
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream", nil).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer session-token")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	if counts.opened != 1 {
+		t.Errorf("opened = %d, want 1", counts.opened)
+	}
+	if counts.closed != 1 {
+		t.Errorf("closed = %d, want 1; a disconnect must release the client", counts.closed)
+	}
+	// Every open console does this on a timer whether or not anything happened,
+	// which is exactly why it is worth counting.
+	if counts.polls < 1 {
+		t.Errorf("polls = %d, want at least one read recorded", counts.polls)
 	}
 }
