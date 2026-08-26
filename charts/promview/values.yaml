@@ -90,12 +90,28 @@ silence:
 metrics:
   enabled: true
   port: 9090
-  # Set podAnnotations yourself if your Prometheus discovers by a different
-  # convention, or use a ServiceMonitor pointing at the pod.
-  annotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "9090"
-    prometheus.io/path: /metrics
+
+  # A ServiceMonitor is rendered only where the Prometheus Operator's CRD
+  # exists. A cluster without it is handed the scrape annotations instead, so
+  # enabling this cannot leave a deployment with neither.
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    # Prometheus selects ServiceMonitors by label, and the selector is set by
+    # whoever installed it. kube-prometheus-stack commonly wants
+    # `release: <its release name>`; without a match this object is created,
+    # ignored, and nothing says so. Check before assuming it is being scraped.
+    labels: {}
+    honorLabels: false
+    relabelings: []
+    metricRelabelings: []
+
+  # Extra pod annotations. The prometheus.io/* trio is added by the Deployment
+  # itself, with the port taken from metrics.port above, and only when no
+  # ServiceMonitor is rendered - two discovery paths at once would scrape the
+  # same pod twice under different job names.
+  annotations: {}
 
 migration:
   enabled: true

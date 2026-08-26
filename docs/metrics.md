@@ -17,11 +17,45 @@ truth.
 `GET /metrics` on a listener of its own, `PROMVIEW_METRICS_ADDRESS`, default `:9090`.
 Setting it to an empty string disables the endpoint entirely.
 
-It is **not** a route on the main listener, and the chart does not put it on the
-Service or the Ingress. The labels name sources and Alertmanagers, and Promview is
-commonly reachable from the internet; a port nothing publishes cannot leak them by
-being forgotten. Prometheus is expected to scrape the pod directly, which the chart's
-default `metrics.annotations` ask it to do.
+It is **not** a route on the main listener. The labels name sources and Alertmanagers,
+and Promview is commonly reachable from the internet; keeping metrics off the port the
+Ingress publishes is what stops them leaving the cluster.
+
+The chart does put the port on the Service, because a ServiceMonitor selects a Service.
+That does not make it externally reachable: the Ingress routes to the port *named*
+`http`, so another named port on the same Service is not somewhere it can send traffic.
+
+## Discovery
+
+The chart configures scraping for you, and picks the mechanism from what the cluster
+actually has:
+
+| Cluster | What is rendered |
+| --- | --- |
+| Prometheus Operator CRD present | a `ServiceMonitor` |
+| No operator | `prometheus.io/scrape` pod annotations |
+
+The two are mutually exclusive, so a pod is never scraped twice under two job names.
+The choice is made by `.Capabilities.APIVersions.Has "monitoring.coreos.com/v1"`, which
+means `helm template` renders the annotation path by default — pass
+`--api-versions monitoring.coreos.com/v1` to see what an operator cluster gets.
+
+**One thing to check after installing.** Prometheus selects ServiceMonitors by label,
+and the selector belongs to whoever installed Prometheus. `kube-prometheus-stack`
+commonly requires `release: <its release name>`. Without a match the ServiceMonitor is
+created, ignored, and nothing reports that it is being ignored:
+
+```yaml
+metrics:
+  serviceMonitor:
+    labels:
+      release: kube-prometheus-stack
+```
+
+Set `metrics.serviceMonitor.enabled: false` to force the annotation path, or
+`metrics.enabled: false` to disable the endpoint entirely — that empties
+`PROMVIEW_METRICS_ADDRESS`, so nothing listens rather than a port sitting open with
+nobody scraping it.
 
 ## What is exported
 
