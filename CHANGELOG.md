@@ -6,6 +6,11 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **server:** promview reports on itself at `/metrics`. It is the console an operator opens when something else breaks, which makes its own failures the easiest to miss — a schema one migration behind turned every read into a 500, and the first person to notice was someone trying to silence an alert. What is exported is aimed at that: request outcomes by matched route, whether each source is still reconciling and when it last managed to, whether silences reach their Alertmanager, and whether their provenance was stored. Alert counts are deliberately absent; Prometheus already knows what is firing. The endpoint listens on `PROMVIEW_METRICS_ADDRESS` (default `:9090`), never on the public listener, and the chart keeps it off the Service and the Ingress — the labels name sources, and a port nothing publishes cannot leak them. See [`docs/metrics.md`](docs/metrics.md).
+- **server:** the binary knows its own version, stamped at build time and reported as `promview_build_info`. Confirming that a rollout actually landed previously meant reading the image tag off the Deployment.
+
 ## [0.1.0-alpha.31] - 2026-08-26
 
 ### Fixed

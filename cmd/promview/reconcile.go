@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cropalato/promview/internal/alertmanager"
+	"github.com/cropalato/promview/internal/metrics"
 	"github.com/cropalato/promview/internal/postgres"
 )
 
@@ -40,13 +41,19 @@ type alertmanagerReader interface {
 // after a promview restart the rule simply starts over, costing one extra
 // interval rather than risking a wrong resolution.
 type reconciler struct {
-	store  reconcileStore
-	client alertmanagerReader
-	misses map[string]map[string]int
+	store   reconcileStore
+	client  alertmanagerReader
+	metrics *metrics.Metrics
+	misses  map[string]map[string]int
 }
 
-func newReconciler(store reconcileStore, client alertmanagerReader) *reconciler {
-	return &reconciler{store: store, client: client, misses: map[string]map[string]int{}}
+func newReconciler(store reconcileStore, client alertmanagerReader, instruments *metrics.Metrics) *reconciler {
+	return &reconciler{
+		store:   store,
+		client:  client,
+		metrics: instruments,
+		misses:  map[string]map[string]int{},
+	}
 }
 
 func (r *reconciler) reconcileOnce(ctx context.Context, now time.Time) {
@@ -75,6 +82,7 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 			// sweep remains the backstop for it.
 			slog.Warn("alert reconciliation could not read alertmanager", "source", slug, "error", err)
 		}
+		r.metrics.ReconcileFailed(slug, metrics.ReasonUnreadable)
 		return
 	}
 	stored, err := r.store.FiringFingerprints(ctx, slug)
@@ -82,6 +90,7 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 		if ctx.Err() == nil {
 			slog.Error("alert reconciliation failed to read stored alerts", "source", slug, "error", err)
 		}
+		r.metrics.ReconcileFailed(slug, metrics.ReasonError)
 		return
 	}
 
@@ -105,6 +114,10 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 	if !trustworthy {
 		slog.Warn("alertmanager reported no alerts while promview holds firing ones; not resolving",
 			"source", slug, "firing", len(stored))
+		// Suppression still syncs below, but nothing is allowed to end on this
+		// reading. Counting it apart from a clean pass is what makes a source
+		// stuck in this state visible rather than merely quiet.
+		r.metrics.ReconcileFailed(slug, metrics.ReasonUntrusted)
 		for fingerprint := range counters {
 			delete(counters, fingerprint)
 		}
@@ -139,7 +152,14 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 		if ctx.Err() == nil {
 			slog.Error("alert reconciliation failed", "source", slug, "error", err)
 		}
+		r.metrics.ReconcileFailed(slug, metrics.ReasonError)
 		return
+	}
+	if trustworthy {
+		// Only a pass that could have resolved something counts as success. A
+		// suppression-only pass leaves endings undetected, and a timestamp that
+		// moved anyway would report health this loop did not deliver.
+		r.metrics.ReconcileSucceeded(slug, now)
 	}
 	for fingerprint := range missing {
 		delete(counters, fingerprint)
@@ -156,12 +176,18 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 
 // runReconciliation reconciles every source on a ticker until the context is
 // cancelled. A zero interval disables it, leaving expiry as the only backstop.
-func runReconciliation(ctx context.Context, store reconcileStore, client alertmanagerReader, interval time.Duration) {
+func runReconciliation(
+	ctx context.Context,
+	store reconcileStore,
+	client alertmanagerReader,
+	instruments *metrics.Metrics,
+	interval time.Duration,
+) {
 	if interval == 0 {
 		slog.Info("alert reconciliation disabled", "reason", "PROMVIEW_RECONCILE_INTERVAL is zero")
 		return
 	}
-	r := newReconciler(store, client)
+	r := newReconciler(store, client, instruments)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

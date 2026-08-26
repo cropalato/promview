@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cropalato/promview/internal/alertmanager"
+	"github.com/cropalato/promview/internal/metrics"
 )
 
 /*
@@ -41,8 +42,9 @@ var refreshDelays = []time.Duration{250 * time.Millisecond, 3 * time.Second}
 
 // silenceRefresher re-reads sources shortly after a silence is written to them.
 type silenceRefresher struct {
-	store  reconcileStore
-	client alertmanagerReader
+	store   reconcileStore
+	client  alertmanagerReader
+	metrics *metrics.Metrics
 	// requests is buffered and never blocks a caller: a refresh is an
 	// optimisation, and an HTTP handler must not wait on one. A full buffer
 	// means passes are already queued, and the ticker covers anything dropped.
@@ -52,10 +54,11 @@ type silenceRefresher struct {
 	inFlight map[string]bool
 }
 
-func newSilenceRefresher(store reconcileStore, client alertmanagerReader) *silenceRefresher {
+func newSilenceRefresher(store reconcileStore, client alertmanagerReader, instruments *metrics.Metrics) *silenceRefresher {
 	return &silenceRefresher{
 		store:    store,
 		client:   client,
+		metrics:  instruments,
 		requests: make(chan string, 64),
 		inFlight: map[string]bool{},
 	}
@@ -158,6 +161,7 @@ func (refresher *silenceRefresher) syncSuppression(ctx context.Context, slug str
 			if ctx.Err() == nil {
 				slog.Warn("silence refresh could not read alertmanager", "source", slug, "error", err)
 			}
+			refresher.metrics.ReconcileFailed(slug, metrics.ReasonUnreadable)
 			continue
 		}
 		// No missing set: this pass syncs suppression and must never conclude
@@ -167,6 +171,7 @@ func (refresher *silenceRefresher) syncSuppression(ctx context.Context, slug str
 			if ctx.Err() == nil {
 				slog.Error("silence refresh failed", "source", slug, "error", err)
 			}
+			refresher.metrics.ReconcileFailed(slug, metrics.ReasonError)
 			continue
 		}
 		if result.Suppressed > 0 || result.Released > 0 {

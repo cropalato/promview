@@ -59,6 +59,8 @@ jobs:
 
       - uses: docker/build-push-action@v7
         with:
+          build-args: |
+            VERSION=${{ github.ref_name }}
           context: .
           platforms: linux/amd64
           push: true

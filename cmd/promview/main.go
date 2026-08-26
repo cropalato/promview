@@ -20,9 +20,15 @@ import (
 	"github.com/cropalato/promview/internal/auth"
 	"github.com/cropalato/promview/internal/config"
 	"github.com/cropalato/promview/internal/httpapi"
+	"github.com/cropalato/promview/internal/metrics"
 	"github.com/cropalato/promview/internal/postgres"
 	"github.com/cropalato/promview/internal/sources"
 )
+
+// version is stamped at build time with -X main.version. A binary that cannot
+// say what it is makes "did the rollout land" a question nobody can answer from
+// outside, which is exactly the question an upgrade raises.
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -77,7 +83,11 @@ func run() error {
 		)
 	}
 
-	store := postgres.New(pool)
+	// Promview is what an operator looks at when something else breaks, so its
+	// own failures are the ones most likely to go unseen. See internal/metrics.
+	instruments := metrics.New(version)
+
+	store := countingStore{Store: postgres.New(pool), metrics: instruments}
 	if cfg.BootstrapSourceSlug != "" {
 		if err := store.BootstrapSource(ctx, sources.Source{
 			Slug: cfg.BootstrapSourceSlug,
@@ -121,15 +131,18 @@ func run() error {
 	// Gated on reconciliation being enabled at all: with it off, promview never
 	// reads suppression from anywhere, and refreshing one source on one write
 	// would leave the console half-informed rather than consistently uninformed.
-	var apiSilencer httpapi.Silencer = silencer
+	var apiSilencer httpapi.Silencer = countingSilencer{inner: silencer, metrics: instruments}
 	var refresher *silenceRefresher
 	if cfg.ReconcileInterval != 0 {
-		refresher = newSilenceRefresher(store, alertmanager.NewClient(cfg.ReconcileTimeout))
-		apiSilencer = refreshingSilencer{inner: silencer, refresher: refresher, ctx: ctx}
+		refresher = newSilenceRefresher(store, alertmanager.NewClient(cfg.ReconcileTimeout), instruments)
+		apiSilencer = refreshingSilencer{inner: apiSilencer, refresher: refresher, ctx: ctx}
 	}
 	server := &http.Server{
-		Addr:              cfg.ListenAddress,
-		Handler:           httpapi.New(cfg, store, authenticator, apiSilencer, authenticationHandler),
+		Addr: cfg.ListenAddress,
+		Handler: httpapi.NewObserved(
+			instruments.ObserveRequest,
+			cfg, store, authenticator, apiSilencer, authenticationHandler,
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -138,9 +151,32 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("promview listening", "address", cfg.ListenAddress)
+		slog.Info("promview listening", "address", cfg.ListenAddress, "version", version)
 		errCh <- server.ListenAndServe()
 	}()
+
+	// A listener of its own rather than a route on the public one. The labels
+	// name sources and teams, and this deployment is commonly reachable from
+	// the internet; a port the ingress never publishes cannot leak them by
+	// being forgotten.
+	var metricsServer *http.Server
+	if cfg.MetricsAddress != "" {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("GET /metrics", instruments.Handler())
+		metricsServer = &http.Server{
+			Addr:              cfg.MetricsAddress,
+			Handler:           metricsMux,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			slog.Info("promview metrics listening", "address", cfg.MetricsAddress)
+			// Never fed into errCh: losing the metrics endpoint is not a reason
+			// to take the console down with it.
+			if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("metrics listener stopped", "error", err)
+			}
+		}()
+	}
 
 	sweepDone := make(chan struct{})
 	go func() {
@@ -151,7 +187,7 @@ func run() error {
 	reconcileDone := make(chan struct{})
 	go func() {
 		defer close(reconcileDone)
-		runReconciliation(ctx, store, alertmanager.NewClient(cfg.ReconcileTimeout), cfg.ReconcileInterval)
+		runReconciliation(ctx, store, alertmanager.NewClient(cfg.ReconcileTimeout), instruments, cfg.ReconcileInterval)
 	}()
 
 	refreshDone := make(chan struct{})
@@ -172,6 +208,9 @@ func run() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err := server.Shutdown(shutdownCtx)
+		if metricsServer != nil {
+			_ = metricsServer.Shutdown(shutdownCtx)
+		}
 		<-sweepDone
 		<-reconcileDone
 		<-refreshDone

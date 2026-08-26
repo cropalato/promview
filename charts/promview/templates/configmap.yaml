@@ -13,6 +13,9 @@ data:
   PROMVIEW_RECONCILE_TIMEOUT: {{ .Values.reconcile.timeout | quote }}
   PROMVIEW_SILENCE_DEFAULT_DURATION: {{ .Values.silence.defaultDuration | quote }}
   PROMVIEW_SILENCE_MAX_DURATION: {{ .Values.silence.maxDuration | quote }}
+  # Empty disables the endpoint, which is how metrics.enabled is honoured: the
+  # port would otherwise still be listening whatever the chart said.
+  PROMVIEW_METRICS_ADDRESS: {{ if .Values.metrics.enabled }}{{ printf ":%v" .Values.metrics.port | quote }}{{ else }}""{{ end }}
   {{- if eq .Values.auth.mode "oidc" }}
   PROMVIEW_OIDC_ISSUER_URL: {{ .Values.oidc.issuerURL | quote }}
   PROMVIEW_OIDC_CLIENT_ID: {{ .Values.oidc.clientID | quote }}
