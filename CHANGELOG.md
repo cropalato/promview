@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.33] - 2026-08-26
+
 ### Added
 
 - **chart:** an alert on the one failure promview cannot report itself. Reconciliation is what learns an alert ended while it was silenced; when the loop stops it emits no errors, and the only symptom is alerts that finished hours ago still sitting in the console — which nobody reads as a promview fault. The chart now ships `PromviewReconciliationStalled` as a `PrometheusRule`, gated on the operator CRD like the ServiceMonitor. It is the only rule shipped by default: thresholds for request errors or latency depend on what a deployment considers normal, and a chart guessing at them produces alerts that get silenced rather than fixed. `metrics.prometheusRule.additionalRules` appends to the same group.
