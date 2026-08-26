@@ -76,3 +76,22 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Whether a ServiceMonitor will actually be rendered.
+
+Gated on the CRD existing, not only on the value: a cluster without the
+Prometheus Operator would otherwise be handed a manifest its API server rejects.
+The Deployment asks the same question so that a cluster falling back to scrape
+annotations gets them, and a cluster with the operator does not get scraped
+twice under two different job names.
+
+Note that `helm template` reports no API versions, so this renders nothing
+locally. `--api-versions monitoring.coreos.com/v1` shows what a cluster with the
+operator would get.
+*/}}
+{{- define "promview.serviceMonitorEnabled" -}}
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") -}}
+true
+{{- end -}}
+{{- end -}}
