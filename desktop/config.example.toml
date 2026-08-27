@@ -26,6 +26,23 @@ server_url = "https://promview.internal"
 # this only covers the gaps. Minimum 5.
 poll_interval_secs = 60
 
+# Whether WebKitGTK may use its DMA-BUF renderer.
+#
+#   auto (default)  probe the machine and switch it off where it looks unsupported
+#   on              never switch it off; this machine renders fine with it
+#   off             always switch it off, without probing
+#
+# Since WebKitGTK 2.42 that renderer is the default, and on the NVIDIA driver its
+# GBM allocations fail: the window renders nothing at all and `Failed to create
+# GBM buffer` goes to stderr. `auto` disables it where there is no DRM render
+# node to allocate from, or where the node is driven by NVIDIA. Getting that
+# guess wrong costs shared-memory buffers and some CPU; getting the other one
+# wrong costs a blank window, which is the whole application.
+#
+# WEBKIT_DISABLE_DMABUF_RENDERER in the environment always wins over this, and
+# nothing here ever removes a variable you exported.
+webkit_dmabuf = "auto"
+
 # Variables exported before anything reads them — the settings that are not this
 # application's own, and that would otherwise need a wrapper script around the
 # desktop entry.
@@ -36,9 +53,10 @@ poll_interval_secs = 60
 [env]
 # A certificate bundle kept outside the system trust store.
 SSL_CERT_FILE = "/etc/promview/internal-ca.pem"
-# WebKitGTK fails to allocate its buffers on some GPU and compositor
-# combinations, and the window renders blank with `Failed to create GBM buffer`.
-WEBKIT_DISABLE_DMABUF_RENDERER = "1"
+# Forcing the WebKitGTK renderer decision by hand. Only needed where
+# webkit_dmabuf = "auto" guesses wrong; it is read here before the webview
+# starts, exactly as if you had exported it.
+# WEBKIT_DISABLE_DMABUF_RENDERER = "1"
 
 # Which alerts this machine wants to be interrupted by.
 #

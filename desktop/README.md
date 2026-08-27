@@ -225,9 +225,25 @@ It is not a way to produce a client you can run.
 
 ### A Linux rendering note
 
-On some GPU and compositor combinations WebKitGTK fails to allocate its buffers
-and the window renders blank, with `Failed to create GBM buffer` on stderr. It is
-a WebKitGTK issue rather than anything in this crate:
+Since 2.42 WebKitGTK renders through a DMA-BUF path: the web process allocates
+its buffers through GBM on a DRM render node and passes the file descriptors to
+the UI process. It is developed against Mesa, and on the NVIDIA driver the
+allocation fails — the window renders nothing at all and `Failed to create GBM
+buffer` goes to stderr. It is a WebKitGTK issue rather than anything in this
+crate, but the symptom is indistinguishable from this application being broken,
+so the shell now guesses rather than leaving an operator to find out.
+
+At startup it probes for a DRM render node and for the driver behind it, and
+switches the renderer off where there is no node to allocate from — a container,
+a VM with no GPU — or where the node is NVIDIA's. The guess is deliberately
+biased: disabling the renderer where it would have worked costs shared-memory
+buffers and some CPU, which for an alert console nobody notices; leaving it on
+where it does not work costs the whole window. It says which way it went and why
+on stderr.
+
+`webkit_dmabuf` in the config file overrides the probe — `"on"` where the guess
+is wrong about a machine, `"off"` to skip it. `WEBKIT_DISABLE_DMABUF_RENDERER`
+in the environment beats both, and nothing removes a variable you exported:
 
 ```sh
 WEBKIT_DISABLE_DMABUF_RENDERER=1 npm --prefix desktop run dev
@@ -262,6 +278,7 @@ should not silently get defaults instead.
 ```toml
 server_url = "https://promview.internal"
 poll_interval_secs = 60
+webkit_dmabuf = "auto"   # or "on" / "off"; see A Linux rendering note
 
 [env]
 SSL_CERT_FILE = "/etc/promview/internal-ca.pem"

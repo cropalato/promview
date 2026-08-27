@@ -27,6 +27,7 @@ pub mod config;
 pub mod credentials;
 pub mod notify;
 pub mod proxy;
+pub mod rendering;
 pub mod signin;
 pub mod sse;
 pub mod stream;
@@ -58,6 +59,10 @@ pub fn run() {
             std::process::exit(2);
         }
     };
+
+    // Before the Tauri builder exists: the web process inherits this
+    // environment when it is spawned, and reads the variable then.
+    crate::rendering::apply(config.dmabuf);
 
     let base = api_base(&config.server_url);
     eprintln!("promview-desktop: using server {base}");
