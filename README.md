@@ -223,6 +223,53 @@ minted credential to whatever it accepts. Only `127.0.0.1`, `::1`, or
 userinfo. A hostname that merely resolves to a loopback address is refused: that
 is a promise which can change.
 
+## Desktop Client Configuration
+
+The desktop shell has no origin to be relative to — unlike the console a server
+serves, it is a local webview that must be told where to look. `PROMVIEW_SERVER_URL`
+answers that for a one-off run; an optional TOML file answers it durably, along
+with the settings that would otherwise need a wrapper script around the desktop
+entry.
+
+It is read from the first of `$XDG_CONFIG_HOME/promview-desktop/config.toml`
+(so `~/.config/…`), `~/.promview-desktop/config.toml`, or `~/.promview-desktop.toml`,
+with `%APPDATA%` and `~/Library/Application Support` standing in for the first on
+Windows and macOS. `PROMVIEW_DESKTOP_CONFIG` names one outright. Unknown keys are
+refused rather than ignored, because a settings file whose typos pass is a file
+you believe is in effect when it is not.
+
+```toml
+server_url = "https://promview.internal"
+poll_interval_secs = 60
+webkit_dmabuf = "auto"   # or "on" / "off"
+
+[env]
+SSL_CERT_FILE = "/etc/promview/internal-ca.pem"
+
+[[notifications.rules]]
+severity = "^critical$"
+team = "^(core|platform)$"
+```
+
+Three things are worth knowing from here, with the rest in
+[`desktop/README.md`](desktop/README.md) and a commented copy in
+[`desktop/config.example.toml`](desktop/config.example.toml):
+
+- **`[env]` exports variables before the webview starts**, which is the only
+  moment early enough for a certificate bundle outside the system trust store or
+  for WebKit's own variables to be read. A variable already exported wins, so
+  `SSL_CERT_FILE=… promview-desktop` still does what it looks like it does.
+- **`[[notifications.rules]]` narrows notifications per machine and never widens
+  them.** Policy stays in [Console Preferences](#console-preferences), where it
+  follows an operator between clients; this is for what is true of one machine,
+  like a laptop that should only ever buzz for its owner's team. Rules are ORed,
+  fields within a rule ANDed, values are unanchored regular expressions over the
+  same fields a stream event carries. No rules means no filtering.
+- **`webkit_dmabuf` overrides a guess.** WebKitGTK's DMA-BUF renderer fails on
+  the NVIDIA driver and renders a blank window, so the shell probes for that at
+  startup and switches the renderer off. `"on"` says the guess is wrong about a
+  machine.
+
 ## Console Preferences
 
 Column choice and order, row density, grouping keys, the console palette, and notification policy are stored per user in `user_preferences` and served by `GET`/`PUT /api/v1/preferences`, so they follow an operator between machines.
