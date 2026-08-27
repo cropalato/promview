@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Documentation
+
+- Document the desktop client's config file in the project README: where it is read from, the `[env]` table that exports variables before the webview starts, the per-machine notification rules and how they relate to the server-side policy in `user_preferences`, and the WebKitGTK renderer override.
+
 ## [0.1.0-alpha.34] - 2026-08-27
 
 ### Added
