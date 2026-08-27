@@ -7,6 +7,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::notify::NotificationRules;
+use crate::rendering::DmabufPolicy;
 
 /// Where this shell points, how often the tray falls back to polling, and which
 /// alerts this machine wants to be interrupted by.
@@ -22,6 +23,8 @@ pub struct Config {
     pub poll_interval_secs: u64,
     /// The local notification filter. Empty means no filtering.
     pub notification_rules: NotificationRules,
+    /// Whether WebKitGTK may use its DMA-BUF renderer on this machine.
+    pub dmabuf: DmabufPolicy,
     /// The file the settings came from, if one was found. Kept for the boot log
     /// and for the tray's reload, which re-reads the same path.
     pub source: Option<PathBuf>,
@@ -52,6 +55,9 @@ pub const CONFIG_PATH_ENV: &str = "PROMVIEW_DESKTOP_CONFIG";
 pub struct FileConfig {
     pub server_url: Option<String>,
     pub poll_interval_secs: Option<u64>,
+    /// `auto` (the default) probes the machine, `on` and `off` say outright.
+    /// Only consulted when `WEBKIT_DISABLE_DMABUF_RENDERER` is unset.
+    pub webkit_dmabuf: Option<DmabufPolicy>,
     /// Variables to export before anything reads them. For the settings that
     /// are not this application's own — a private CA bundle, a webview
     /// workaround — and that would otherwise need a wrapper script.
@@ -225,6 +231,7 @@ impl Config {
             server_url,
             poll_interval_secs,
             notification_rules: NotificationRules::compile(&file.notifications.rules)?,
+            dmabuf: file.webkit_dmabuf.unwrap_or_default(),
             source,
         })
     }
@@ -391,6 +398,24 @@ mod tests {
         assert_eq!(api_base(&config.server_url), "https://ops.example/promview");
         assert_eq!(config.poll_interval_secs, 30);
         assert_eq!(config.notification_rules.len(), 2);
+    }
+
+    #[test]
+    fn the_renderer_policy_defaults_to_probing_and_can_be_forced() {
+        let config = Config::resolve(&FileConfig::parse("").unwrap(), None, no_env).unwrap();
+        assert_eq!(config.dmabuf, DmabufPolicy::Auto);
+
+        let forced = Config::resolve(
+            &FileConfig::parse("webkit_dmabuf = \"off\"").unwrap(),
+            None,
+            no_env,
+        )
+        .unwrap();
+        assert_eq!(forced.dmabuf, DmabufPolicy::Off);
+
+        // A value that is not one of the three is a typo, and a typo that
+        // parsed would silently pick a rendering path nobody asked for.
+        assert!(FileConfig::parse("webkit_dmabuf = \"maybe\"").is_err());
     }
 
     #[test]
