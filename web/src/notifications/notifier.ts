@@ -34,6 +34,14 @@ export interface ShowNotificationOptions {
   body?: string;
   /** Collapses duplicate OS notifications for the same alert. */
   tag?: string;
+  /**
+   * The event fields the notification was built from, for a factory that can
+   * filter on them. The browser cannot — a page has no per-machine settings to
+   * consult — but a host shell does: an operator may want one laptop to buzz
+   * only for their own team, which is a property of the machine and so cannot
+   * live in the server-side selector every client shares.
+   */
+  labels?: Record<string, string>;
 }
 
 /**
@@ -174,6 +182,22 @@ export function eventMatchesSelector(
   });
 }
 
+/**
+ * The event fields a host filter may match on. The same four the server-side
+ * selector accepts, plus the summary, so a rule can key on the text an operator
+ * actually recognises. Severity is normalized so a rule matches what the
+ * console displays rather than whatever casing the source used.
+ */
+function notificationLabels(event: AlertStreamNotificationEvent): Record<string, string> {
+  return {
+    severity: normalizeSeverity(event.severity),
+    alertname: event.alertName,
+    source: event.source,
+    team: event.team,
+    summary: event.summary,
+  };
+}
+
 function notificationBody(event: AlertStreamNotificationEvent): string {
   const context = [event.source, event.team].filter((part) => part !== '').join(' · ');
   return [event.summary, context].filter((part) => part !== '').join('\n');
@@ -213,6 +237,7 @@ export function createAlertNotifier(options: AlertNotifierOptions): AlertNotifie
         notification = options.createNotification(notificationTitle(event), {
           body: notificationBody(event),
           tag: `promview-alert-${event.alertId}`,
+          labels: notificationLabels(event),
         });
       } catch {
         // Construction can still fail despite a granted-looking permission

@@ -6,6 +6,15 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **desktop:** the shell reads an optional config file, so the settings that used to need a wrapper script around the desktop entry survive a reboot on their own. TOML, found at `~/.config/promview-desktop/config.toml` or one of the `$HOME` fallbacks, named outright by `PROMVIEW_DESKTOP_CONFIG`, and refusing keys it does not know — a settings file whose typos pass is a file you believe is in effect when it is not. It carries the server and the poll interval, and an `[env]` table for the variables that are not this application's own: `SSL_CERT_FILE` for a bundle outside the system trust store, `WEBKIT_DISABLE_DMABUF_RENDERER` for the GPU and compositor combinations where WebKitGTK renders a blank window. The table is applied before the Tauri builder exists, which is the only moment early enough for WebKit to still read its own variables, and a variable already exported wins — `SSL_CERT_FILE=… promview-desktop` is how you test a bundle once, and a file that overwrote it would make that do nothing. Names are logged, values never. See [`desktop/config.example.toml`](desktop/config.example.toml).
+- **desktop:** notifications can be narrowed per machine. Whether an alert deserves a page still belongs to the console — the opt-in, the label selector and the dedupe ledger stay there, so policy follows an operator between clients — but one thing about it is genuinely per-machine and cannot live in a selector every client shares: a laptop that should only ever buzz for its owner's team. `[[notifications.rules]]` is that and only that. Rules are ORed, fields within a rule ANDed, values are unanchored regular expressions over the fields a stream event carries (`severity`, `alertname`, `source`, `team`, `summary`; arbitrary alert labels are not among them, because the server denormalizes only these into the stream record). No rules means no filtering, never "match nothing". A bad pattern or a field no event carries is refused at startup rather than at the first alert, a suppressed notification is logged because "the filter ate it" and "the daemon is down" are otherwise the same silence, and the tray's **Reload alert filter** re-reads the rules so one can be tried against live alerts without relaunching.
+
+### Fixed
+
+- **desktop:** a notification that never appeared no longer reports success. `tauri-plugin-notification` shows on a spawned task and drops the result, so every failure there is — no notification daemon, notifications switched off for the application, an AppUserModelID Windows does not recognise — arrived as `Ok(())`, and the console's own error handling could never fire. That is the one failure mode nobody notices: the operator learns of it by missing a page. The shell now calls notify-rust directly on the blocking pool, waits for the outcome, logs it on stderr and returns it to the console, which reports it too. The plugin's per-platform identifier handling is kept, so an installed Windows build still attributes its toast to Promview.
+
 ## [0.1.0-alpha.33] - 2026-08-26
 
 ### Added

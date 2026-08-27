@@ -6,7 +6,9 @@
 //! cannot do for itself — a tray that survives every window being closed, and
 //! transport owned outside the webview so credentials can stay out of it.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tauri::menu::{Menu, MenuItem};
@@ -14,14 +16,16 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::api::Client;
-use crate::config::{api_base, Config};
+use crate::config::{api_base, describe_source, Config};
 use crate::credentials::{Credentials, Durability};
+use crate::notify::NotificationRules;
 use crate::proxy::ApiProxy;
 use crate::stream::{StreamActivity, StreamHandle};
 
 pub mod api;
 pub mod config;
 pub mod credentials;
+pub mod notify;
 pub mod proxy;
 pub mod signin;
 pub mod sse;
@@ -45,7 +49,7 @@ fn toggle_window(window: &WebviewWindow) -> tauri::Result<()> {
 }
 
 pub fn run() {
-    let config = match Config::from_env() {
+    let config = match Config::load() {
         Ok(config) => config,
         Err(message) => {
             // Refusing to start beats starting pointed at nothing: every window
@@ -57,6 +61,18 @@ pub fn run() {
 
     let base = api_base(&config.server_url);
     eprintln!("promview-desktop: using server {base}");
+    eprintln!(
+        "promview-desktop: settings from {}",
+        describe_source(config.source.as_deref())
+    );
+    if config.notification_rules.is_empty() {
+        eprintln!("promview-desktop: no local notification rules; showing what the console sends");
+    } else {
+        eprintln!(
+            "promview-desktop: {} local notification rule(s) in effect",
+            config.notification_rules.len()
+        );
+    }
 
     let credentials = Arc::new(Credentials::new(&base));
     let proxy = match ApiProxy::new(
@@ -75,9 +91,14 @@ pub fn run() {
     // every poll, so it needs the same handle sign-in writes to.
     let tray_credentials = Arc::clone(&credentials);
 
+    let notifications = Notifications {
+        rules: RwLock::new(config.notification_rules),
+        source: config.source.clone(),
+    };
+
     tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
         .manage(proxy)
+        .manage(notifications)
         .manage(StreamHandle::default())
         .manage(Arc::new(StreamActivity::default()))
         .manage(SignInState {
@@ -100,9 +121,23 @@ pub fn run() {
             let console = MenuItem::with_id(app, "console", "Open console", true, None::<&str>)?;
             let compact =
                 MenuItem::with_id(app, "compact", "Toggle compact window", true, None::<&str>)?;
+            let reload = MenuItem::with_id(
+                app,
+                "reload-rules",
+                "Reload alert filter",
+                true,
+                None::<&str>,
+            )?;
             let menu = Menu::with_items(
                 app,
-                &[&console, &compact, &sign_in_item, &sign_out_item, &quit],
+                &[
+                    &console,
+                    &compact,
+                    &reload,
+                    &sign_in_item,
+                    &sign_out_item,
+                    &quit,
+                ],
             )?;
 
             let tray = TrayIconBuilder::with_id("promview")
@@ -136,6 +171,9 @@ pub fn run() {
                                 eprintln!("promview-desktop: sign-in failed: {message}");
                             }
                         });
+                    }
+                    "reload-rules" => {
+                        app.state::<Notifications>().reload();
                     }
                     "sign-out" => {
                         app.state::<SignInState>().credentials.clear();
@@ -247,23 +285,94 @@ fn auth_status(state: tauri::State<'_, SignInState>) -> bool {
     state.credentials.token().is_some()
 }
 
+/// The local notification filter, and the file it was read from.
+///
+/// Behind a lock because the tray can re-read it: writing a filter is
+/// iterative, and an operator testing one against live alerts should not have
+/// to relaunch between attempts.
+pub struct Notifications {
+    rules: RwLock<NotificationRules>,
+    source: Option<PathBuf>,
+}
+
+impl Notifications {
+    /// Whether this machine wants to be interrupted by an event with these
+    /// fields. A poisoned lock is read as "show it": a filter that has stopped
+    /// working must fail towards paging, never towards silence.
+    fn allows(&self, labels: &HashMap<String, String>) -> bool {
+        match self.rules.read() {
+            Ok(rules) => rules.allows(labels),
+            Err(_) => true,
+        }
+    }
+
+    /// Re-reads the rules from the same file. Failure keeps the rules that are
+    /// already loaded — a typo mid-edit must not silently turn the filter off.
+    fn reload(&self) {
+        match Config::reload_rules(self.source.as_deref()) {
+            Ok(rules) => {
+                let count = rules.len();
+                match self.rules.write() {
+                    Ok(mut slot) => {
+                        *slot = rules;
+                        eprintln!(
+                            "promview-desktop: reloaded {count} local notification rule(s) from {}",
+                            describe_source(self.source.as_deref())
+                        );
+                    }
+                    Err(_) => {
+                        eprintln!("promview-desktop: notification rules are locked; reload skipped")
+                    }
+                }
+            }
+            Err(message) => eprintln!(
+                "promview-desktop: keeping the loaded notification rules; reload failed: {message}"
+            ),
+        }
+    }
+}
+
 /// Shows an operating-system notification.
 ///
-/// The console decides *whether* to notify — it owns the opt-in, the selector,
-/// and the ledger that stops a replayed event notifying twice. Duplicating any
-/// of that here would give the two halves separate opinions about what deserves
-/// a page. This only puts one on screen, which is the part a webview cannot do:
-/// WebKitGTK has no usable Notification API, so without this there are no
-/// notifications at all.
+/// The console decides *whether* an event deserves a page — it owns the opt-in,
+/// the server-side selector, and the ledger that stops a replayed event
+/// notifying twice. Duplicating any of that here would give the two halves
+/// separate opinions about what deserves a page. What this adds is the part that
+/// cannot live on the server: a per-machine filter, and the showing itself,
+/// which is what a webview cannot do — WebKitGTK has no usable Notification
+/// API, so without this there are no notifications at all.
+///
+/// Every outcome is logged. A notification that never appeared used to report
+/// success, which is the one failure mode an operator cannot notice.
 #[tauri::command]
-fn show_notification(app: AppHandle, title: String, body: String) -> Result<(), String> {
-    use tauri_plugin_notification::NotificationExt;
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .map_err(|err| format!("show notification: {err}"))
+async fn show_notification(
+    app: AppHandle,
+    notifications: tauri::State<'_, Notifications>,
+    title: String,
+    body: String,
+    labels: Option<HashMap<String, String>>,
+) -> Result<(), String> {
+    let labels = labels.unwrap_or_default();
+    if !notifications.allows(&labels) {
+        // Logged, because "the filter ate it" and "the daemon is down" look
+        // identical from the operator's chair otherwise.
+        eprintln!("promview-desktop: local rules suppressed a notification: {title}");
+        return Ok(());
+    }
+
+    let identifier = app.config().identifier.clone();
+    // The D-Bus round trip blocks, so it runs on the blocking pool rather than
+    // stalling the async runtime the stream is pumping on.
+    let shown = tauri::async_runtime::spawn_blocking(move || {
+        crate::notify::show(&identifier, &title, &body)
+    })
+    .await
+    .map_err(|err| format!("notification task stopped: {err}"))?;
+
+    if let Err(message) = &shown {
+        eprintln!("promview-desktop: could not show a notification: {message}");
+    }
+    shown.map_err(|message| format!("show notification: {message}"))
 }
 
 #[cfg(test)]

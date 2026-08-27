@@ -13,9 +13,12 @@ This is the walking skeleton from `docs/desktop-client-plan.md`, not the MVP.
   window, quit. Closing a window hides it; the tray owns the process lifetime.
 - The tray tooltip shows firing counts by severity, refreshed whenever the stream
   reports a change and on a slow timer as a fallback.
-- `PROMVIEW_SERVER_URL` selects the server, validated on the way in.
+- `PROMVIEW_SERVER_URL` selects the server, validated on the way in, or an
+  optional config file does — including a per-machine alert filter and variables
+  to export before the webview starts.
 - Signing in against an `oidc` deployment, from the tray menu.
-- Native notifications for alerts the console's selector matches.
+- Native notifications for alerts the console's selector matches, narrowed by
+  this machine's own filter if it has one.
 
 - The console loads and works: alerts, groups, detail, filters, preferences. Its
   API requests go through the Rust core over Tauri's `invoke`, not from the
@@ -121,6 +124,41 @@ opt-in, the label selector, and the ledger that stops a replayed event notifying
 twice. That is the same split as the stream's reconnect policy, and for the same
 reason: two implementations of one rule eventually disagree.
 
+`notify-rust` is called directly rather than through `tauri-plugin-notification`.
+The plugin shows on a spawned task and drops the result, so every failure — no
+notification daemon, notifications switched off for the app, an
+AppUserModelID Windows does not recognise — arrived as success. A page that never
+appeared and reported success is the one failure mode nobody notices, so the
+outcome is now waited for, returned to the console, and logged on stderr either
+way.
+
+### The local filter
+
+One thing about _whether_ to notify is genuinely per-machine and cannot live in a
+server-side selector every client shares: a laptop that should only ever buzz for
+its owner's team. `[[notifications.rules]]` in the config file is that, and only
+that — it narrows what the console already chose to send and never widens it, so
+a machine with no rules behaves exactly as before the file existed.
+
+Rules are ORed, fields within a rule ANDed, values are unanchored regular
+expressions over the fields a stream event carries (`severity`, `alertname`,
+`source`, `team`, `summary`):
+
+```toml
+[[notifications.rules]]
+severity = "^critical$"
+team = "^(core|platform)$"
+
+[[notifications.rules]]
+alertname = "(?i)disk"
+```
+
+A bad pattern or a field no event carries is refused at startup rather than at
+the first alert. A suppressed notification is logged, because "the filter ate it"
+and "the daemon is down" are otherwise the same silence. The tray's **Reload
+alert filter** re-reads this section only, so a rule can be tried against live
+alerts without relaunching.
+
 Two limits worth knowing. Clicking a notification does nothing yet — the host
 has no click callback to hand back, so deep-linking to the alert is still to
 come. And the console only notifies while its window is hidden, as it does in a
@@ -205,5 +243,55 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 npm --prefix desktop run dev
 `SSL_CERT_FILE` and `SSL_CERT_DIR` are read too, for a certificate bundle kept
 outside the system trust store; see [Servers behind a private CA](#servers-behind-a-private-ca).
 
-Environment variables are the walking skeleton's answer. A settings surface and
-multiple server profiles are later work in the plan.
+### The config file
+
+Optional, TOML, and read from the first of these that exists:
+
+| Platform | Location                                                                                                                                                                                                  |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux    | `$XDG_CONFIG_HOME/promview-desktop/config.toml` (so `~/.config/…`), then `config` without the extension, then `~/.promview-desktop/config.toml`, `~/.promview-desktop/config`, `~/.promview-desktop.toml` |
+| Windows  | `%APPDATA%\promview-desktop\config.toml`, then the `$HOME` fallbacks above                                                                                                                                |
+| macOS    | `~/Library/Application Support/promview-desktop/config.toml`, then the `$HOME` fallbacks above                                                                                                            |
+
+`PROMVIEW_DESKTOP_CONFIG` names a file outright and skips the search. It is an
+error if that file is not there: an operator who said where their settings are
+should not silently get defaults instead.
+
+`desktop/config.example.toml` is a commented copy of everything below.
+
+```toml
+server_url = "https://promview.internal"
+poll_interval_secs = 60
+
+[env]
+SSL_CERT_FILE = "/etc/promview/internal-ca.pem"
+WEBKIT_DISABLE_DMABUF_RENDERER = "1"
+
+[[notifications.rules]]
+severity = "^critical$"
+team = "^(core|platform)$"
+```
+
+Unknown keys are **refused**, not ignored. A settings file whose typos pass is a
+file you believe is in effect when it is not.
+
+The `[env]` table exists for the settings that are not this application's own —
+a private CA bundle, a WebKitGTK workaround — which otherwise need a wrapper
+script around the desktop entry. It is applied before the Tauri builder exists,
+which is the only moment early enough for WebKit to still read its own variables.
+Names are logged, values never: this is exactly where somebody will put a path
+they consider private.
+
+Precedence, highest first:
+
+1. a variable already exported in the environment,
+2. the same variable set by the file's `[env]` table,
+3. the file's own key (`server_url`, `poll_interval_secs`),
+4. the built-in default.
+
+The launch environment winning is deliberate. `SSL_CERT_FILE=… promview-desktop`
+is how you test a bundle once, and a file that overwrote it would make that do
+nothing, with no clue as to why — so the file says so on stderr when it yields.
+
+A settings surface and multiple server profiles are still later work in the plan;
+this is a file, not a UI.
