@@ -114,6 +114,18 @@ told. They stay signed in until the process exits, then sign in again. Nothing
 secret is written to disk: a bearer token in a file is readable by anything
 running as the user, and surviving a restart is not worth that.
 
+**When the store does not answer**, the same thing happens. An absent keyring is
+not the only way this fails: a locked collection makes the D-Bus unlock call
+block until something prompts for the password, and a session with no prompter
+running never does — the call simply never returns. Untimed, that was not a slow
+sign-in but one that never finished, with nothing on screen to explain it. Every
+call into the store now has a three-second deadline, and a store that misses it
+is not consulted again for the rest of the run: paying the deadline on every
+request would make the whole client feel broken rather than just the part that
+remembers a session. A store that was only slow because it put a prompt on
+screen may answer afterwards and store the token anyway, so what the operator is
+told is pessimistic rather than wrong.
+
 ## Notifications
 
 Shown by the host, because WebKitGTK has no usable Notification API — without
