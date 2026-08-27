@@ -1,0 +1,65 @@
+# Promview desktop shell — optional configuration.
+#
+# Copy to one of these and edit; the first one that exists is the one read:
+#
+#   ~/.config/promview-desktop/config.toml   ($XDG_CONFIG_HOME honoured)
+#   ~/.config/promview-desktop/config
+#   ~/.promview-desktop/config.toml
+#   ~/.promview-desktop/config
+#   ~/.promview-desktop.toml
+#
+# On Windows the first location is %APPDATA%\promview-desktop\config.toml, on
+# macOS ~/Library/Application Support/promview-desktop/config.toml.
+#
+# PROMVIEW_DESKTOP_CONFIG=/path/to/config.toml overrides the search entirely,
+# and is an error if the file is not there — an operator who named a file should
+# not silently get defaults.
+#
+# Unknown keys are refused rather than ignored: a settings file whose typos pass
+# is a file you believe is in effect when it is not.
+
+# Server to talk to. Same rules as PROMVIEW_SERVER_URL: absolute http/https, a
+# path prefix is kept for a reverse proxy, no query or fragment.
+server_url = "https://promview.internal"
+
+# Fallback tray refresh, in seconds. The stream is what makes the tray prompt;
+# this only covers the gaps. Minimum 5.
+poll_interval_secs = 60
+
+# Variables exported before anything reads them — the settings that are not this
+# application's own, and that would otherwise need a wrapper script around the
+# desktop entry.
+#
+# A variable already set in the environment wins: `SSL_CERT_FILE=… promview-desktop`
+# is the obvious way to test a bundle once, and a file that overwrote it would
+# make that do nothing.
+[env]
+# A certificate bundle kept outside the system trust store.
+SSL_CERT_FILE = "/etc/promview/internal-ca.pem"
+# WebKitGTK fails to allocate its buffers on some GPU and compositor
+# combinations, and the window renders blank with `Failed to create GBM buffer`.
+WEBKIT_DISABLE_DMABUF_RENDERER = "1"
+
+# Which alerts this machine wants to be interrupted by.
+#
+# This narrows what the console already decided to send; it never widens it. The
+# opt-in and the label selector still live in your server-side preferences, so
+# policy follows you between clients — this is for what is true of the machine
+# rather than of you, like a laptop that should only ever buzz for your own team.
+#
+# Rules are ORed. Fields within one rule are ANDed. Values are regular
+# expressions, unanchored — use ^ and $ for an exact match. Matchable fields are
+# the ones a stream event carries: severity, alertname, source, team, summary.
+#
+# No rules at all means no filtering. The tray's "Reload alert filter" re-reads
+# just this section, so a rule can be tried against live alerts without a
+# restart.
+
+# Anything critical for my own team.
+[[notifications.rules]]
+severity = "^critical$"
+team = "^(core|platform)$"
+
+# Plus disk alerts wherever they come from, whatever the severity.
+[[notifications.rules]]
+alertname = "(?i)disk"

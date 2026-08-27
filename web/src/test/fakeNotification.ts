@@ -17,6 +17,7 @@ export class FakeNotification implements NotificationHandle {
   readonly title: string;
   readonly body: string | undefined;
   readonly tag: string | undefined;
+  readonly labels: Record<string, string> | undefined;
   onclick: (() => void) | null = null;
   closed = false;
 
@@ -24,6 +25,7 @@ export class FakeNotification implements NotificationHandle {
     this.title = title;
     this.body = options.body;
     this.tag = options.tag;
+    this.labels = options.labels;
     FakeNotification.instances.push(this);
   }
 

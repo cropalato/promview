@@ -94,6 +94,23 @@ describe('createAlertNotifier', () => {
     expect(notification.tag).toBe('promview-alert-42');
   });
 
+  it('passes the event fields a host filter matches on', () => {
+    // A host shell filters on these; without them its only view of the event is
+    // the rendered title, which is not a selector anyone can reason about.
+    const { options } = harness();
+    createAlertNotifier(options).handleEvent(createdCritical({ severity: 'CRITICAL' }));
+
+    expect(FakeNotification.latest().labels).toEqual({
+      // Normalized, so a rule matches what the console displays rather than
+      // whatever casing the source used.
+      severity: 'critical',
+      alertname: 'HighErrorRate',
+      source: 'am-eu',
+      team: 'core',
+      summary: 'Error rate above 5% for 10m',
+    });
+  });
+
   it('keeps the body useful when summary and team are empty', () => {
     const { options } = harness();
     createAlertNotifier(options).handleEvent(createdCritical({ summary: '', team: '' }));
