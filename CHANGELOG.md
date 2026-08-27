@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.34] - 2026-08-27
+
 ### Added
 
 - **desktop:** the shell decides for itself whether WebKitGTK may use its DMA-BUF renderer. Since WebKitGTK 2.42 that renderer is the default, and on the NVIDIA driver its GBM allocations fail — the window renders nothing at all, `Failed to create GBM buffer` goes to stderr, and the symptom is indistinguishable from promview being broken, so every affected operator had to find `WEBKIT_DISABLE_DMABUF_RENDERER` for themselves. At startup the shell now probes for a DRM render node and the driver behind it, and switches the renderer off where there is nothing to allocate from — a container, a VM with no GPU — or where the node is NVIDIA's. The guess is biased on purpose: disabling the renderer where it would have worked costs shared-memory buffers and some CPU, which for an alert console nobody notices, while leaving it on where it does not work costs the whole window. It says which way it went and why. `webkit_dmabuf = "on" | "off"` in the config file overrides the probe, `WEBKIT_DISABLE_DMABUF_RENDERER` in the environment beats both, and nothing ever removes a variable an operator exported.
