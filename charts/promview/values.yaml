@@ -47,6 +47,20 @@ bootstrapSource:
   existingSecret: ""
   tokenKey: token
 
+# Sources registered on every install and upgrade, one Job per entry running
+# `promview source set`. Unlike bootstrapSource this overwrites the stored
+# ingestion token, so rotating the Secret and upgrading rotates the credential.
+# Tokens live in an existing Secret; the key defaults to the slug so one Secret
+# can carry every source.
+sources: []
+# - slug: production
+#   name: Production Alertmanager   # defaults to slug
+#   existingSecret: promview-sources
+#   tokenKey: production            # defaults to slug
+#   staleAfter: 12h                 # optional; empty keeps the stored value
+#   alertmanagerURL: http://alertmanager.monitoring:9093  # optional
+#   alertmanagerTokenKey: production-am                   # optional, same Secret
+
 roleBindings: []
 # - name: promview-administrators
 #   role: administrator
