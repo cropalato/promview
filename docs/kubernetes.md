@@ -95,8 +95,23 @@ reconcile:
   timeout: 10s
 ```
 
-Reconciliation stays inert until a source carries an Alertmanager URL, which is set
-per source rather than through chart values:
+Reconciliation stays inert until a source carries an Alertmanager URL. Sources declared
+through the chart's `sources` list carry it in values:
+
+```yaml
+sources:
+  - slug: production
+    existingSecret: promview-sources   # token in key "production"
+    alertmanagerURL: http://alertmanager.monitoring:9093
+```
+
+Each entry becomes a post-install and post-upgrade Job running `promview source set`,
+so the ingestion token is rewritten from the Secret on every upgrade — rotating the
+Secret and upgrading rotates the credential. See the
+[chart guide](../charts/promview/README.md#declare-multiple-sources) for the Secret
+layout and the optional per-source fields.
+
+A source managed outside chart values takes its URL from the CLI instead:
 
 ```sh
 kubectl --namespace promview exec deploy/promview -- \
@@ -111,7 +126,7 @@ holds it.
 
 The PostgreSQL Secret must exist before installation because the migration Job is a Helm pre-install hook.
 
-For all chart values, OIDC configuration, source bootstrap, migration behavior, and validation commands, see [`charts/promview/README.md`](../charts/promview/README.md).
+For all chart values, OIDC configuration, source bootstrap, the declarative `sources` list, migration behavior, and validation commands, see [`charts/promview/README.md`](../charts/promview/README.md).
 
 OIDC deployments must create at least one group binding after installation and before the first login. The chart guide includes the required `promview access set` command.
 
