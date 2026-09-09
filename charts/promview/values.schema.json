@@ -103,6 +103,44 @@
         }
       }
     },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "slug",
+          "existingSecret"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "existingSecret": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tokenKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "staleAfter": {
+            "type": "string"
+          },
+          "alertmanagerURL": {
+            "type": "string",
+            "pattern": "^https?://"
+          },
+          "alertmanagerTokenKey": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
     "roleBindings": {
       "type": "array",
       "items": {

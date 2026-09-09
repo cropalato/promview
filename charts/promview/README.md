@@ -143,6 +143,31 @@ bootstrapSource:
 
 Bootstrap initializes an absent or legacy uncredentialed source. Changing the Secret does not rotate a source that already has a credential. Use `promview source set` explicitly for rotation.
 
+## Declare Multiple Sources
+
+`sources` registers any number of sources on every install and upgrade, one Job per entry running `promview source set`. Unlike `bootstrapSource` it overwrites the stored ingestion token, so rotating the Secret and upgrading rotates the credential.
+
+Create one Secret with a token key per source:
+
+```sh
+kubectl --namespace promview create secret generic promview-sources \
+  --from-literal=production='replace-with-at-least-16-characters' \
+  --from-literal=staging='replace-with-at-least-16-characters'
+```
+
+```yaml
+sources:
+  - slug: production
+    existingSecret: promview-sources
+    alertmanagerURL: http://alertmanager.monitoring:9093
+  - slug: staging
+    name: Staging Alertmanager
+    existingSecret: promview-sources
+    staleAfter: 12h
+```
+
+`name` and `tokenKey` default to the slug. `staleAfter`, `alertmanagerURL`, and `alertmanagerTokenKey` are optional; an absent value keeps whatever the database already stores, so a value removed from the list is not un-set.
+
 ## Migrations And Rollbacks
 
 The chart runs `promview migrate` as a `pre-install,pre-upgrade` Helm hook using the same image as the Deployment. Migration failure blocks the release. Promview serializes migration processes with a PostgreSQL advisory lock.
@@ -179,6 +204,7 @@ make verify-helm
 | `auth.mode` | `open` | `open` or `oidc` |
 | `oidc.existingSecret` | empty | Secret containing the OIDC client secret |
 | `bootstrapSource.enabled` | `false` | Initialize one Alertmanager source |
+| `sources` | `[]` | Alertmanager sources registered after install and upgrade; overwrites tokens |
 | `roleBindings` | `[]` | OIDC group role bindings applied after install and upgrade |
 | `alertExpiry.staleAfter` | `12h` | How long an alert may go unreported before it expires; `0` disables expiry |
 | `alertExpiry.interval` | `1m` | How often the expiry sweep runs |

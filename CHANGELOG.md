@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **chart:** `sources` declares any number of Alertmanager sources in values, one post-install and post-upgrade Job per entry running `promview source set`. `bootstrapSource` stays what it was — one source, written only while the row has no credential — which made it safe to re-run but also made it a dead end: it cannot register a second source and it cannot rotate a token. The Jobs overwrite the stored ingestion token on every upgrade, so rotating the Secret and syncing rotates the credential. The token never appears in a manifest: the kubelet expands it into the argument list from the Secret-backed environment. `name` and `tokenKey` default to the slug so one Secret carries every source, and `staleAfter`, `alertmanagerURL`, and `alertmanagerTokenKey` are passed only when set, because `source set` keeps the stored value for a flag it is not given.
+
 ### Documentation
 
 - Document the desktop client's config file in the project README: where it is read from, the `[env]` table that exports variables before the webview starts, the per-machine notification rules and how they relate to the server-side policy in `user_preferences`, and the WebKitGTK renderer override.
