@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Documentation
+
+- The Kubernetes guide claimed a source's Alertmanager URL could only be set per source through the CLI; the chart's `sources` list has carried it in values since 0.1.0-alpha.35. The guide now shows the declarative path first and keeps `source update` for sources managed outside chart values.
+
 ## [0.1.0-alpha.35] - 2026-09-09
 
 ### Added
