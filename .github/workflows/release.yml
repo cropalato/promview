@@ -312,3 +312,53 @@ jobs:
               --notes-file notes.md \
               "${files[@]}"
           fi
+
+  # Publishing the recipe to the AUR, which is a different thing from the
+  # package desktop-arch already builds: the AUR distributes PKGBUILDs, and each
+  # user's makepkg fetches the asset and assembles the package itself.
+  #
+  # It runs after `release` rather than beside it because the PKGBUILD downloads
+  # the deb from the release asset URL. A job racing the upload would resolve a
+  # 404 and pin the checksum of an error page.
+  aur:
+    if: github.ref_type == 'tag'
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stamp the release version into the PKGBUILD
+        id: stamp
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          # pacman forbids a hyphen in pkgver, so a pre-release is stored as
+          # 0.1.0_alpha.36 while the tag and the asset keep 0.1.0-alpha.36.
+          pkgver="${version//-/_}"
+          sed -i "s/^pkgver=.*/pkgver=${pkgver}/" desktop/packaging/aur/PKGBUILD
+          grep -q "^pkgver=${pkgver}$" desktop/packaging/aur/PKGBUILD
+          echo "pkgver=${pkgver}" >> "${GITHUB_OUTPUT}"
+
+      # The action brings its own Arch container, so this needs no `container:`
+      # and never meets the "makepkg cannot run as root" trap that desktop-arch
+      # works around with a builder user. It also writes .SRCINFO itself, which
+      # is why none is committed: a stale one is worse than none, since the AUR
+      # serves its metadata and would keep advertising the previous version.
+      #
+      # updpkgsums replaces the zeroed placeholders with the real digests, and
+      # the test build is what proves it happened — an unstamped PKGBUILD fails
+      # checksum verification instead of publishing something unverifiable.
+      # --nodeps keeps that build from installing the whole GTK stack to
+      # exercise a package() that only runs bsdtar.
+      - uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        with:
+          pkgname: promview-desktop-bin
+          pkgbuild: desktop/packaging/aur/PKGBUILD
+          updpkgsums: true
+          test: true
+          test_flags: --nodeps
+          allow_empty_commits: false
+          commit_username: ${{ github.actor }}
+          commit_email: ${{ github.actor }}@users.noreply.github.com
+          commit_message: "promview-desktop-bin ${{ steps.stamp.outputs.pkgver }}-1"
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}

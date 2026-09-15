@@ -1,0 +1,77 @@
+# Maintainer: Ricardo Melo <ricardo@cropa.ca>
+#
+# The recipe published to the AUR as promview-desktop-bin.
+#
+# It is deliberately not the one in ../arch. That one repackages a deb sitting
+# beside it in a CI workspace, which the AUR forbids twice over: a source entry
+# without a URL has to be committed to the package repository, and the
+# repository rejects any blob past a quarter of a megabyte. This one names the
+# release asset by URL, so an ordinary makepkg on someone else's machine can
+# fetch what CI already built and published.
+#
+# The -bin suffix is required rather than chosen. Promview's sources are public,
+# so a package shipping a prebuilt binary must say so in its name; the suffix is
+# only dropped for software whose sources are unavailable.
+#
+# pkgver is a placeholder. The release workflow stamps the tag into it and pins
+# the checksums, the same way ../arch/PKGBUILD is stamped, so a release needs no
+# edit here. Building this by hand means setting both first.
+
+pkgname=promview-desktop-bin
+_binname=promview-desktop
+pkgver=0.0.0
+pkgrel=1
+pkgdesc="Operational console for Prometheus Alertmanager alerts"
+arch=('x86_64')
+url="https://github.com/cropalato/promview"
+license=('MIT')
+# What the Tauri shell links against at runtime. The webkit and appindicator
+# names are Arch's, which differ from the Debian ones the deb declares.
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
+provides=("${_binname}")
+conflicts=("${_binname}")
+# The binary ships as it was built and released everywhere else. Stripping it
+# here would produce something no other platform is running.
+options=('!strip' '!debug')
+
+# pacman forbids a hyphen in pkgver, so a pre-release is stored as
+# 0.1.0_alpha.36 while the tag and the asset keep 0.1.0-alpha.36. Converted once
+# here rather than at each use.
+_relver="${pkgver//_/-}"
+
+# Both entries are renamed on the way in: makepkg's download cache is shared by
+# every package built on the machine, so a bare LICENSE would collide with
+# somebody else's.
+source=(
+    "${pkgname}-${pkgver}.deb::${url}/releases/download/v${_relver}/Promview_${_relver}_amd64.deb"
+    "${pkgname}-${pkgver}.LICENSE::https://raw.githubusercontent.com/cropalato/promview/v${_relver}/LICENSE"
+)
+
+# Unpacked by hand in package() instead of by makepkg, so the layout this
+# depends on is stated in one place rather than inferred from whatever
+# libarchive decides to do with a deb.
+noextract=("${pkgname}-${pkgver}.deb")
+
+# Placeholders the release workflow replaces with the real digests. They are
+# deliberately zeros rather than SKIP: an unstamped PKGBUILD then fails
+# verification loudly, where SKIP would build happily against anything that
+# answered the URL. Uploaded release assets are byte-stable, so pinning them is
+# safe — unlike GitHub's generated source tarballs, whose stability guarantee
+# lapsed in 2024.
+sha256sums=('0000000000000000000000000000000000000000000000000000000000000000'
+            '0000000000000000000000000000000000000000000000000000000000000000')
+
+package() {
+    # The deb already carries the install layout — /usr/bin, the desktop entry,
+    # the hicolor icons — and nothing Debian-specific, so moving its payload
+    # into $pkgdir is the whole job.
+    bsdtar -xOf "${srcdir}/${pkgname}-${pkgver}.deb" data.tar.gz |
+        bsdtar -xzf - -C "${pkgdir}"
+
+    # MIT is not among the licenses pacman ships in /usr/share/licenses/common,
+    # so the text has to travel with the package. No `|| true` guard: a license
+    # that stopped arriving should fail the build rather than quietly produce a
+    # package whose declared license appears nowhere inside it.
+    install -Dm644 "${srcdir}/${pkgname}-${pkgver}.LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
