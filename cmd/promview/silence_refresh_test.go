@@ -318,3 +318,7 @@ func (silencer stubSilencer) CreateSilence(
 ) (string, error) {
 	return silencer.id, silencer.err
 }
+
+func (silencer stubSilencer) DeleteSilence(context.Context, string, string, string) error {
+	return silencer.err
+}

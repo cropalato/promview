@@ -29,6 +29,14 @@ export interface RuntimeConfig {
    * key as it always did.
    */
   silencePreviewSupported: boolean;
+  /**
+   * Whether the server can remove a silence. Same reason as the preview flag:
+   * a console offering a Remove control against an older server would send a
+   * request that falls through to the SPA route and answers a page, which
+   * reads as a broken console rather than a missing feature. Absent reads as
+   * unsupported and the control is not offered.
+   */
+  silenceRemoveSupported: boolean;
 }
 
 export const RUNTIME_CONFIG_URL = '/api/v1/config';
@@ -99,6 +107,7 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
     silenceDefaultSeconds,
     silenceMaxSeconds,
     silencePreviewSupported,
+    silenceRemoveSupported,
   } = body as Record<string, unknown>;
   if (typeof authMode !== 'string' || !AUTH_MODES.includes(authMode as AuthMode)) {
     throw new RuntimeConfigError(`Unsupported auth mode: ${String(authMode)}`);
@@ -115,6 +124,7 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
     // serve it, so absent reads as off rather than as enabled.
     silenceEnabled: silenceEnabled === true,
     silencePreviewSupported: silencePreviewSupported === true,
+    silenceRemoveSupported: silenceRemoveSupported === true,
     silenceMaxSeconds: max,
     // Never offer a default the server would refuse.
     silenceDefaultSeconds: Math.min(

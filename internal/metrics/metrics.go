@@ -70,8 +70,9 @@ type Metrics struct {
 	reconcileRuns        *prometheus.CounterVec
 	reconcileLastSuccess *prometheus.GaugeVec
 
-	silenceWrites  *prometheus.CounterVec
-	silenceRecords *prometheus.CounterVec
+	silenceWrites   *prometheus.CounterVec
+	silenceRemovals *prometheus.CounterVec
+	silenceRecords  *prometheus.CounterVec
 
 	streamClients    prometheus.Gauge
 	streamPolls      prometheus.Counter
@@ -113,6 +114,15 @@ func New(version string) *Metrics {
 			// Labelled by Alertmanager rather than by promview source: one
 			// Alertmanager can serve several sources, and the code that writes
 			// the silence knows the URL it wrote to, not the slug behind it.
+		}, []string{"alertmanager", "result"}),
+		silenceRemovals: prometheus.NewCounterVec(prometheus.CounterOpts{
+			// A counter of its own rather than a label on the writes: removal
+			// is the direction that puts alerts back on screen, and a failing
+			// one means an operator believes noise is coming back when it is
+			// not. Folding it into the write counter would also rewrite every
+			// existing query against that series.
+			Name: "promview_silence_removals_total",
+			Help: "Silences promview tried to remove, by Alertmanager and outcome.",
 		}, []string{"alertmanager", "result"}),
 		silenceRecords: prometheus.NewCounterVec(prometheus.CounterOpts{
 			// A failure here does not fail the silence, which is the point: the
@@ -156,6 +166,7 @@ func New(version string) *Metrics {
 		m.reconcileRuns,
 		m.reconcileLastSuccess,
 		m.silenceWrites,
+		m.silenceRemovals,
 		m.silenceRecords,
 		m.streamClients,
 		m.streamPolls,
@@ -217,6 +228,14 @@ func (m *Metrics) SilenceWritten(alertmanager string, err error) {
 		return
 	}
 	m.silenceWrites.WithLabelValues(alertmanager, resultOf(err)).Inc()
+}
+
+// SilenceRemoved records an attempt to remove a silence from an Alertmanager.
+func (m *Metrics) SilenceRemoved(alertmanager string, err error) {
+	if m == nil {
+		return
+	}
+	m.silenceRemovals.WithLabelValues(alertmanager, resultOf(err)).Inc()
 }
 
 // SilenceRecorded records an attempt to store a created silence's provenance.

@@ -19,7 +19,12 @@ import { AlertDetailDrawer } from './components/AlertDetailDrawer';
 import { AlertTable } from './components/AlertTable';
 import { AlertGroupTable } from './components/AlertGroupTable';
 import { SilenceDialog } from './components/SilenceDialog';
-import { previewGroupSilence, silenceAlert, silenceGroup } from './alerts/silence';
+import {
+  previewGroupSilence,
+  removeAlertSilence,
+  silenceAlert,
+  silenceGroup,
+} from './alerts/silence';
 import type { SilencePreview, SilenceResponse } from './alerts/silence';
 import { ViewMenu } from './components/ViewMenu';
 import { resolveColumns } from './alerts/columns';
@@ -95,11 +100,6 @@ export default function App({ navigate }: AppProps = {}) {
   const consoleUnlocked =
     configState.status === 'ready' &&
     (configState.config.authMode !== 'oidc' || sessionState.status === 'ready');
-  // Server-side filter/sort state. The filter input holds a draft; only a
-  // draft that parses into label matchers is applied, and applying restarts
-  // the alert query from the first page with repeated `match` params.
-  const [filterDraft, setFilterDraft] = useState('');
-  const [appliedMatchers, setAppliedMatchers] = useState<readonly LabelMatcher[]>([]);
 
   // Under a host shell, sign-in goes through the host to the system browser
   // instead of navigating the webview to the identity provider. Pending means
@@ -125,6 +125,11 @@ export default function App({ navigate }: AppProps = {}) {
         setHostSignInError(error instanceof Error ? error.message : String(error));
       });
   }, [hostSignIn, retrySession]);
+  // Server-side filter/sort state. The filter input holds a draft; only a
+  // draft that parses into label matchers is applied, and applying restarts
+  // the alert query from the first page with repeated `match` params.
+  const [filterDraft, setFilterDraft] = useState('');
+  const [appliedMatchers, setAppliedMatchers] = useState<readonly LabelMatcher[]>([]);
   const [filterError, setFilterError] = useState<string | null>(null);
   const [sort, setSort] = useState<AlertSort | null>(null);
 
@@ -392,6 +397,34 @@ export default function App({ navigate }: AppProps = {}) {
   const silenceAvailable =
     config?.silenceEnabled === true &&
     canOperate(sessionState.status === 'ready' ? sessionState.session : undefined);
+  // Lifting a silence is offered only where all three hold: the deployment can
+  // write to an Alertmanager, the server is new enough to have the endpoint,
+  // and the server says this operator may act on this alert. The last is the
+  // same per-alert permission the silence button reads — creating and lifting
+  // a silence are one right — and open mode never carries it.
+  const removeSilenceReady =
+    config?.silenceEnabled === true &&
+    config?.silenceRemoveSupported === true &&
+    detailState.status === 'ready' &&
+    detailState.detail.alert.actions.canSilence;
+  const removableAlertId =
+    removeSilenceReady && detailState.status === 'ready' ? detailState.detail.alert.id : null;
+  const removeSilence = useMemo(() => {
+    if (removableAlertId === null) {
+      return undefined;
+    }
+    return async (silenceId: string) => {
+      await removeAlertSilence(removableAlertId, silenceId);
+      // The alert is no longer hidden, so both views of it are now stale: the
+      // drawer still names the silence and the list still dims the row. The
+      // server releases the suppression within seconds and streams an update
+      // of its own, but re-reading here means the operator sees the result of
+      // their own click rather than waiting on a background pass.
+      refreshDetailIfSelected(removableAlertId);
+      scheduleLiveRefresh();
+    };
+  }, [removableAlertId, refreshDetailIfSelected, scheduleLiveRefresh]);
+
   const filterActive = appliedMatchers.length > 0;
   const appliedFilterText = formatFilter(appliedMatchers);
 
@@ -674,6 +707,7 @@ export default function App({ navigate }: AppProps = {}) {
                   })
               : undefined
           }
+          onRemoveSilence={removeSilence}
         />
       ) : null}
       {silenceTarget !== null && config !== undefined ? (

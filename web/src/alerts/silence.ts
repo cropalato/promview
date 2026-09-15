@@ -12,6 +12,8 @@ import { apiUrl } from '../config/apiBase';
 import { apiFetch } from '../config/transport';
 
 export const ALERT_SILENCE_URL = (id: string) => `/api/v1/alerts/${encodeURIComponent(id)}/silence`;
+export const ALERT_SILENCE_REMOVE_URL = (alertId: string, silenceId: string) =>
+  `/api/v1/alerts/${encodeURIComponent(alertId)}/silences/${encodeURIComponent(silenceId)}`;
 export const GROUP_SILENCE_URL = '/api/v1/groups/silence';
 export const GROUP_SILENCE_PREVIEW_URL = '/api/v1/groups/silence/preview';
 
@@ -199,6 +201,45 @@ export function silenceAlert(
   fetchImpl: FetchLike = apiFetch,
 ): Promise<SilenceResponse> {
   return postSilence(ALERT_SILENCE_URL(id), request, fetchImpl);
+}
+
+/**
+ * Removes one silence that is holding an alert back.
+ *
+ * Addressed through the alert rather than by silence id alone, because that is
+ * what proves the caller may lift it: a silence id is an opaque token, and a
+ * bare id endpoint would let anyone who can operate on anything un-hide
+ * anything. The server re-checks the same thing, in SQL.
+ */
+export async function removeAlertSilence(
+  alertId: string,
+  silenceId: string,
+  fetchImpl: FetchLike = apiFetch,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetchImpl(apiUrl(ALERT_SILENCE_REMOVE_URL(alertId, silenceId)), {
+      method: 'DELETE',
+    });
+  } catch {
+    throw new SilenceError('Unable to reach the Promview API', 0);
+  }
+  if (response.ok) {
+    return;
+  }
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  const message =
+    typeof payload === 'object' &&
+    payload !== null &&
+    typeof (payload as { error?: unknown }).error === 'string'
+      ? (payload as { error: string }).error
+      : `Removing the silence failed (HTTP ${response.status})`;
+  throw new SilenceError(message, response.status);
 }
 
 export function silenceGroup(

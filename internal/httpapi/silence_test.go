@@ -40,6 +40,123 @@ func postSilence(handler http.Handler, path, body string) *httptest.ResponseReco
 	return response
 }
 
+func deleteSilence(handler http.Handler, path string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodDelete, path, nil)
+	request.Header.Set("Authorization", "Bearer session-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func removableTarget() alerts.SilenceTarget {
+	return alerts.SilenceTarget{
+		Source:            "demo",
+		AlertmanagerURL:   "http://am-a:9093",
+		AlertmanagerToken: "sekret",
+		Labels:            map[string]string{"alertname": "HighCPU", "instance": "web-01"},
+		Members:           1,
+	}
+}
+
+func TestRemoveAlertSilenceExpiresItAndTheStoredRecord(t *testing.T) {
+	store := &fakeStore{removalTarget: removableTarget()}
+	silencer := newFakeSilencer()
+	handler := New(silenceConfig(), store, operator(), silencer)
+
+	response := deleteSilence(handler, "/api/v1/alerts/42/silences/sil-1")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (%s)", response.Code, http.StatusOK, response.Body)
+	}
+	if len(silencer.deleted) != 1 || silencer.deleted[0] != "sil-1" {
+		t.Fatalf("deleted = %v, want the named silence", silencer.deleted)
+	}
+	if silencer.deleteToken != "sekret" {
+		t.Errorf("token = %q, want the source's credential", silencer.deleteToken)
+	}
+	// The scope is resolved against the alert, which is what proves the
+	// operator may act on the silence at all.
+	if store.removalAlertID != 42 || store.removalSilence != "sil-1" {
+		t.Errorf("scope asked for alert %d silence %q, want 42/sil-1", store.removalAlertID, store.removalSilence)
+	}
+	// The record stops claiming the silence is live without waiting for a sync,
+	// which may never come where reconciliation is switched off.
+	if len(store.expiredRecords) != 1 || store.expiredRecords[0] != "sil-1" {
+		t.Errorf("expired records = %v, want the removed silence", store.expiredRecords)
+	}
+}
+
+func TestRemoveAlertSilenceReportsAnAlertmanagerRefusal(t *testing.T) {
+	store := &fakeStore{removalTarget: removableTarget()}
+	silencer := newFakeSilencer()
+	silencer.deleteErr = errors.New("alertmanager refused")
+	handler := New(silenceConfig(), store, operator(), silencer)
+
+	// The silence is still in place, so the alert is still hidden. Reporting
+	// success would tell an operator the noise is coming back when it is not.
+	response := deleteSilence(handler, "/api/v1/alerts/42/silences/sil-1")
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadGateway)
+	}
+	if len(store.expiredRecords) != 0 {
+		t.Error("a silence the alertmanager still holds was recorded as expired")
+	}
+}
+
+func TestRemoveAlertSilenceSucceedsWhenTheRecordCannotBeExpired(t *testing.T) {
+	store := &fakeStore{removalTarget: removableTarget(), expireRecordErr: errors.New("database is down")}
+	silencer := newFakeSilencer()
+	handler := New(silenceConfig(), store, operator(), silencer)
+
+	// The silence is gone from the Alertmanager, which is what was asked for. A
+	// stale local record is a reporting defect, not a failed action, and an
+	// error here would invite a retry of something already done.
+	if code := deleteSilence(handler, "/api/v1/alerts/42/silences/sil-1").Code; code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", code, http.StatusOK)
+	}
+	if len(silencer.deleted) != 1 {
+		t.Errorf("deleted = %v, want the silence removed regardless", silencer.deleted)
+	}
+}
+
+func TestRemoveAlertSilenceRefusesASilenceThatIsNotHoldingTheAlertBack(t *testing.T) {
+	// The scope refuses an id that is not in this alert's silencedBy, which is
+	// what stops a silence id being removable by anyone who can reach any alert.
+	store := &fakeStore{removalErr: alerts.ErrNotFound}
+	silencer := newFakeSilencer()
+	handler := New(silenceConfig(), store, operator(), silencer)
+
+	if code := deleteSilence(handler, "/api/v1/alerts/42/silences/somebody-elses").Code; code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", code, http.StatusNotFound)
+	}
+	if len(silencer.deleted) != 0 {
+		t.Error("an unauthorized removal reached the alertmanager")
+	}
+}
+
+func TestRemoveAlertSilenceRequiresOperatorRights(t *testing.T) {
+	viewer := fakeAuthenticator{principal: auth.Principal{Subject: "v", Roles: []string{"viewer"}}}
+	silencer := newFakeSilencer()
+	handler := New(silenceConfig(), &fakeStore{removalTarget: removableTarget()}, viewer, silencer)
+
+	// Un-hiding another team's alerts is not a viewer's decision either.
+	if code := deleteSilence(handler, "/api/v1/alerts/42/silences/sil-1").Code; code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", code, http.StatusForbidden)
+	}
+	if len(silencer.deleted) != 0 {
+		t.Error("a viewer removed a silence")
+	}
+}
+
+func TestRemoveAlertSilenceIsNotImplementedWithoutASilencer(t *testing.T) {
+	handler := New(silenceConfig(), &fakeStore{removalTarget: removableTarget()}, operator(), nil)
+
+	// 501 rather than 404, so the console can tell "not built" from "not
+	// configured here".
+	if code := deleteSilence(handler, "/api/v1/alerts/42/silences/sil-1").Code; code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want %d", code, http.StatusNotImplemented)
+	}
+}
+
 func oneTarget() alerts.SilenceScope {
 	return alerts.SilenceScope{
 		Labels: map[string]string{"alertname": "HighCPU", "instance": "web-01"},

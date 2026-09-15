@@ -37,7 +37,9 @@ type Store interface {
 	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
 	SilenceScopeForAlert(context.Context, auth.Principal, int64) (alerts.SilenceScope, error)
 	SilenceScopeForGroup(context.Context, auth.Principal, []string, map[string]string) (alerts.SilenceScope, error)
+	SilenceRemovalScope(context.Context, auth.Principal, int64, string) (alerts.SilenceTarget, error)
 	RecordSilence(context.Context, alerts.SilenceRecord) error
+	ExpireSilenceRecord(context.Context, string, string, time.Time) error
 	StreamEvents(context.Context, auth.Principal, int64, int) (alerts.StreamBatch, error)
 	ReadPreferences(context.Context, auth.Principal) (preferences.Preferences, error)
 	WritePreferences(context.Context, auth.Principal, preferences.Preferences) error
@@ -107,6 +109,7 @@ func NewObserved(
 	mux.Handle("GET /api/v1/alerts/{id}/events", api.requireAuthentication(http.HandlerFunc(api.getAlertEvents)))
 	mux.Handle("POST /api/v1/alerts/{id}/acknowledge", api.requireAuthentication(http.HandlerFunc(api.acknowledgeAlert)))
 	mux.Handle("POST /api/v1/alerts/{id}/silence", api.requireAuthentication(http.HandlerFunc(api.silenceAlert)))
+	mux.Handle("DELETE /api/v1/alerts/{id}/silences/{silenceId}", api.requireAuthentication(http.HandlerFunc(api.removeAlertSilence)))
 	mux.Handle("POST /api/v1/groups/silence", api.requireAuthentication(http.HandlerFunc(api.silenceGroup)))
 	mux.Handle("POST /api/v1/groups/silence/preview", api.requireAuthentication(http.HandlerFunc(api.previewGroupSilence)))
 	mux.Handle("GET /api/v1/stream", api.requireAuthentication(http.HandlerFunc(api.streamAlerts)))
@@ -572,6 +575,10 @@ func (api *API) getConfig(w http.ResponseWriter, _ *http.Request) {
 		// grouping key as it always did, rather than sending a field that
 		// server's strict decoder would reject outright.
 		"silencePreviewSupported": true,
+		// Same reason as the preview flag: a console that offered a Remove
+		// control against an older server would answer 404 through the SPA
+		// route, which reads as a broken console rather than a missing feature.
+		"silenceRemoveSupported": true,
 	})
 }
 

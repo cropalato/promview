@@ -43,6 +43,7 @@ describe('loadRuntimeConfig', () => {
       // match rejects the field outright rather than ignoring it, so the
       // console must not send one.
       silencePreviewSupported: false,
+      silenceRemoveSupported: false,
     });
   });
 
@@ -59,6 +60,7 @@ describe('loadRuntimeConfig', () => {
       // match rejects the field outright rather than ignoring it, so the
       // console must not send one.
       silencePreviewSupported: false,
+      silenceRemoveSupported: false,
     });
   });
 
@@ -151,6 +153,7 @@ describe('silence preview capability', () => {
       .mockResolvedValue(jsonResponse({ authMode: 'open', silenceEnabled: true }));
     await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
       silencePreviewSupported: false,
+      silenceRemoveSupported: false,
     });
   });
 
@@ -162,6 +165,31 @@ describe('silence preview capability', () => {
       );
     await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
       silencePreviewSupported: true,
+    });
+  });
+});
+
+describe('silence removal capability', () => {
+  it('reads an older server as unable to remove a silence', async () => {
+    // A DELETE against a server without the route falls through to the SPA
+    // route and answers a page, which reads as a broken console rather than a
+    // missing feature. So the control is offered only where the server says so.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ authMode: 'open', silenceEnabled: true }));
+    await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
+      silenceRemoveSupported: false,
+    });
+  });
+
+  it('takes the server at its word when it says it can', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ authMode: 'open', silenceEnabled: true, silenceRemoveSupported: true }),
+      );
+    await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
+      silenceRemoveSupported: true,
     });
   });
 });

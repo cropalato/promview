@@ -39,6 +39,15 @@ function seedNotificationsEnabled(enabled = true): void {
   );
 }
 
+/** Grouping off, so assertions can read a flat alert row. */
+function seedFlatLayout(): void {
+  const preferences = defaultPreferences();
+  window.localStorage.setItem(
+    PREFERENCES_KEY,
+    JSON.stringify({ ...preferences, grouping: { ...preferences.grouping, enabled: false } }),
+  );
+}
+
 function storedNotificationsEnabled(): boolean | undefined {
   const raw = window.localStorage.getItem(PREFERENCES_KEY);
   if (raw === null) {
@@ -868,6 +877,91 @@ describe('App', () => {
     render(<App />);
     await screen.findByRole('treegrid');
     expect(await screen.findByRole('button', { name: /^Silence / })).toBeInTheDocument();
+  });
+
+  it('offers to lift a silence only where the server and the operator both allow it', async () => {
+    const silencedDetail = (removeSupported: boolean, canSilence: boolean) => {
+      const detail = apiDetailResponse({
+        alert: {
+          ...apiAlert(),
+          repeatCount: 3,
+          occurrence: 1,
+          rawData: { status: 'firing' },
+          suppressed: true,
+          silencedBy: ['sil-1'],
+          actions: { canAcknowledge: true, canSilence },
+        },
+        silences: [
+          {
+            source: 'am-eu',
+            silenceId: 'sil-1',
+            matchers: { alertname: 'HighErrorRate' },
+            createdBy: 'ada@example.com',
+            comment: 'disk swap',
+            startsAt: '2026-08-14T10:00:00Z',
+            endsAt: '2026-08-14T14:00:00Z',
+          },
+        ],
+      });
+      return (url: string) => {
+        const target = String(url);
+        if (target === '/api/v1/preferences') {
+          // No stored layout, so the console keeps the flat local one these
+          // assertions read rows from.
+          return Promise.resolve(new Response('{}', { status: 404 }));
+        }
+        if (target.startsWith('/api/v1/alerts/')) {
+          return Promise.resolve(jsonResponse(detail));
+        }
+        if (target.startsWith('/api/v1/alerts')) {
+          return Promise.resolve(
+            jsonResponse(alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 })),
+          );
+        }
+        if (target === '/api/v1/me') {
+          return Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
+        }
+        return Promise.resolve(
+          jsonResponse({
+            ...OIDC_CONFIG,
+            silenceEnabled: true,
+            silenceRemoveSupported: removeSupported,
+          }),
+        );
+      };
+    };
+
+    // An older server has no endpoint to call; a control that answers a page
+    // reads as a broken console rather than a missing feature.
+    window.localStorage.clear();
+    seedFlatLayout();
+    fetchMock().mockImplementation(silencedDetail(false, true));
+    const older = render(<App />);
+    fireEvent.click(await screen.findByRole('row', { name: /HighErrorRate/ }));
+    const olderDialog = await screen.findByRole('dialog', { name: 'HighErrorRate' });
+    expect(await within(olderDialog).findByText('silenced')).toBeInTheDocument();
+    expect(within(olderDialog).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+    older.unmount();
+
+    // Nor where the server says this operator may not act on this alert:
+    // creating and lifting a silence are one right.
+    window.history.replaceState(null, '', '/');
+    seedFlatLayout();
+    fetchMock().mockImplementation(silencedDetail(true, false));
+    const unprivileged = render(<App />);
+    fireEvent.click(await screen.findByRole('row', { name: /HighErrorRate/ }));
+    const plainDialog = await screen.findByRole('dialog', { name: 'HighErrorRate' });
+    expect(await within(plainDialog).findByText('silenced')).toBeInTheDocument();
+    expect(within(plainDialog).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+    unprivileged.unmount();
+
+    window.history.replaceState(null, '', '/');
+    seedFlatLayout();
+    fetchMock().mockImplementation(silencedDetail(true, true));
+    render(<App />);
+    fireEvent.click(await screen.findByRole('row', { name: /HighErrorRate/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'HighErrorRate' });
+    expect(await within(dialog).findByRole('button', { name: 'Remove' })).toBeInTheDocument();
   });
 
   it('hides group silencing when the deployment cannot reach an Alertmanager', async () => {

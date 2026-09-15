@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -190,6 +191,87 @@ func (store *Store) SilenceScopeForGroup(
 		return alerts.SilenceScope{}, alerts.ErrNoSilenceTarget
 	}
 	return alerts.SilenceScope{Labels: alerts.CommonLabels(targets), Targets: targets}, nil
+}
+
+// SilenceRemovalScope resolves which Alertmanager to expire a silence on, and
+// proves the operator is entitled to.
+//
+// Entitlement is anchored on an alert rather than on the silence: a silence id
+// is an opaque token an operator could name without having any right to it, and
+// a bare `DELETE /silences/{id}` would let anyone who may operate on anything
+// un-hide anything. Requiring the silence to be one currently holding back an
+// in-scope alert reuses the authorization that already exists and keeps the
+// blast radius to what the operator can see.
+//
+// The consequence is deliberate: a preventive silence matching no alert cannot
+// be reached this way. It has no row to act from, and inventing one would mean
+// inventing an authorization rule too.
+func (store *Store) SilenceRemovalScope(
+	ctx context.Context,
+	principal auth.Principal,
+	alertID int64,
+	silenceID string,
+) (alerts.SilenceTarget, error) {
+	if !principal.CanOperate() {
+		return alerts.SilenceTarget{}, alerts.ErrNotFound
+	}
+	if strings.TrimSpace(silenceID) == "" {
+		return alerts.SilenceTarget{}, errors.New("a silence id is required")
+	}
+	access, args := operateAccessCondition(principal, "alert.labels", []any{alertID})
+	var target alerts.SilenceTarget
+	var silencedBy []string
+	var labelsJSON []byte
+	err := store.pool.QueryRow(ctx, `
+		SELECT alert.labels, alert.source_slug, alert.silenced_by,
+		       source.alertmanager_url, source.alertmanager_token
+		FROM alerts AS alert
+		JOIN alert_sources AS source ON source.slug = alert.source_slug
+		WHERE alert.id = $1 AND (`+access+`)
+	`, args...).Scan(&labelsJSON, &target.Source, &silencedBy,
+		&target.AlertmanagerURL, &target.AlertmanagerToken)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Out of scope reads the same as absent, so a removal attempt cannot be
+		// used to probe for alerts the operator may not act on.
+		return alerts.SilenceTarget{}, alerts.ErrNotFound
+	}
+	if err != nil {
+		return alerts.SilenceTarget{}, fmt.Errorf("read silence removal scope for alert %d: %w", alertID, err)
+	}
+	if !slices.Contains(silencedBy, silenceID) {
+		// Either the id is not this alert's, or the suppression has already
+		// lifted. Both are "there is nothing here to remove", and saying which
+		// would leak whether the id exists elsewhere.
+		return alerts.SilenceTarget{}, alerts.ErrNotFound
+	}
+	if target.AlertmanagerURL == "" {
+		return alerts.SilenceTarget{}, alerts.ErrNoSilenceTarget
+	}
+	labels := map[string]string{}
+	if err := json.Unmarshal(labelsJSON, &labels); err != nil {
+		return alerts.SilenceTarget{}, fmt.Errorf("decode labels for alert %d: %w", alertID, err)
+	}
+	target.Labels = labels
+	target.Members = 1
+	return target, nil
+}
+
+// ExpireSilenceRecord marks a stored silence as no longer suppressing, right
+// after promview expired it on the Alertmanager.
+//
+// The next sync would do this on its own. Doing it here means the drawer stops
+// calling the silence live the moment the removal returns, including in a
+// deployment where reconciliation is switched off and no sync is coming.
+func (store *Store) ExpireSilenceRecord(ctx context.Context, sourceSlug, silenceID string, now time.Time) error {
+	if _, err := store.pool.Exec(ctx, `
+		UPDATE alertmanager_silences SET
+			state = 'expired',
+			ends_at = LEAST(ends_at, $3)
+		WHERE source_slug = $1 AND silence_id = $2
+	`, sourceSlug, silenceID, now.UTC()); err != nil {
+		return fmt.Errorf("expire silence record %s: %w", silenceID, err)
+	}
+	return nil
 }
 
 // RecordSilence remembers a silence promview created. Alertmanager owns the

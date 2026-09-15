@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -300,4 +301,137 @@ func containsCompactJSON(document []byte, fragment string) bool {
 		}
 	}
 	return strings.Contains(string(compact), fragment)
+}
+
+func TestStoreSilenceRemovalScope(t *testing.T) {
+	databaseURL := os.Getenv("PROMVIEW_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("PROMVIEW_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyMigrations(ctx, pool, "../../migrations"); err != nil {
+		t.Fatalf("ApplyMigrations() error = %v", err)
+	}
+	store := New(pool)
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+
+	amURL, token := "http://am:9093", "sekret"
+	if err := store.SetSource(ctx, sources.Source{
+		Slug: "demo", Name: "Demo", AlertmanagerURL: &amURL, AlertmanagerToken: &token,
+	}, "0123456789abcdef"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSource(ctx, sources.Source{Slug: "orphan", Name: "Orphan"}, "0123456789abcdef"); err != nil {
+		t.Fatal(err)
+	}
+	for _, alert := range []struct {
+		slug, fingerprint, team string
+	}{
+		{"demo", "silenced", "platform"},
+		{"demo", "unsilenced", "platform"},
+		{"demo", "other-team", "payments"},
+		{"orphan", "no-alertmanager", "platform"},
+	} {
+		if err := store.Ingest(ctx, []alertmanager.IncomingAlert{{
+			SourceSlug: alert.slug, Fingerprint: alert.fingerprint, Status: "firing",
+			Labels:      map[string]string{"alertname": "HighCPU", "team": alert.team},
+			Annotations: map[string]string{}, StartsAt: now, ReceivedAt: now,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.ReconcileSource(ctx, "demo", []alertmanager.LiveAlert{
+		{Fingerprint: "silenced", Suppressed: true, SilencedBy: []string{"sil-1"}},
+		{Fingerprint: "unsilenced"},
+		{Fingerprint: "other-team", Suppressed: true, SilencedBy: []string{"sil-2"}},
+	}, nil, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReconcileSource(ctx, "orphan", []alertmanager.LiveAlert{
+		{Fingerprint: "no-alertmanager", Suppressed: true, SilencedBy: []string{"sil-3"}},
+	}, nil, nil, now); err != nil {
+		t.Fatal(err)
+	}
+
+	alertID := func(fingerprint string) int64 {
+		var id int64
+		if err := pool.QueryRow(ctx, "SELECT id FROM alerts WHERE fingerprint = $1", fingerprint).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	admin := auth.Principal{UserID: 1, Subject: "ada", Grants: []auth.Grant{{Role: auth.RoleAdministrator}}}
+
+	target, err := store.SilenceRemovalScope(ctx, admin, alertID("silenced"), "sil-1")
+	if err != nil {
+		t.Fatalf("SilenceRemovalScope() error = %v", err)
+	}
+	if target.Source != "demo" || target.AlertmanagerURL != amURL || target.AlertmanagerToken != token {
+		t.Errorf("target = %#v, want the alert's own alertmanager and credential", target)
+	}
+
+	// An id that is not holding this alert back is not removable through it,
+	// which is what stops any operator from lifting any silence they can name.
+	if _, err := store.SilenceRemovalScope(ctx, admin, alertID("silenced"), "sil-2"); !errors.Is(err, alerts.ErrNotFound) {
+		t.Errorf("foreign silence id error = %v, want ErrNotFound", err)
+	}
+	// Nothing is holding this one back at all.
+	if _, err := store.SilenceRemovalScope(ctx, admin, alertID("unsilenced"), "sil-1"); !errors.Is(err, alerts.ErrNotFound) {
+		t.Errorf("unsilenced alert error = %v, want ErrNotFound", err)
+	}
+	// A source with no Alertmanager cannot be written to, which is a
+	// configuration gap rather than a missing alert.
+	if _, err := store.SilenceRemovalScope(ctx, admin, alertID("no-alertmanager"), "sil-3"); !errors.Is(err, alerts.ErrNoSilenceTarget) {
+		t.Errorf("unconfigured source error = %v, want ErrNoSilenceTarget", err)
+	}
+
+	// Authorization is the acknowledge path's, re-checked in SQL: an operator
+	// scoped to one team cannot un-hide another team's alerts. Out of scope
+	// reads as absent so it cannot be used to probe.
+	platform := auth.Principal{UserID: 2, Subject: "ops", Grants: []auth.Grant{{
+		Role: auth.RoleOperator, Matchers: []auth.LabelMatcher{{Name: "team", Operator: "=", Value: "platform"}},
+	}}}
+	if _, err := store.SilenceRemovalScope(ctx, platform, alertID("silenced"), "sil-1"); err != nil {
+		t.Errorf("an in-scope operator was refused: %v", err)
+	}
+	if _, err := store.SilenceRemovalScope(ctx, platform, alertID("other-team"), "sil-2"); !errors.Is(err, alerts.ErrNotFound) {
+		t.Errorf("out-of-scope error = %v, want ErrNotFound", err)
+	}
+	viewer := auth.Principal{UserID: 3, Subject: "vic", Grants: []auth.Grant{{Role: auth.RoleViewer}}}
+	if _, err := store.SilenceRemovalScope(ctx, viewer, alertID("silenced"), "sil-1"); !errors.Is(err, alerts.ErrNotFound) {
+		t.Errorf("viewer error = %v, want ErrNotFound", err)
+	}
+
+	// Expiring the record stops the drawer calling the silence live, without
+	// waiting for a sync that may never come.
+	if err := store.SyncSilences(ctx, "demo", []alertmanager.ListedSilence{{
+		ID: "sil-1", State: "active", CreatedBy: "ada@example.com",
+		Matchers: []alertmanager.Matcher{{Name: "alertname", Value: "HighCPU", IsEqual: true}},
+		StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour),
+	}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ExpireSilenceRecord(ctx, "demo", "sil-1", now); err != nil {
+		t.Fatalf("ExpireSilenceRecord() error = %v", err)
+	}
+	var state string
+	var endsAt time.Time
+	if err := pool.QueryRow(ctx,
+		"SELECT state, ends_at FROM alertmanager_silences WHERE silence_id = 'sil-1'").Scan(&state, &endsAt); err != nil {
+		t.Fatal(err)
+	}
+	if state != "expired" {
+		t.Errorf("state = %q, want expired", state)
+	}
+	if !endsAt.Equal(now) {
+		t.Errorf("ends_at = %v, want brought forward to the removal time", endsAt)
+	}
 }

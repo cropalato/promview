@@ -66,6 +66,7 @@ nobody scraping it.
 | `promview_reconcile_runs_total` | counter | `source`, `result` | Separates "the Alertmanager is unreachable" from "the database rejected the write" without reading logs. |
 | `promview_reconcile_last_success_timestamp_seconds` | gauge | `source` | The one that matters most. See below. |
 | `promview_silence_writes_total` | counter | `alertmanager`, `result` | Whether silences are reaching the Alertmanager at all. |
+| `promview_silence_removals_total` | counter | `alertmanager`, `result` | The other direction: a failure here means an operator believes alerts are coming back when they are not. |
 | `promview_silence_records_total` | counter | `result` | A provenance write that fails does not fail the silence, so this is the only place its failure is visible. |
 | `promview_build_info` | gauge | `version` | Always 1. Confirms which build is actually running. |
 | `promview_stream_clients` | gauge | — | Event-stream connections open right now. The multiplier on everything below. |

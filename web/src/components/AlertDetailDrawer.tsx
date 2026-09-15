@@ -26,6 +26,8 @@ interface AlertDetailDrawerProps {
   onFilterLabel?: (matcher: LabelMatcher) => void;
   /** Opens the silence dialog for this alert; forwarded to the gated action. */
   onSilence?: () => void;
+  /** Lifts one silence holding this alert back; forwarded to the gated action. */
+  onRemoveSilence?: (silenceId: string) => Promise<void>;
 }
 
 /**
@@ -44,6 +46,7 @@ export function AlertDetailDrawer({
   onAcknowledge,
   onFilterLabel,
   onSilence,
+  onRemoveSilence,
 }: AlertDetailDrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -175,6 +178,7 @@ export function AlertDetailDrawer({
                   onAcknowledge={onAcknowledge}
                   onFilterLabel={onFilterLabel}
                   onSilence={onSilence}
+                  onRemoveSilence={onRemoveSilence}
                 />
               ) : null}
               {activeTab === 'timeline' ? <AlertTimeline history={ready.history} /> : null}
