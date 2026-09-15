@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -117,6 +118,46 @@ func (client *Client) CreateSilence(
 		return "", fmt.Errorf("alertmanager %s created a silence without an id", baseURL)
 	}
 	return payload.SilenceID, nil
+}
+
+// DeleteSilence expires a silence on the Alertmanager.
+//
+// Alertmanager calls this DELETE, but it is an expiry rather than an erasure:
+// the silence stops suppressing immediately and stays listed as expired until
+// Alertmanager garbage-collects it. That is what promview wants — the record of
+// who silenced what survives long enough for the next sync to see it end.
+//
+// A silence that is already gone is not an error. The operator asked for it to
+// stop suppressing, and it is not suppressing; failing here would only invite a
+// retry of something already done.
+func (client *Client) DeleteSilence(ctx context.Context, baseURL string, token string, silenceID string) error {
+	if strings.TrimSpace(silenceID) == "" {
+		return errors.New("a silence id is required")
+	}
+	endpoint := strings.TrimSuffix(baseURL, "/") + "/api/v2/silence/" + url.PathEscape(silenceID)
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("build alertmanager silence deletion request: %w", err)
+	}
+	request.Header.Set("Accept", "application/json")
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	response, err := client.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("delete silence on alertmanager %s: %w", baseURL, err)
+	}
+	defer func() {
+		_ = response.Body.Close()
+	}()
+	switch response.StatusCode {
+	case http.StatusOK, http.StatusNoContent, http.StatusNotFound:
+		return nil
+	default:
+		return fmt.Errorf("alertmanager %s returned HTTP %d deleting silence %s",
+			baseURL, response.StatusCode, silenceID)
+	}
 }
 
 func validateSilence(silence Silence) error {

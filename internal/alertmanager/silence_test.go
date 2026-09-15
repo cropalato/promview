@@ -172,3 +172,72 @@ func TestCreateSilenceFailsWhenAlertmanagerRejectsOrReturnsNoID(t *testing.T) {
 		t.Error("a silence with no id was reported as success")
 	}
 }
+
+func TestDeleteSilenceExpiresItOnTheAlertmanager(t *testing.T) {
+	var method, path, authorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		authorization = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	if err := NewClient(2*time.Second).DeleteSilence(context.Background(), server.URL, "sekret", "4f2c8e1a"); err != nil {
+		t.Fatalf("DeleteSilence() error = %v", err)
+	}
+	if method != http.MethodDelete || path != "/api/v2/silence/4f2c8e1a" {
+		t.Errorf("request = %s %s, want DELETE /api/v2/silence/4f2c8e1a", method, path)
+	}
+	// Writes are the direction deployments protect, and removal is a write.
+	if authorization != "Bearer sekret" {
+		t.Errorf("authorization = %q, want the source's bearer credential", authorization)
+	}
+}
+
+func TestDeleteSilenceEscapesTheIDIntoThePath(t *testing.T) {
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// The id comes from the Alertmanager rather than from a person, but it lands
+	// in a URL path, and a path separator inside it must not become one.
+	if err := NewClient(2*time.Second).DeleteSilence(context.Background(), server.URL, "", "a/b"); err != nil {
+		t.Fatalf("DeleteSilence() error = %v", err)
+	}
+	if path != "/api/v2/silence/a%2Fb" {
+		t.Errorf("path = %q, want the id escaped into one segment", path)
+	}
+}
+
+func TestDeleteSilenceTreatsAnAbsentSilenceAsDone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	// The operator asked for it to stop suppressing, and it is not suppressing.
+	// Failing here would only invite a retry of something already done.
+	if err := NewClient(2*time.Second).DeleteSilence(context.Background(), server.URL, "", "gone"); err != nil {
+		t.Errorf("a silence already gone was reported as an error: %v", err)
+	}
+}
+
+func TestDeleteSilenceReportsARefusal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	client := NewClient(2 * time.Second)
+	// The silence is still in place, so the alert is still hidden; saying
+	// otherwise would promise noise that is not coming back.
+	if err := client.DeleteSilence(context.Background(), server.URL, "", "sil-1"); err == nil {
+		t.Error("a 401 was reported as success")
+	}
+	if err := client.DeleteSilence(context.Background(), server.URL, "", "  "); err == nil {
+		t.Error("an empty silence id was accepted")
+	}
+}

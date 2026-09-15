@@ -45,6 +45,13 @@ type fakeStore struct {
 	recordErr    error
 	groupBy      []string
 	groupKey     map[string]string
+
+	removalTarget   alerts.SilenceTarget
+	removalErr      error
+	removalAlertID  int64
+	removalSilence  string
+	expiredRecords  []string
+	expireRecordErr error
 }
 
 type fakeAuthenticator struct {
@@ -147,6 +154,23 @@ func (store *fakeStore) RecordSilence(_ context.Context, record alerts.SilenceRe
 	return store.recordErr
 }
 
+func (store *fakeStore) SilenceRemovalScope(
+	_ context.Context,
+	principal auth.Principal,
+	alertID int64,
+	silenceID string,
+) (alerts.SilenceTarget, error) {
+	store.principal = principal
+	store.removalAlertID = alertID
+	store.removalSilence = silenceID
+	return store.removalTarget, store.removalErr
+}
+
+func (store *fakeStore) ExpireSilenceRecord(_ context.Context, _ string, silenceID string, _ time.Time) error {
+	store.expiredRecords = append(store.expiredRecords, silenceID)
+	return store.expireRecordErr
+}
+
 // fakeSilencer records what reached each Alertmanager, and can be told to fail
 // for one of them so partial application is testable.
 type fakeSilencer struct {
@@ -155,6 +179,10 @@ type fakeSilencer struct {
 	failFor  string
 	nextID   int
 	failWith error
+
+	deleted     []string
+	deleteToken string
+	deleteErr   error
 }
 
 func newFakeSilencer() *fakeSilencer {
@@ -177,6 +205,20 @@ func (silencer *fakeSilencer) CreateSilence(
 	silencer.tokens[baseURL] = token
 	silencer.nextID++
 	return fmt.Sprintf("silence-%d", silencer.nextID), nil
+}
+
+func (silencer *fakeSilencer) DeleteSilence(
+	_ context.Context,
+	_ string,
+	token string,
+	silenceID string,
+) error {
+	if silencer.deleteErr != nil {
+		return silencer.deleteErr
+	}
+	silencer.deleted = append(silencer.deleted, silenceID)
+	silencer.deleteToken = token
+	return nil
 }
 
 func TestIngestAlertmanager(t *testing.T) {

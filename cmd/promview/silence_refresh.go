@@ -209,6 +209,7 @@ type refreshingSilencer struct {
 // does not depend on the transport package.
 type httpSilencer interface {
 	CreateSilence(ctx context.Context, baseURL string, token string, silence alertmanager.Silence) (string, error)
+	DeleteSilence(ctx context.Context, baseURL string, token string, silenceID string) error
 }
 
 func (silencer refreshingSilencer) CreateSilence(
@@ -223,4 +224,21 @@ func (silencer refreshingSilencer) CreateSilence(
 	}
 	silencer.refresher.refreshURL(silencer.ctx, baseURL)
 	return id, nil
+}
+
+// DeleteSilence refreshes for the same reason creating does, and with more at
+// stake: removal puts alerts back on screen, and an operator who lifted a
+// silence deliberately is watching for exactly that. The refresh releases the
+// suppression within seconds rather than at the next tick.
+func (silencer refreshingSilencer) DeleteSilence(
+	ctx context.Context,
+	baseURL string,
+	token string,
+	silenceID string,
+) error {
+	if err := silencer.inner.DeleteSilence(ctx, baseURL, token, silenceID); err != nil {
+		return err
+	}
+	silencer.refresher.refreshURL(silencer.ctx, baseURL)
+	return nil
 }

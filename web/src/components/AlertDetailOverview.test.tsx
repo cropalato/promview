@@ -283,3 +283,84 @@ describe('why an alert is not notifying', () => {
     expect(screen.queryByText('silenced')).not.toBeInTheDocument();
   });
 });
+
+describe('removing a silence', () => {
+  const silenced = () => detail({ suppressed: true, silencedBy: ['sil-1', 'sil-2'] });
+
+  /** The nth Remove control, asserted present so the test fails on absence. */
+  function removeButton(index: number): HTMLElement {
+    const button = screen.getAllByRole('button', { name: 'Remove' })[index];
+    if (button === undefined) {
+      throw new Error(`no Remove control at index ${index}`);
+    }
+    return button;
+  }
+
+  it('offers no control where the deployment cannot remove silences', () => {
+    // The handler is absent where the server is too old, the deployment has no
+    // Alertmanager to write to, or this operator may not act on this alert.
+    // Rendering a control that could only fail is worse than not offering one.
+    render(<AlertDetailOverview detail={silenced()} />);
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+  });
+
+  it('lifts the silence the operator picked, not the other one', async () => {
+    const onRemoveSilence = vi.fn().mockResolvedValue(undefined);
+    render(<AlertDetailOverview detail={silenced()} onRemoveSilence={onRemoveSilence} />);
+
+    const buttons = screen.getAllByRole('button', { name: 'Remove' });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(removeButton(1));
+
+    await waitFor(() => expect(onRemoveSilence).toHaveBeenCalledWith('sil-2'));
+    expect(onRemoveSilence).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds every control while one removal is in flight', async () => {
+    let settle: () => void = () => {};
+    const onRemoveSilence = vi.fn().mockReturnValue(
+      new Promise<void>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    render(<AlertDetailOverview detail={silenced()} onRemoveSilence={onRemoveSilence} />);
+
+    fireEvent.click(removeButton(0));
+
+    // A second click while the first is still settling would ask the
+    // Alertmanager to lift something twice on a guess about what the first did.
+    await screen.findByRole('button', { name: 'Removing…' });
+    for (const button of screen.getAllByRole('button', { name: /Remove/ })) {
+      expect(button).toBeDisabled();
+    }
+
+    settle();
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Removing…' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('says what went wrong and leaves the silence listed', async () => {
+    const onRemoveSilence = vi.fn().mockRejectedValue(new Error('the alertmanager refused'));
+    render(<AlertDetailOverview detail={silenced()} onRemoveSilence={onRemoveSilence} />);
+
+    fireEvent.click(removeButton(0));
+
+    // The silence is still in place, so the alert is still hidden; reporting
+    // success would promise noise that is not coming back.
+    expect(await screen.findByRole('alert')).toHaveTextContent('the alertmanager refused');
+    expect(screen.getByText('silenced')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(2);
+  });
+
+  it('offers nothing to remove for an inhibition', () => {
+    // An inhibition has no silence to lift: it goes when its parent alert does.
+    render(
+      <AlertDetailOverview
+        detail={detail({ suppressed: true, silencedBy: [] })}
+        onRemoveSilence={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+  });
+});

@@ -1992,6 +1992,39 @@ kbd {
   color: var(--text-muted);
 }
 
+/* Lifting a silence puts alerts back on screen, which is the recoverable
+   direction, so the control is a quiet inline button rather than a destructive
+   one. It warms on hover: the effect is shared, not personal. */
+.detail-silence-remove {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.detail-silence-remove:hover:not(:disabled) {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border-strong));
+}
+
+.detail-silence-remove:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.detail-silence-error {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--down);
+}
+
 /* Alert detail drawer: right-side non-modal panel on desktop */
 .detail-drawer {
   position: fixed;

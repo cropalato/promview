@@ -32,10 +32,16 @@ follow from that, and they are enforced here rather than left to the caller:
 
 const maxSilenceBodyBytes = 4096
 
-// Silencer creates a silence on one Alertmanager. Narrow on purpose: the
+// Silencer writes silences to one Alertmanager. Narrow on purpose: the
 // transport should not be able to read alerts back out of the Alertmanager.
+//
+// Removal is here rather than behind its own interface because it is the same
+// direction and the same credential: a deployment that can hide alerts on a
+// system it does not own can un-hide them too, and splitting the two would
+// invite a configuration where a silence can be created but never lifted.
 type Silencer interface {
 	CreateSilence(ctx context.Context, baseURL string, token string, silence alertmanager.Silence) (string, error)
+	DeleteSilence(ctx context.Context, baseURL string, token string, silenceID string) error
 }
 
 type silenceRequest struct {
@@ -81,6 +87,55 @@ func (api *API) silenceAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.createSilences(w, r, principal, scope, body.DurationSeconds, body.Comment)
+}
+
+// removeAlertSilence expires one silence that is holding an alert back.
+//
+// Removing is the inverse of creating and is gated the same way, with one
+// asymmetry worth naming: creating hides alerts from everyone, removing shows
+// them to everyone. The second is the safer direction — an operator who lifts a
+// silence by mistake gets noise back, where one who creates a silence by
+// mistake gets silence — so it needs no duration, no author, and no preview.
+// It still needs operator rights on the alert itself, because un-hiding another
+// team's alerts is not this operator's decision either.
+func (api *API) removeAlertSilence(w http.ResponseWriter, r *http.Request) {
+	principal, ok := api.silenceRequestPrincipal(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "alert id is invalid")
+		return
+	}
+	silenceID := r.PathValue("silenceId")
+	target, err := api.store.SilenceRemovalScope(r.Context(), principal, id, silenceID)
+	if !api.writeScopeError(w, err) {
+		return
+	}
+	if err := api.silencer.DeleteSilence(r.Context(), target.AlertmanagerURL, target.AlertmanagerToken, silenceID); err != nil {
+		// The Alertmanager still holds the silence, so the alert is still
+		// hidden. Reporting success here would tell an operator the noise is
+		// coming back when it is not.
+		slog.Error("could not remove a silence",
+			"source", target.Source, "silence", silenceID, "error", err)
+		writeError(w, http.StatusBadGateway, "the alertmanager refused to remove the silence")
+		return
+	}
+	// The sync would catch this on its next pass; doing it now means the drawer
+	// stops calling the silence live immediately, and still does where
+	// reconciliation is switched off and no pass is coming.
+	if err := api.store.ExpireSilenceRecord(r.Context(), target.Source, silenceID, time.Now().UTC()); err != nil {
+		// The silence is gone from the Alertmanager, which is what the operator
+		// asked for. A stale local record is a reporting defect, not a failure
+		// of the action, and reporting one would invite a pointless retry.
+		slog.Error("could not expire the stored silence record",
+			"source", target.Source, "silence", silenceID, "error", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"source":    target.Source,
+		"silenceId": silenceID,
+	})
 }
 
 func (api *API) silenceGroup(w http.ResponseWriter, r *http.Request) {

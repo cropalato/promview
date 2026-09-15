@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState } from 'react';
 import { safeExternalUrl } from '../alerts/detail';
 import type { AlertDetail, AlertSilenceRecord } from '../alerts/detail';
 import type { LabelMatcher } from '../alerts/filter';
@@ -22,6 +22,13 @@ interface AlertDetailOverviewProps {
   onAcknowledge?: (acknowledged: boolean) => Promise<void>;
   /** Opens the silence dialog for this alert; enables the gated action. */
   onSilence?: () => void;
+  /**
+   * Lifts one silence holding this alert back. Absent where the deployment
+   * cannot remove silences, where the server is too old to offer the endpoint,
+   * or where this operator may not act on this alert; the control is then not
+   * rendered rather than rendered to fail.
+   */
+  onRemoveSilence?: (silenceId: string) => Promise<void>;
   /**
    * Upserts a label matcher into the console filter and applies it. When
    * present, every label row gains include (`key="value"`) and exclude
@@ -47,6 +54,7 @@ export function AlertDetailOverview({
   silences = [],
   onAcknowledge,
   onSilence,
+  onRemoveSilence,
   onFilterLabel,
 }: AlertDetailOverviewProps) {
   const labels = Object.entries(detail.labels).sort(byKey);
@@ -85,7 +93,13 @@ export function AlertDetailOverview({
         </div>
         <div className="detail-fact">
           <dt>Suppressed</dt>
-          <dd>{suppressionNote(detail, silences)}</dd>
+          <dd>
+            <SuppressionNote
+              detail={detail}
+              silences={silences}
+              onRemoveSilence={onRemoveSilence}
+            />
+          </dd>
         </div>
         <div className="detail-fact">
           <dt>Source</dt>
@@ -267,7 +281,21 @@ function ExternalRef({ label, value }: { label: string; value: string }) {
  * which is just as real and about which promview honestly knows nothing but
  * the id.
  */
-function suppressionNote(detail: AlertDetail, silences: readonly AlertSilenceRecord[]): ReactNode {
+function SuppressionNote({
+  detail,
+  silences,
+  onRemoveSilence,
+}: {
+  detail: AlertDetail;
+  silences: readonly AlertSilenceRecord[];
+  onRemoveSilence?: (silenceId: string) => Promise<void>;
+}) {
+  // Which silence is mid-removal, and what went wrong with the last attempt.
+  // Keyed by id rather than a single flag: an alert can be held by more than
+  // one silence, and a failure against one says nothing about the others.
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [failures, setFailures] = useState<Record<string, string>>({});
+
   if (!detail.suppressed) {
     return <span className="detail-mono">No</span>;
   }
@@ -275,29 +303,76 @@ function suppressionNote(detail: AlertDetail, silences: readonly AlertSilenceRec
     return (
       <>
         <span className="state-chip state-suppressed state-inhibited">inhibited</span>{' '}
-        <span className="detail-mono">Held back by an inhibition rule, not a silence.</span>
+        <span className="detail-mono">
+          Held back by an inhibition rule, not a silence. It lifts itself when its parent alert
+          clears.
+        </span>
       </>
     );
   }
   const known = new Map(silences.map((record) => [record.silenceId, record]));
+
+  const remove = (id: string) => {
+    if (onRemoveSilence === undefined) {
+      return;
+    }
+    setRemoving(id);
+    // The previous attempt's message goes with the retry; leaving it up beside
+    // a "Removing…" control would report two contradictory states at once.
+    setFailures((current) =>
+      Object.fromEntries(Object.entries(current).filter(([key]) => key !== id)),
+    );
+    onRemoveSilence(id)
+      // Success needs nothing here: the alert's own detail refreshes, and the
+      // suppression row re-renders from it rather than from local state that
+      // could disagree with the server.
+      .catch((error: unknown) => {
+        setFailures((current) => ({
+          ...current,
+          [id]: error instanceof Error ? error.message : String(error),
+        }));
+      })
+      .finally(() => setRemoving(null));
+  };
+
   return (
     <>
       <span className="state-chip state-suppressed">silenced</span>
       <ul className="detail-silences">
         {detail.silencedBy.map((id) => {
           const record = known.get(id);
+          const failure = failures[id];
           return (
             <li key={id}>
               <span className="detail-mono detail-break">{id}</span>
               {record === undefined ? (
-                // Created outside promview: the silence is real, the reasoning
-                // is not ours to report.
+                // Created outside promview and not yet seen by a sync: the
+                // silence is real, the reasoning is not ours to report.
                 <span> — created outside Promview</span>
               ) : (
                 <span>
                   {` — by ${record.createdBy || 'unknown'} until ${formatTimestamp(record.endsAt)}`}
                   {record.comment === '' ? '' : `: ${record.comment}`}
                 </span>
+              )}
+              {onRemoveSilence === undefined ? null : (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="detail-silence-remove"
+                    onClick={() => remove(id)}
+                    disabled={removing !== null}
+                    title="Lift this silence on its Alertmanager, so the alerts it holds back are shown again"
+                  >
+                    {removing === id ? 'Removing…' : 'Remove'}
+                  </button>
+                </>
+              )}
+              {failure === undefined ? null : (
+                <p className="detail-silence-error" role="alert">
+                  {failure}
+                </p>
               )}
             </li>
           );

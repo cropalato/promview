@@ -5,6 +5,7 @@ import {
   parseSilencePreview,
   parseSilenceResponse,
   previewGroupSilence,
+  removeAlertSilence,
   silenceAlert,
   silenceDurationOptions,
   silenceGroup,
@@ -275,5 +276,47 @@ describe('a group that moved between the preview and the confirmation', () => {
       alertname: 'HighCPU',
       cluster: 'a',
     });
+  });
+});
+
+describe('removeAlertSilence', () => {
+  it('addresses the silence through the alert holding it', async () => {
+    fetchMock().mockResolvedValue(new Response(null, { status: 200 }));
+
+    await removeAlertSilence('42', 'sil-1');
+
+    const [url, init] = fetchMock().mock.calls[0] as [string, RequestInit];
+    // Through the alert, not by bare silence id: that is what proves the
+    // caller may lift it, and the server re-checks the same thing.
+    expect(url).toBe('/api/v1/alerts/42/silences/sil-1');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('escapes both ids into the path', async () => {
+    fetchMock().mockResolvedValue(new Response(null, { status: 200 }));
+
+    await removeAlertSilence('a/b', 'c d');
+
+    const [url] = fetchMock().mock.calls[0] as [string];
+    expect(url).toBe('/api/v1/alerts/a%2Fb/silences/c%20d');
+  });
+
+  it('surfaces what the server said when it refuses', async () => {
+    fetchMock().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'the alertmanager refused to remove the silence' }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    // The silence is still in place, so the alert is still hidden. The drawer
+    // has to say so rather than report a removal that did not happen.
+    await expect(removeAlertSilence('42', 'sil-1')).rejects.toThrow(/alertmanager refused/);
+  });
+
+  it('reports an unreachable API rather than a silent no-op', async () => {
+    fetchMock().mockRejectedValue(new TypeError('fetch failed'));
+
+    await expect(removeAlertSilence('42', 'sil-1')).rejects.toBeInstanceOf(SilenceError);
   });
 });

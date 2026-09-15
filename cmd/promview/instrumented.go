@@ -39,6 +39,17 @@ func (silencer countingSilencer) CreateSilence(
 	return id, err
 }
 
+func (silencer countingSilencer) DeleteSilence(
+	ctx context.Context,
+	baseURL string,
+	token string,
+	silenceID string,
+) error {
+	err := silencer.inner.DeleteSilence(ctx, baseURL, token, silenceID)
+	silencer.metrics.SilenceRemoved(baseURL, err)
+	return err
+}
+
 // countingStore records whether a created silence's provenance was stored.
 //
 // Embedded rather than reimplemented: the store interface is wide, and this
