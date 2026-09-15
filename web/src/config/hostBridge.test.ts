@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectHost, createHostFetch, hostPath } from './hostBridge';
 import { apiBaseUrl, setApiBaseUrl } from './apiBase';
 import { apiFetch, setApiFetch } from './transport';
+import { getHostSignIn, resetHostSession } from './hostSession';
 
 afterEach(() => {
   setApiBaseUrl('');
   setApiFetch();
+  resetHostSession();
   delete (globalThis as Record<string, unknown>).__PROMVIEW_API_BASE__;
   delete (globalThis as Record<string, unknown>).__TAURI_INTERNALS__;
   vi.unstubAllGlobals();
@@ -102,6 +104,9 @@ describe('connectHost', () => {
 
     expect(connectHost()).toBe(true);
     expect(apiBaseUrl()).toBe('https://promview.example');
+    // Sign-in now goes through the host to the system browser instead of
+    // navigating the webview to the identity provider.
+    expect(getHostSignIn()).toBeDefined();
 
     // Every client module defaults to apiFetch, so installing it here is what
     // routes the whole console through the host.

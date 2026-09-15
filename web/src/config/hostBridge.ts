@@ -4,6 +4,7 @@ import { createHostEventSourceFactory } from './hostStream';
 import { createHostNotificationFactory } from './hostNotifications';
 import { setNotificationFactory } from '../notifications/notifier';
 import { setApiFetch } from './transport';
+import { installHostSession } from './hostSession';
 
 /**
  * Wiring the console into a host shell.
@@ -113,5 +114,8 @@ export function connectHost(): boolean {
   // Not an optimisation: a webview may have no usable Notification API at all,
   // so without this the console's notifications never appear.
   setNotificationFactory(createHostNotificationFactory(invoke));
+  // Sign-in must not navigate the webview to the identity provider — the host
+  // runs the flow in the system browser and announces the result back.
+  installHostSession(invoke);
   return true;
 }

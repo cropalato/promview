@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { SessionError, endSession, loadSession } from '../auth/session';
 import type { NavigateTo, SessionFetch, SessionInfo } from '../auth/session';
 import type { AuthMode } from '../config/runtimeConfig';
+import { onHostSessionChange } from '../config/hostSession';
 
 export type SessionState =
   | { status: 'idle' }
@@ -90,6 +91,25 @@ export function useSession(
   }, [authMode, attempt, fetchImpl]);
 
   const retry = useCallback(() => setAttempt((current) => current + 1), []);
+
+  // A host shell can change the session without the page asking — its tray
+  // menu signs in and out on its own. Signing in re-checks the session so the
+  // console unlocks by itself; signing out drops a verified session back to
+  // the gate the same way mid-session expiry does. In a browser nothing ever
+  // arrives here.
+  useEffect(
+    () =>
+      onHostSessionChange((message) => {
+        if (message.kind === 'signedIn') {
+          setAttempt((current) => current + 1);
+        } else {
+          setState((current) =>
+            current.status === 'ready' ? { status: 'unauthenticated' } : current,
+          );
+        }
+      }),
+    [],
+  );
 
   const signOut = useCallback(() => {
     setSignOutState('pending');
