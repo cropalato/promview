@@ -29,11 +29,13 @@ const missesBeforeResolving = 2
 type reconcileStore interface {
 	ReconcilableSources(ctx context.Context) (map[string]string, error)
 	FiringFingerprints(ctx context.Context, sourceSlug string) ([]string, error)
-	ReconcileSource(ctx context.Context, sourceSlug string, live []alertmanager.LiveAlert, missing map[string]bool, now time.Time) (postgres.ReconcileResult, error)
+	ReconcileSource(ctx context.Context, sourceSlug string, live []alertmanager.LiveAlert, missing map[string]bool, activeSilences map[string]bool, now time.Time) (postgres.ReconcileResult, error)
+	SyncSilences(ctx context.Context, sourceSlug string, listed []alertmanager.ListedSilence, now time.Time) error
 }
 
 type alertmanagerReader interface {
 	LiveAlerts(ctx context.Context, baseURL string) ([]alertmanager.LiveAlert, error)
+	ListSilences(ctx context.Context, baseURL string) ([]alertmanager.ListedSilence, error)
 }
 
 // reconciler carries the miss counters between passes, which is what makes the
@@ -94,6 +96,16 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 		return
 	}
 
+	// The silence listing rides along on the same pass. It is what notices a
+	// silence ending or being deleted for an alert the live view no longer
+	// carries — the alert list cannot say that — and it is deliberately not
+	// gated on the alert list's trustworthiness: Alertmanager persists silences
+	// across restarts and alerts not at all, so an empty silence listing is a
+	// real answer where an empty alert list is usually a restart. A failed
+	// listing degrades this pass to what it did before silences were read at
+	// all, rather than failing it.
+	activeSilences := syncSilences(ctx, r.store, r.client, r.metrics, slug, baseURL, now)
+
 	present := make(map[string]bool, len(live))
 	for _, alert := range live {
 		present[alert.Fingerprint] = true
@@ -147,7 +159,7 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 		}
 	}
 
-	result, err := r.store.ReconcileSource(ctx, slug, live, missing, now)
+	result, err := r.store.ReconcileSource(ctx, slug, live, missing, activeSilences, now)
 	if err != nil {
 		if ctx.Err() == nil {
 			slog.Error("alert reconciliation failed", "source", slug, "error", err)
@@ -172,6 +184,37 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 			"released", result.Released,
 		)
 	}
+}
+
+// syncSilences reads one Alertmanager's silences, stores them, and returns the
+// ids of the active ones. Nil means the listing or the sync failed and no claim
+// is being made either way; an empty map is the real answer that nothing is
+// suppressing. Shared by the ticker pass and the post-silence refresh, which
+// need exactly the same reading.
+func syncSilences(
+	ctx context.Context,
+	store reconcileStore,
+	client alertmanagerReader,
+	instruments *metrics.Metrics,
+	slug, baseURL string,
+	now time.Time,
+) map[string]bool {
+	listed, err := client.ListSilences(ctx, baseURL)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("reconciliation could not list alertmanager silences", "source", slug, "error", err)
+		}
+		instruments.ReconcileFailed(slug, metrics.ReasonSilences)
+		return nil
+	}
+	if err := store.SyncSilences(ctx, slug, listed, now); err != nil {
+		if ctx.Err() == nil {
+			slog.Error("silence sync failed", "source", slug, "error", err)
+		}
+		instruments.ReconcileFailed(slug, metrics.ReasonError)
+		return nil
+	}
+	return alertmanager.ActiveSilenceIDs(listed)
 }
 
 // runReconciliation reconciles every source on a ticker until the context is

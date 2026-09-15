@@ -82,16 +82,39 @@ type SilenceResult struct {
 	Error     string            `json:"error,omitempty"`
 }
 
-// SilenceRecord is a silence promview created itself, kept after Alertmanager
-// has expired and forgotten it. Alertmanager keeps the live state; this keeps
-// the reasoning, which is what lets the console still say who silenced an alert
-// and why once the silence is gone.
+// SilenceMatcher is one matcher exactly as the Alertmanager holds it. Promview
+// only ever writes plain equality, but a silence made straight on the
+// Alertmanager can negate or use a regular expression, and a record that
+// flattened either would misreport what the silence suppresses.
+//
+// Declared here rather than reusing the alertmanager package's Matcher because
+// that package imports this one; the shapes are kept identical.
+type SilenceMatcher struct {
+	Name    string `json:"name"`
+	Value   string `json:"value"`
+	IsRegex bool   `json:"isRegex"`
+	IsEqual bool   `json:"isEqual"`
+}
+
+// SilenceRecord is one silence in the stored inventory: written when promview
+// creates one, and synced from each source's own listing every reconcile pass,
+// so silences made straight on the Alertmanager appear with their real author
+// and ones deleted there stop reading as live. Rows outlive the silence —
+// Alertmanager forgets, this is what still answers "who silenced this and why".
 type SilenceRecord struct {
-	Source    string            `json:"source"`
-	SilenceID string            `json:"silenceId"`
+	Source    string `json:"source"`
+	SilenceID string `json:"silenceId"`
+	// Matchers keeps the equality-only map older consoles already read; a
+	// matcher that negates or uses a regex is only in MatcherList, never
+	// flattened into an equality it does not mean.
 	Matchers  map[string]string `json:"matchers"`
 	CreatedBy string            `json:"createdBy"`
 	Comment   string            `json:"comment"`
 	StartsAt  time.Time         `json:"startsAt"`
 	EndsAt    time.Time         `json:"endsAt"`
+	// State is the silence's live state at the last sync: active, pending or
+	// expired. Empty on a record written before the first sync reaches it.
+	State string `json:"state,omitempty"`
+	// MatcherList carries every matcher verbatim, in the shapes Matchers cannot.
+	MatcherList []SilenceMatcher `json:"matcherList,omitempty"`
 }

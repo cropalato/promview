@@ -193,9 +193,9 @@ func (store *Store) SilenceScopeForGroup(
 }
 
 // RecordSilence remembers a silence promview created. Alertmanager owns the
-// live state and expires it on its own schedule; this row is the reasoning,
-// which is what still answers "who silenced this, and why" after the silence
-// itself is gone.
+// live state; the sync re-reads it every reconcile pass, and this row written
+// at creation is what still answers "who silenced this, and why" after the
+// silence itself is gone.
 //
 // A repeated (source, id) is an upsert rather than an error: the id comes from
 // Alertmanager, and a retry that lands twice should not fail a silence that
@@ -205,34 +205,42 @@ func (store *Store) RecordSilence(ctx context.Context, record alerts.SilenceReco
 	if err != nil {
 		return fmt.Errorf("encode silence matchers: %w", err)
 	}
+	// Promview only writes equality matchers, so the full-fidelity list is
+	// derived rather than asked for.
+	listJSON, err := json.Marshal(equalityMatcherList(record.Matchers))
+	if err != nil {
+		return fmt.Errorf("encode silence matcher list: %w", err)
+	}
 	_, err = store.pool.Exec(ctx, `
 		INSERT INTO alertmanager_silences
-			(source_slug, silence_id, matchers, created_by, comment, starts_at, ends_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+			(source_slug, silence_id, matchers, created_by, comment, starts_at, ends_at, state, matcher_list)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
 		ON CONFLICT (source_slug, silence_id) DO UPDATE SET
 			matchers = EXCLUDED.matchers,
 			created_by = EXCLUDED.created_by,
 			comment = EXCLUDED.comment,
 			starts_at = EXCLUDED.starts_at,
-			ends_at = EXCLUDED.ends_at
+			ends_at = EXCLUDED.ends_at,
+			state = EXCLUDED.state,
+			matcher_list = EXCLUDED.matcher_list
 	`, record.Source, record.SilenceID, matchersJSON, record.CreatedBy, record.Comment,
-		record.StartsAt.UTC(), record.EndsAt.UTC())
+		record.StartsAt.UTC(), record.EndsAt.UTC(), listJSON)
 	if err != nil {
 		return fmt.Errorf("record silence %s: %w", record.SilenceID, err)
 	}
 	return nil
 }
 
-// silenceRecords reads back the promview-created silences with these ids. Ids
-// promview never created simply do not come back: a silence made straight on
-// the Alertmanager is still real and still suppressing, and the console says so
-// without inventing an author for it.
+// silenceRecords reads back the stored silences with these ids. An id with no
+// record — a silence made straight on the Alertmanager that no sync has read
+// yet — simply does not come back: it is still real and still suppressing, and
+// the console says so without inventing an author for it.
 func (store *Store) silenceRecords(ctx context.Context, sourceSlug string, ids []string) ([]alerts.SilenceRecord, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	rows, err := store.pool.Query(ctx, `
-		SELECT source_slug, silence_id, matchers, created_by, comment, starts_at, ends_at
+		SELECT source_slug, silence_id, matchers, created_by, comment, starts_at, ends_at, state, matcher_list
 		FROM alertmanager_silences
 		WHERE source_slug = $1 AND silence_id = ANY($2)
 		ORDER BY ends_at DESC
@@ -244,14 +252,18 @@ func (store *Store) silenceRecords(ctx context.Context, sourceSlug string, ids [
 	records := make([]alerts.SilenceRecord, 0, len(ids))
 	for rows.Next() {
 		var record alerts.SilenceRecord
-		var matchersJSON []byte
+		var matchersJSON, listJSON []byte
 		var startsAt, endsAt time.Time
 		if err := rows.Scan(&record.Source, &record.SilenceID, &matchersJSON,
-			&record.CreatedBy, &record.Comment, &startsAt, &endsAt); err != nil {
+			&record.CreatedBy, &record.Comment, &startsAt, &endsAt,
+			&record.State, &listJSON); err != nil {
 			return nil, fmt.Errorf("scan silence record: %w", err)
 		}
 		if err := json.Unmarshal(matchersJSON, &record.Matchers); err != nil {
 			return nil, fmt.Errorf("decode silence matchers for %s: %w", record.SilenceID, err)
+		}
+		if err := json.Unmarshal(listJSON, &record.MatcherList); err != nil {
+			return nil, fmt.Errorf("decode silence matcher list for %s: %w", record.SilenceID, err)
 		}
 		record.StartsAt = startsAt.UTC()
 		record.EndsAt = endsAt.UTC()
