@@ -915,7 +915,9 @@ describe('App', () => {
         }
         if (target.startsWith('/api/v1/alerts')) {
           return Promise.resolve(
-            jsonResponse(alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 })),
+            jsonResponse(
+              alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 }),
+            ),
           );
         }
         if (target === '/api/v1/me') {
