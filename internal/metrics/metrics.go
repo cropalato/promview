@@ -31,6 +31,10 @@ const (
 	ReasonUnreadable = "unreadable"
 	ReasonError      = "error"
 	ReasonUntrusted  = "untrusted"
+	// ReasonSilences is a pass whose alert half proceeded but whose silence
+	// listing could not be read: suppression may go stale even though endings
+	// are still being confirmed, which is a different repair than either.
+	ReasonSilences = "silences-unreadable"
 )
 
 // PoolSnapshot is a database pool's state at one instant.

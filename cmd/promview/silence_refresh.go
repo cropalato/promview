@@ -164,9 +164,14 @@ func (refresher *silenceRefresher) syncSuppression(ctx context.Context, slug str
 			refresher.metrics.ReconcileFailed(slug, metrics.ReasonUnreadable)
 			continue
 		}
+		now := time.Now().UTC()
+		// The silence just written lands in the inventory immediately, so the
+		// detail drawer can name its author without waiting for the ticker.
+		// Releasing is as safe here as suppressing: neither concludes an ending.
+		activeSilences := syncSilences(ctx, refresher.store, refresher.client, refresher.metrics, slug, baseURL, now)
 		// No missing set: this pass syncs suppression and must never conclude
 		// that an alert has ended.
-		result, err := refresher.store.ReconcileSource(ctx, slug, live, nil, time.Now().UTC())
+		result, err := refresher.store.ReconcileSource(ctx, slug, live, nil, activeSilences, now)
 		if err != nil {
 			if ctx.Err() == nil {
 				slog.Error("silence refresh failed", "source", slug, "error", err)

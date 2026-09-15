@@ -15,9 +15,12 @@ type fakeReconcileStore struct {
 	firing       map[string][]string
 	missingCalls []map[string]bool
 	liveCalls    [][]alertmanager.LiveAlert
+	silenceSets  []map[string]bool
+	synced       [][]alertmanager.ListedSilence
 	sourcesErr   error
 	firingErr    error
 	reconcileErr error
+	syncErr      error
 }
 
 func (store *fakeReconcileStore) ReconcilableSources(context.Context) (map[string]string, error) {
@@ -33,17 +36,31 @@ func (store *fakeReconcileStore) ReconcileSource(
 	_ string,
 	live []alertmanager.LiveAlert,
 	missing map[string]bool,
+	activeSilences map[string]bool,
 	_ time.Time,
 ) (postgres.ReconcileResult, error) {
 	store.missingCalls = append(store.missingCalls, missing)
 	store.liveCalls = append(store.liveCalls, live)
+	store.silenceSets = append(store.silenceSets, activeSilences)
 	return postgres.ReconcileResult{Resolved: len(missing)}, store.reconcileErr
 }
 
+func (store *fakeReconcileStore) SyncSilences(
+	_ context.Context,
+	_ string,
+	listed []alertmanager.ListedSilence,
+	_ time.Time,
+) error {
+	store.synced = append(store.synced, listed)
+	return store.syncErr
+}
+
 type fakeAlertmanager struct {
-	live []alertmanager.LiveAlert
-	err  error
-	nth  int
+	live        []alertmanager.LiveAlert
+	err         error
+	nth         int
+	silences    []alertmanager.ListedSilence
+	silencesErr error
 	// responses, when set, is used per call so a restart can be simulated.
 	responses [][]alertmanager.LiveAlert
 }
@@ -58,6 +75,13 @@ func (client *fakeAlertmanager) LiveAlerts(context.Context, string) ([]alertmana
 		return response, nil
 	}
 	return client.live, nil
+}
+
+func (client *fakeAlertmanager) ListSilences(context.Context, string) ([]alertmanager.ListedSilence, error) {
+	if client.silencesErr != nil {
+		return nil, client.silencesErr
+	}
+	return client.silences, nil
 }
 
 func min(a, b int) int {
@@ -197,6 +221,83 @@ func TestReconcilerPassesSuppressionThrough(t *testing.T) {
 
 	if len(store.liveCalls) != 1 || !store.liveCalls[0][0].Suppressed {
 		t.Fatalf("suppression did not reach the store: %#v", store.liveCalls)
+	}
+}
+
+func TestReconcilerSyncsSilencesAndPassesTheActiveIDs(t *testing.T) {
+	store := &fakeReconcileStore{
+		sources: map[string]string{"yul": "http://am:9093"},
+		firing:  map[string][]string{"yul": {"a"}},
+	}
+	client := &fakeAlertmanager{
+		live: []alertmanager.LiveAlert{{Fingerprint: "a"}},
+		silences: []alertmanager.ListedSilence{
+			{ID: "active-1", State: "active"},
+			// A pending preventive silence and an expired one are stored like any
+			// other, but neither is suppressing, so neither reaches the release set.
+			{ID: "pending-1", State: "pending"},
+			{ID: "expired-1", State: "expired"},
+		},
+	}
+	r := newReconciler(store, client, nil)
+
+	r.reconcileOnce(context.Background(), time.Now().UTC())
+
+	if len(store.synced) != 1 || len(store.synced[0]) != 3 {
+		t.Fatalf("silences synced = %#v, want one call carrying all three", store.synced)
+	}
+	want := map[string]bool{"active-1": true}
+	if len(store.silenceSets) != 1 || len(store.silenceSets[0]) != 1 || !store.silenceSets[0]["active-1"] {
+		t.Fatalf("active silences = %v, want %v", store.silenceSets, want)
+	}
+}
+
+func TestReconcilerPassesNoSilenceClaimWhenTheListingFails(t *testing.T) {
+	store := &fakeReconcileStore{
+		sources: map[string]string{"yul": "http://am:9093"},
+		firing:  map[string][]string{"yul": {"a"}},
+	}
+	client := &fakeAlertmanager{
+		live:        []alertmanager.LiveAlert{{Fingerprint: "a"}},
+		silencesErr: errors.New("connection refused"),
+	}
+	r := newReconciler(store, client, nil)
+
+	r.reconcileOnce(context.Background(), time.Now().UTC())
+
+	// Nil, not empty: a failed listing makes no claim, where an empty one says
+	// nothing is suppressing. The alert half of the pass still ran.
+	if len(store.silenceSets) != 1 || store.silenceSets[0] != nil {
+		t.Fatalf("active silences = %v, want nil", store.silenceSets)
+	}
+	if len(store.synced) != 0 {
+		t.Fatalf("a failed listing was synced: %#v", store.synced)
+	}
+}
+
+func TestReconcilerReadsSilencesEvenWhenTheAlertListIsUntrusted(t *testing.T) {
+	// The user-visible failure this closes: every alert cleared inside a
+	// maintenance window, the Alertmanager now reports no alerts at all, and the
+	// empty-list guard rightly refuses to resolve anything. The silence listing
+	// is persisted across restarts, so it is still read, still synced, and still
+	// allowed to release suppression that nothing is holding any more.
+	store := &fakeReconcileStore{
+		sources: map[string]string{"yul": "http://am:9093"},
+		firing:  map[string][]string{"yul": {"a", "b"}},
+	}
+	client := &fakeAlertmanager{live: nil, silences: []alertmanager.ListedSilence{}}
+	r := newReconciler(store, client, nil)
+
+	r.reconcileOnce(context.Background(), time.Now().UTC())
+
+	if len(store.synced) != 1 {
+		t.Fatalf("silences were not synced on an untrusted alert reading: %#v", store.synced)
+	}
+	if len(store.silenceSets) != 1 || store.silenceSets[0] == nil || len(store.silenceSets[0]) != 0 {
+		t.Fatalf("active silences = %#v, want an empty, non-nil set", store.silenceSets)
+	}
+	if len(store.missingCalls) != 1 || len(store.missingCalls[0]) != 0 {
+		t.Fatalf("the untrusted reading resolved alerts: %v", store.missingCalls)
 	}
 }
 

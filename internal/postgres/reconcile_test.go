@@ -74,7 +74,7 @@ func TestStoreReconcileSource(t *testing.T) {
 		{Fingerprint: "still-firing"},
 		{Fingerprint: "silenced", Suppressed: true, SilencedBy: []string{"sil-2", "sil-1"}},
 	}
-	result, err := store.ReconcileSource(ctx, "yul", live, map[string]bool{"gone": true}, now)
+	result, err := store.ReconcileSource(ctx, "yul", live, map[string]bool{"gone": true}, nil, now)
 	if err != nil {
 		t.Fatalf("ReconcileSource() error = %v", err)
 	}
@@ -161,7 +161,7 @@ func TestStoreReconcileSource(t *testing.T) {
 	released, err := store.ReconcileSource(ctx, "yul", []alertmanager.LiveAlert{
 		{Fingerprint: "still-firing"},
 		{Fingerprint: "silenced", Suppressed: false},
-	}, nil, now)
+	}, nil, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestStoreReconcileSource(t *testing.T) {
 	quiet, err := store.ReconcileSource(ctx, "yul", []alertmanager.LiveAlert{
 		{Fingerprint: "still-firing"},
 		{Fingerprint: "silenced"},
-	}, nil, now)
+	}, nil, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}

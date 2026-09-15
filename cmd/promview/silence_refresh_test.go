@@ -14,12 +14,14 @@ import (
 // The refresher reads from its own goroutines, so its fakes record under a
 // mutex rather than reusing the ticker's single-threaded ones.
 type refreshStore struct {
-	mu       sync.Mutex
-	sources  map[string]string
-	calls    []string
-	missing  []map[string]bool
-	err      error
-	released int
+	mu         sync.Mutex
+	sources    map[string]string
+	calls      []string
+	missing    []map[string]bool
+	activeSets []map[string]bool
+	synced     []string
+	err        error
+	released   int
 }
 
 func (store *refreshStore) ReconcilableSources(context.Context) (map[string]string, error) {
@@ -44,13 +46,27 @@ func (store *refreshStore) ReconcileSource(
 	slug string,
 	_ []alertmanager.LiveAlert,
 	missing map[string]bool,
+	activeSilences map[string]bool,
 	_ time.Time,
 ) (postgres.ReconcileResult, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.calls = append(store.calls, slug)
 	store.missing = append(store.missing, missing)
+	store.activeSets = append(store.activeSets, activeSilences)
 	return postgres.ReconcileResult{Suppressed: 1, Released: store.released}, nil
+}
+
+func (store *refreshStore) SyncSilences(
+	_ context.Context,
+	slug string,
+	_ []alertmanager.ListedSilence,
+	_ time.Time,
+) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.synced = append(store.synced, slug)
+	return nil
 }
 
 func (store *refreshStore) recorded() ([]string, []map[string]bool) {
@@ -76,6 +92,17 @@ func (client *refreshClient) count() int {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	return len(client.reads)
+}
+
+// Silences are listed on a separate call and deliberately not recorded in
+// `reads`: the tests count alert reads, and the listing rides along with each.
+func (client *refreshClient) ListSilences(context.Context, string) ([]alertmanager.ListedSilence, error) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.err != nil {
+		return nil, client.err
+	}
+	return []alertmanager.ListedSilence{{ID: "sil-1", State: "active"}}, nil
 }
 
 // withFastDelays collapses the settle waits so a test does not sit through the

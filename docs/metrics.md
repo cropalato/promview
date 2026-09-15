@@ -78,9 +78,12 @@ nobody scraping it.
 Go runtime and process collectors are registered alongside them.
 
 `result` is `ok` on success. A reconciliation failure is `unreadable` when the
-Alertmanager could not be read, `error` when the database refused the work, and
+Alertmanager could not be read, `error` when the database refused the work,
 `untrusted` when the Alertmanager reported no alerts at all while Promview still held
-firing ones — a reading that syncs suppression but is never allowed to end anything.
+firing ones — a reading that syncs suppression but is never allowed to end anything —
+and `silences-unreadable` when the alert half of the pass proceeded but the silence
+listing could not be read, so suppression may go stale even while endings are still
+being confirmed.
 
 ### The one worth alerting on first
 

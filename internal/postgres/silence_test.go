@@ -236,7 +236,7 @@ func TestStoreSilenceVisibility(t *testing.T) {
 		{Fingerprint: "quiet", Suppressed: true, SilencedBy: []string{"sil-1"}},
 		{Fingerprint: "loud-1"},
 		{Fingerprint: "loud-2"},
-	}, nil, now); err != nil {
+	}, nil, nil, now); err != nil {
 		t.Fatal(err)
 	}
 

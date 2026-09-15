@@ -15,8 +15,9 @@ import (
 
 /*
 Reconciliation compares what promview holds against what the source Alertmanager
-still has, which is the only way to learn two things webhooks never report: an
-alert that ended while silenced, and an alert that is currently being suppressed.
+still has, which is the only way to learn things webhooks never report: an
+alert that ended while silenced, an alert that is currently being suppressed,
+and a silence that is no longer holding anything back.
 
 An alert the Alertmanager no longer lists is recorded as resolved rather than
 expired. Expiry is promview's own inference from silence; here the source itself
@@ -40,11 +41,21 @@ type ReconcileResult struct {
 // because a single absent reading is not evidence: an Alertmanager restarting
 // briefly holds no alerts at all, and resolving everything on that basis would
 // be worse than the staleness reconciliation exists to fix.
+//
+// `activeSilences` is the ids of the silences the Alertmanager reports as
+// active, or nil when that listing failed. A stored alert the live view no
+// longer carries cannot have its suppression synced from live data, so its
+// silenced_by is checked against this set instead: a silence that is gone is
+// not holding anything back, and the row must stop reading as silenced even
+// while the alert's own ending is still unconfirmed. Nil skips the check —
+// no listing is not the same claim as an empty one. An alert suppressed with
+// no silence ids is inhibited, and the silence listing says nothing about it.
 func (store *Store) ReconcileSource(
 	ctx context.Context,
 	sourceSlug string,
 	live []alertmanager.LiveAlert,
 	missing map[string]bool,
+	activeSilences map[string]bool,
 	now time.Time,
 ) (ReconcileResult, error) {
 	liveByFingerprint := make(map[string]alertmanager.LiveAlert, len(live))
@@ -133,6 +144,29 @@ func (store *Store) ReconcileSource(
 
 			current, present := liveByFingerprint[item.fingerprint]
 			if !present {
+				// Not in the live view, not yet confirmed missing. Its silences
+				// can still be checked: every one gone from the active set means
+				// nothing is suppressing it any more, whatever its ending turns
+				// out to be. This is the one signal the alert list cannot carry
+				// for an alert it no longer lists — an alert that cleared inside
+				// a silence takes the evidence of that silence with it.
+				if activeSilences == nil || !item.suppressed || len(item.silencedBy) == 0 {
+					continue
+				}
+				if anySilenceActive(item.silencedBy, activeSilences) {
+					continue
+				}
+				if _, err := tx.Exec(ctx,
+					"UPDATE alerts SET suppressed = false, silenced_by = '{}' WHERE id = $1",
+					item.id,
+				); err != nil {
+					return fmt.Errorf("release suppression for alert %d: %w", item.id, err)
+				}
+				incoming.Status = alerts.StatusFiring
+				if err := insertStreamEvent(ctx, tx, "alert.updated", item.id, incoming, nil); err != nil {
+					return err
+				}
+				result.Released++
 				continue
 			}
 			stateChanged := current.Suppressed != item.suppressed
@@ -232,4 +266,13 @@ func sortedCopy(values []string) []string {
 
 func sameStrings(left, right []string) bool {
 	return slices.Equal(left, right)
+}
+
+func anySilenceActive(ids []string, active map[string]bool) bool {
+	for _, id := range ids {
+		if active[id] {
+			return true
+		}
+	}
+	return false
 }
