@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.36] - 2026-09-15
+
 ### Added
 
 - **silence:** a silence can be lifted from the console. `DELETE /api/v1/alerts/{id}/silences/{silenceId}` expires it on the source's Alertmanager, and the detail drawer grows a **Remove** control beside each silence holding the alert back. Removal is addressed through the alert rather than by silence id alone, and that is the authorization: a silence id is an opaque token, so a bare id endpoint would let anyone who may operate on anything un-hide anything. The server re-checks in SQL that the id is one currently suppressing an alert this operator may act on — the same per-alert permission the silence button reads, since creating and lifting a silence are one right. The removal then triggers the same re-read a new silence does, so the suppression releases and the row un-dims within seconds rather than at the next reconcile tick, and the stored record is marked expired immediately so the drawer stops calling it live even where reconciliation is switched off. The control is offered only where the server advertises `silenceRemoveSupported`, so a newer console against an older server does not offer a button whose request would fall through to the SPA route. Outcomes are counted in `promview_silence_removals_total`. A preventive silence matching no alert has no row to act from and is not reachable this way; that needs a silences view of its own.
