@@ -40,6 +40,19 @@ fn base_url_script(base: &str) -> String {
     format!("globalThis.__PROMVIEW_API_BASE__ = {encoded};")
 }
 
+/// Tells every open webview the session changed, through the same kind of
+/// page-installed global the stream uses. The tray can sign in and out on its
+/// own, and a console left on the sign-in gate has to find out without the
+/// operator hunting for a refresh.
+fn announce_session(app: &AppHandle, kind: &str) {
+    let script = format!(
+        "globalThis.__PROMVIEW_SESSION__&&globalThis.__PROMVIEW_SESSION__({{\"kind\":\"{kind}\"}});"
+    );
+    for (_, window) in app.webview_windows() {
+        let _ = window.eval(&script);
+    }
+}
+
 fn toggle_window(window: &WebviewWindow) -> tauri::Result<()> {
     if window.is_visible()? {
         window.hide()
@@ -170,10 +183,11 @@ pub fn run() {
                     "sign-in" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            if let Err(message) =
-                                run_sign_in(app.state::<SignInState>().inner()).await
-                            {
-                                eprintln!("promview-desktop: sign-in failed: {message}");
+                            match run_sign_in(app.state::<SignInState>().inner()).await {
+                                Ok(_) => announce_session(&app, "signedIn"),
+                                Err(message) => {
+                                    eprintln!("promview-desktop: sign-in failed: {message}");
+                                }
                             }
                         });
                     }
@@ -183,6 +197,7 @@ pub fn run() {
                     "sign-out" => {
                         app.state::<SignInState>().credentials.clear();
                         eprintln!("promview-desktop: signed out");
+                        announce_session(app, "signedOut");
                     }
                     _ => {}
                 })
@@ -271,8 +286,12 @@ async fn run_sign_in(state: &SignInState) -> Result<Durability, String> {
 }
 
 #[tauri::command]
-async fn sign_in(state: tauri::State<'_, SignInState>) -> Result<String, String> {
-    match run_sign_in(state.inner()).await? {
+async fn sign_in(app: AppHandle, state: tauri::State<'_, SignInState>) -> Result<String, String> {
+    let durability = run_sign_in(state.inner()).await?;
+    // The invoking window learns from its own resolved promise; the announce is
+    // for every other window showing the same gate, the compact view included.
+    announce_session(&app, "signedIn");
+    match durability {
         Durability::Keychain => Ok("keychain".to_string()),
         // Signed in either way; the difference is only whether they will still
         // be tomorrow, and saying so beats a silent surprise at next launch.
@@ -281,8 +300,9 @@ async fn sign_in(state: tauri::State<'_, SignInState>) -> Result<String, String>
 }
 
 #[tauri::command]
-fn sign_out(state: tauri::State<'_, SignInState>) {
+fn sign_out(app: AppHandle, state: tauri::State<'_, SignInState>) {
     state.credentials.clear();
+    announce_session(&app, "signedOut");
 }
 
 #[tauri::command]

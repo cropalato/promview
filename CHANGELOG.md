@@ -6,6 +6,11 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **desktop:** signing in from the console's own gate now opens the system browser instead of the identity provider's login form inside the webview. The gate's control was a plain link, so it navigated the whole shell to the server's OIDC endpoint: the operator lost the address bar the flow is meant to be checked in, and the session ended up as a cookie in the webview rather than in the platform secret store, where the tray and the API proxy could not reach it. It now runs the same loopback flow the tray menu has always used, says that it is waiting on the browser, and reports a refusal instead of appearing to do nothing. A plain browser keeps the navigation it always had.
+- **desktop:** the console picks up a sign-in without being told to refresh. Nothing announced a session change to the webview, so an operator who signed in — from the gate, or from the tray while the window sat on it — kept looking at "Sign in required" until they reloaded by hand. The shell now announces sign-in and sign-out to every open window, including the compact one, and the console re-checks its session and loads alerts on its own; a sign-out drops it back to the gate the same way an expired session does.
+
 ### Documentation
 
 - The Kubernetes guide claimed a source's Alertmanager URL could only be set per source through the CLI; the chart's `sources` list has carried it in values since 0.1.0-alpha.35. The guide now shows the declarative path first and keeps `source update` for sources managed outside chart values.

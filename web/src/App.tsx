@@ -13,6 +13,7 @@ import type { AlertSummary } from './alerts/types';
 import type { AlertGroupSummary } from './alerts/api';
 import { OIDC_LOGIN_URL, canOperate } from './auth/session';
 import { apiUrl } from './config/apiBase';
+import { getHostSignIn } from './config/hostSession';
 import type { NavigateTo } from './auth/session';
 import { AlertDetailDrawer } from './components/AlertDetailDrawer';
 import { AlertTable } from './components/AlertTable';
@@ -99,6 +100,31 @@ export default function App({ navigate }: AppProps = {}) {
   // the alert query from the first page with repeated `match` params.
   const [filterDraft, setFilterDraft] = useState('');
   const [appliedMatchers, setAppliedMatchers] = useState<readonly LabelMatcher[]>([]);
+
+  // Under a host shell, sign-in goes through the host to the system browser
+  // instead of navigating the webview to the identity provider. Pending means
+  // the browser is open and the host is waiting for the operator to finish.
+  const hostSignIn = getHostSignIn();
+  const [hostSignInPending, setHostSignInPending] = useState(false);
+  const [hostSignInError, setHostSignInError] = useState<string | null>(null);
+  const startHostSignIn = useCallback(() => {
+    if (hostSignIn === undefined) {
+      return;
+    }
+    setHostSignInPending(true);
+    setHostSignInError(null);
+    hostSignIn()
+      .then(() => {
+        setHostSignInPending(false);
+        // The host also announces the change; retrying here as well costs one
+        // request and covers a shell too old to announce.
+        retrySession();
+      })
+      .catch((error: unknown) => {
+        setHostSignInPending(false);
+        setHostSignInError(error instanceof Error ? error.message : String(error));
+      });
+  }, [hostSignIn, retrySession]);
   const [filterError, setFilterError] = useState<string | null>(null);
   const [sort, setSort] = useState<AlertSort | null>(null);
 
@@ -435,9 +461,34 @@ export default function App({ navigate }: AppProps = {}) {
               This deployment uses OIDC sign-in. Alerts and the live stream stay paused until you
               sign in with your identity provider.
             </p>
-            <a className="button" href={apiUrl(OIDC_LOGIN_URL)}>
-              Sign in with your identity provider
-            </a>
+            {hostSignIn !== undefined ? (
+              <>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={startHostSignIn}
+                  disabled={hostSignInPending}
+                >
+                  {hostSignInPending
+                    ? 'Waiting for the browser…'
+                    : 'Sign in with your identity provider'}
+                </button>
+                {hostSignInPending ? (
+                  <p className="boot-copy" role="status">
+                    Finish signing in in the browser window that just opened.
+                  </p>
+                ) : null}
+                {hostSignInError !== null ? (
+                  <p className="boot-copy" role="alert">
+                    Sign-in failed: {hostSignInError}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <a className="button" href={apiUrl(OIDC_LOGIN_URL)}>
+                Sign in with your identity provider
+              </a>
+            )}
           </section>
         ) : configState.config.authMode === 'oidc' && sessionState.status === 'forbidden' ? (
           <section className="boot boot-error" role="alert" aria-label="Access denied">

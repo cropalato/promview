@@ -1,6 +1,19 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSession } from './useSession';
+import { installHostSession, resetHostSession } from '../config/hostSession';
+import type { HostSessionMessage } from '../config/hostSession';
+
+afterEach(() => {
+  resetHostSession();
+});
+
+/** Installs a host and returns what the host would call to announce. */
+function installAnnouncingHost(): (message: HostSessionMessage) => void {
+  installHostSession(vi.fn());
+  const dispatch = (globalThis as Record<string, unknown>).__PROMVIEW_SESSION__;
+  return dispatch as (message: HostSessionMessage) => void;
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -104,6 +117,34 @@ describe('useSession', () => {
 
     await waitFor(() => expect(result.current.state).toEqual({ status: 'unauthenticated' }));
     act(() => result.current.expire());
+
+    expect(result.current.state).toEqual({ status: 'unauthenticated' });
+  });
+
+  it('re-checks the session when the host announces a sign-in', async () => {
+    const announce = installAnnouncingHost();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: 'nope' }, 401))
+      .mockResolvedValue(jsonResponse(PRINCIPAL));
+    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+
+    await waitFor(() => expect(result.current.state).toEqual({ status: 'unauthenticated' }));
+
+    // The tray signed in on its own; the gate must clear without a refresh.
+    act(() => announce({ kind: 'signedIn' }));
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops a verified session back to the gate when the host announces a sign-out', async () => {
+    const announce = installAnnouncingHost();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(PRINCIPAL));
+    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    act(() => announce({ kind: 'signedOut' }));
 
     expect(result.current.state).toEqual({ status: 'unauthenticated' });
   });
