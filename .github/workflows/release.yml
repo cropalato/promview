@@ -321,7 +321,13 @@ jobs:
   # the deb from the release asset URL. A job racing the upload would resolve a
   # 404 and pin the checksum of an error page.
   aur:
-    if: github.ref_type == 'tag'
+    # Gated on a repository variable rather than on the tag alone. Publishing
+    # needs an AUR account, and registration was closed to new accounts when
+    # this landed; without the gate every tag would push to a remote nothing
+    # can authenticate against and paint the release run red for a reason the
+    # release itself has nothing to do with. Unset means skipped. Set
+    # AUR_PUBLISH to "true" once the account exists and its key is registered.
+    if: github.ref_type == 'tag' && vars.AUR_PUBLISH == 'true'
     needs: release
     runs-on: ubuntu-latest
     steps:
