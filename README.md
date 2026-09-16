@@ -29,6 +29,7 @@ same UI. Alertmanager keeps routing, grouping, inhibition and notification.
 - [Live Updates](#live-updates)
 - [Acknowledgement](#acknowledgement)
 - [Assignment](#assignment)
+- [Notes](#notes)
 - [Alert Expiry](#alert-expiry)
 - [Alertmanager Reconciliation](#alertmanager-reconciliation)
 - [Silences](#silences)
@@ -238,6 +239,31 @@ whoever already owns the alert changes nothing and wakes no console.
 Assignment is Promview-local and never reaches Alertmanager. It is cleared when
 a resolved alert fires again, along with the acknowledgement: that is a new
 occurrence, and the previous owner did not agree to own it.
+
+## Notes
+
+An operator can leave a note on an alert — what was checked, what was ruled out,
+who was called:
+
+```sh
+curl -X POST 'http://localhost:8080/api/v1/alerts/42/notes' \
+  -H 'Content-Type: application/json' \
+  -d '{"body":"Paged the vendor, awaiting callback"}'
+```
+
+Notes are **append-only**. There is no endpoint that edits or deletes one,
+deliberately: a note is what somebody relied on at the time, and a handover that
+can be quietly rewritten afterwards is worth less than none. Deleting the alert
+takes its notes with it.
+
+Each note records the occurrence it was written against, so a note about a
+previous incident stays attributable rather than reading as though it describes
+the current one. Notes survive an alert resolving and firing again; the
+assignment and acknowledgement do not.
+
+The alert list carries a note *count* rather than the notes, because the list's
+job is to show there is something to read and opening the alert is what reads
+it. The full notes are on the detail response.
 
 ## Alert Expiry
 
@@ -493,7 +519,8 @@ Alpha, and honest about it. What works today:
 | OIDC sign-in, label-scoped roles enforced in SQL | Working |
 | Helm chart, Compose, desktop client | Working |
 | Assign | Working |
-| Close, notes, bulk actions | Planned |
+| Notes | Working |
+| Close, bulk actions | Planned |
 | Authorization administration API | Planned (CLI only) |
 | Stream event retention | Planned |
 
