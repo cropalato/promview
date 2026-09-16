@@ -72,6 +72,8 @@ nobody scraping it.
 | `promview_stream_clients` | gauge | — | Event-stream connections open right now. The multiplier on everything below. |
 | `promview_stream_polls_total` | counter | — | Database reads made for stream clients. This *is* the polling load. |
 | `promview_stream_events_sent_total` | counter | — | Events actually delivered. Interesting against the polls. |
+| `promview_stream_gaps_total` | counter | — | Clients told to re-snapshot because their resume point had been pruned. Rising means retention is shorter than the disconnections this deployment sees. |
+| `promview_stream_events_pruned_total` | counter | — | Stream events deleted by the retention sweep. |
 | `promview_db_connections` | gauge | `state` | `acquired`, `idle`, `total`, `max`, sampled at scrape time. |
 | `promview_db_acquire_waits_total` | counter | — | Acquisitions that had to wait. The saturation signal. |
 | `promview_db_acquire_duration_seconds_total` | counter | — | Cumulative wait, so `rate()` reads as contention. |

@@ -87,8 +87,8 @@ stack in [`docs/dockerhub.md`](docs/dockerhub.md). Images are published for
 **linux/amd64** to both registries:
 
 ```sh
-docker pull cropalato/promview:0.1.0-alpha.36
-docker pull ghcr.io/cropalato/promview:0.1.0-alpha.36
+docker pull cropalato/promview:alpha
+docker pull ghcr.io/cropalato/promview:alpha
 ```
 
 Send an Alertmanager-compatible webhook to the bootstrapped `demo` source:
@@ -138,7 +138,7 @@ Promview ships a Helm chart for an external PostgreSQL database:
 ```sh
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.36
+  --version 0.1.0-alpha.39
 ```
 
 Create the required database Secret before installation. The pinned chart version is

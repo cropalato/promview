@@ -52,7 +52,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
 
   migrate:
-    image: cropalato/promview:0.1.0-alpha.36
+    image: cropalato/promview:alpha
     command: ["migrate"]
     depends_on:
       postgres:
@@ -64,7 +64,7 @@ services:
       PROMVIEW_BOOTSTRAP_SOURCE_TOKEN: development-token
 
   app:
-    image: cropalato/promview:0.1.0-alpha.36
+    image: cropalato/promview:alpha
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -160,6 +160,7 @@ that is absent or has no credential; it never overwrites a token rotated with
 | --- | --- | --- |
 | `PROMVIEW_ALERT_STALE_AFTER` | `12h` | Default window before an unreported alert expires. `0` disables expiry. Must exceed the Alertmanager `repeat_interval`. |
 | `PROMVIEW_ALERT_EXPIRY_INTERVAL` | `1m` | How often the expiry sweep runs. |
+| `PROMVIEW_STREAM_RETENTION` | `24h` | How long a stream event is kept so a disconnected client can resume. `0` keeps every event. |
 | `PROMVIEW_RECONCILE_INTERVAL` | `1m` | How often each source's Alertmanager is read to confirm what is still firing. `0` disables reconciliation. |
 | `PROMVIEW_RECONCILE_TIMEOUT` | `10s` | Bounds one Alertmanager request. |
 | `PROMVIEW_SILENCE_DEFAULT_DURATION` | `2h` | Silence length when the operator does not say. |
@@ -198,7 +199,7 @@ serialized pre-install and pre-upgrade migration hook:
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
   --create-namespace \
-  --version 0.1.0-alpha.36
+  --version 0.1.0-alpha.39
 ```
 
 The chart version is the application version. Create the PostgreSQL Secret
@@ -208,7 +209,7 @@ before installing. See
 ## Also published at
 
 ```sh
-docker pull ghcr.io/cropalato/promview:0.1.0-alpha.36
+docker pull ghcr.io/cropalato/promview:alpha
 ```
 
 ## Desktop client

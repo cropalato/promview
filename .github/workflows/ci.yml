@@ -124,6 +124,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: make changelog-check
+      - run: make docs-check
 
   # Advisory scanning across all four toolchains. Deliberately one job: an
   # advisory is an advisory whichever manifest it arrives through, and three
