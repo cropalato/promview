@@ -1,11 +1,22 @@
 name: CI
 
+# Unfiltered `push` plus `pull_request` ran every job twice for any branch with
+# a pull request open on it. Commits land on main here, so that is the branch
+# worth watching directly; everything else arrives as a pull request.
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
   contents: read
+
+# A second push supersedes the first, except on main, where every commit is a
+# state someone may later bisect to and deserves its own answer.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   go:
@@ -17,6 +28,19 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: make verify-go
+
+  # Separate from `go` so a data race reports as a data race rather than as
+  # "the Go job failed", and so the slower race build does not hold up the
+  # ordinary test signal.
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make test-race
 
   web:
     runs-on: ubuntu-latest
@@ -94,3 +118,35 @@ jobs:
         with:
           version: v4.2.4
       - run: make verify-helm
+
+  # Advisory scanning across all four toolchains. Deliberately one job: an
+  # advisory is an advisory whichever manifest it arrives through, and three
+  # separate red jobs would say the same thing three times.
+  #
+  # This is the check that found pgx and go-jose vulnerabilities reachable from
+  # the migration runner and the OIDC token verifier, and a rustls one two days
+  # after it was published. Nothing was watching before it existed.
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make vuln-go
+
+      # npm audit resolves from the lockfile, so neither project needs
+      # installing to be scanned.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: make vuln-web
+
+      # cargo-audit reads Cargo.lock and never builds, so this needs no Rust
+      # toolchain beyond cargo itself and none of the GTK system libraries the
+      # desktop job installs.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-audit
+      - run: make vuln-desktop

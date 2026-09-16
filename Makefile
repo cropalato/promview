@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build
+.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build vuln vuln-go vuln-web vuln-desktop
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
@@ -11,6 +11,13 @@ vet:
 
 test:
 	go test ./cmd/... ./internal/...
+
+# The server fans one ingestion out to every open console over SSE and runs the
+# expiry and reconcile loops beside it, so its concurrency is not incidental.
+# Kept out of `test` because the race build is several times slower, and out of
+# `verify` for the same reason; CI runs it as its own job on every change.
+test-race:
+	go test -race ./cmd/... ./internal/...
 
 test-postgres:
 	go test ./internal/postgres -run 'TestPendingMigrations|TestStoreIngestAndList|TestStoreExpireStaleAlerts|TestStoreGroupAlerts|TestStorePreferences|TestStoreReconcileSource|TestStoreUpdateSource|TestStoreSilenceScope|TestStoreSilenceVisibility|TestStoreSyncSilences|TestStoreDesktopAuthCodes'
@@ -60,3 +67,21 @@ helm-package:
 verify-helm: helm-lint helm-template helm-package
 
 verify: verify-go verify-web verify-desktop compose-check verify-helm
+
+# Advisory scanning, deliberately not part of `verify`. It reads a database over
+# the network, and an advisory published this morning would otherwise fail a
+# local run of work that has nothing to do with it. CI runs it as its own job,
+# where going red is the point.
+vuln-go:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./cmd/... ./internal/...
+
+# --omit=dev because the question is what ships. A vite or vitest advisory is
+# worth knowing about and is not a vulnerability in the console anyone runs.
+vuln-web:
+	npm --prefix web audit --omit=dev --audit-level=high
+	npm --prefix desktop audit --omit=dev --audit-level=high
+
+vuln-desktop:
+	cd desktop/src-tauri && cargo audit
+
+vuln: vuln-go vuln-web vuln-desktop

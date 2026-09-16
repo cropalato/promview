@@ -1,0 +1,57 @@
+name: CodeQL
+
+# Static analysis for the two languages CodeQL covers here. The Tauri crate is
+# left to clippy and cargo-audit: CodeQL's Rust support is newer than this
+# project's tolerance for a scanner that reports on a language nobody has
+# tuned the queries for.
+#
+# The weekly run is the point as much as the per-change one. Queries improve
+# after code is written, so the same commit is worth re-scanning later.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      # Writing the results back to the Security tab is the whole output.
+      security-events: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        if: matrix.language == 'go'
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
