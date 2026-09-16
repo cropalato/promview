@@ -72,8 +72,16 @@ verify: verify-go verify-web verify-desktop compose-check verify-helm
 # the network, and an advisory published this morning would otherwise fail a
 # local run of work that has nothing to do with it. CI runs it as its own job,
 # where going red is the point.
+
+# GOTOOLCHAIN=auto because govulncheck is built from source and its own go
+# directive runs ahead of this module's - it currently needs 1.26 while the
+# server is on 1.25. setup-go pins GOTOOLCHAIN=local in CI, which turns that
+# into a build failure rather than a scan. Switching is scoped to this command,
+# and only decides what compiles the scanner: govulncheck loads this module
+# under its own go directive, so the analysis still sees the Go version that
+# ships.
 vuln-go:
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./cmd/... ./internal/...
+	GOTOOLCHAIN=auto go run golang.org/x/vuln/cmd/govulncheck@latest ./cmd/... ./internal/...
 
 # --omit=dev because the question is what ships. A vite or vitest advisory is
 # worth knowing about and is not a vulnerability in the console anyone runs.
