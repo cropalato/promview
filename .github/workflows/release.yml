@@ -56,6 +56,13 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=${{ github.ref_name }}
+            # A moving pointer at the newest pre-release, so "try it" does not
+            # mean "first go and find which alpha is current". A semver
+            # pre-release is the tags that carry a hyphen, which is also exactly
+            # when the action's own latest=auto declines to move `latest` - the
+            # two never point at the same image, and neither ever lies about
+            # what it is.
+            type=raw,value=alpha,enable=${{ contains(github.ref_name, '-') }}
 
       - uses: docker/build-push-action@v7
         with:
