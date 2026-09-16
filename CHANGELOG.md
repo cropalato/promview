@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.39] - 2026-09-16
+
 ### Added
 
 - **alerts:** an operator can file an alert as handled. `POST /api/v1/alerts/{id}/close` with `{"closed":true}` closes it and `false` reopens it. Closing is Promview-local and never reaches Alertmanager — it is not silencing, and the source keeps reporting the alert exactly as before. It is a flag rather than a fourth `status` for that reason: `firing`, `resolved` and `expired` are claims about what the source reports, `closed` is a claim about what somebody decided, and an alert can honestly be both still firing and already dealt with. Closed alerts leave the default list, since closing an alert that stayed in it would be an action with no visible effect; `?closed=true` finds them again. Besides an operator reopening it by hand, a delivery that materially changes the alert reopens it — new labels, a new annotation, a status transition — because that is not the alert that was closed. An identical repeat deliberately does not: those arrive every `repeat_interval` and carry no new information, so reopening on one would mean a close never outlived the next notification.
