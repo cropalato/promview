@@ -11,6 +11,10 @@ import (
 
 var ErrNotFound = errors.New("alert not found")
 
+// ErrInvalid is a request the caller can fix by sending something else, as
+// opposed to one that fails because of what the caller may see.
+var ErrInvalid = errors.New("invalid request")
+
 // Source status values. Firing and resolved are reported by the source itself;
 // expired is the console's own conclusion after the source went quiet for longer
 // than its configured window, which is not the same claim as resolved.
@@ -45,7 +49,12 @@ type Alert struct {
 	SilencedBy     []string
 	AcknowledgedAt *time.Time
 	AcknowledgedBy string
-	RawData        json.RawMessage
+	// AssignedTo is who owns the alert, as free text: an alert is routinely
+	// handed to somebody who has never signed in here. Empty means unassigned.
+	AssignedTo string
+	AssignedAt *time.Time
+	AssignedBy string
+	RawData    json.RawMessage
 }
 
 type Cursor struct {
