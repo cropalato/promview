@@ -359,10 +359,23 @@ export default function App({ navigate }: AppProps = {}) {
       handleNotificationEvent,
     ],
   );
+  // The server deleted the events this console was going to resume through, so
+  // nothing can replay what was missed. A debounced live refresh is not enough:
+  // it merges into what is already held, and what is already held is exactly
+  // what is no longer trustworthy. Retrying reloads the snapshot from scratch
+  // and resets pagination with it, which is the only honest recovery.
+  const handleStreamGap = useCallback(() => {
+    retryAlerts();
+    if (grouped) {
+      refreshGroups();
+      refreshGroupChildren();
+    }
+  }, [retryAlerts, grouped, refreshGroups, refreshGroupChildren]);
   const streamStatus = useAlertStream({
     cursor:
       consoleUnlocked && alertsState.status === 'ready' ? alertsState.data.streamCursor : null,
     onAlertEvent: handleAlertEvent,
+    onStreamGap: handleStreamGap,
   });
 
   const loadedAlerts = alertsState.status === 'ready' ? alertsState.data.alerts : NO_ALERTS;

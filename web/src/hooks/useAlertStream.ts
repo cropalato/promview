@@ -5,6 +5,7 @@ import type {
   AlertStreamEvent,
   AlertStreamStatus,
   EventSourceFactory,
+  StreamGapEvent,
 } from '../alerts/stream';
 
 export interface UseAlertStreamOptions {
@@ -17,6 +18,14 @@ export interface UseAlertStreamOptions {
   cursor: number | null;
   /** Called for every validated alert lifecycle event. */
   onAlertEvent: (event: AlertStreamEvent) => void;
+  /**
+   * Called when the server reports that events between the resume position and
+   * the oldest retained one were deleted. The subscriber must take a fresh
+   * snapshot: the gap cannot be replayed, and continuing would leave the list
+   * quietly disagreeing with the server about what is firing. Optional so a
+   * caller that does not hold a snapshot has nothing to implement.
+   */
+  onStreamGap?: (gap: StreamGapEvent) => void;
   /** Transport override for tests and the future Tauri client. */
   factory?: EventSourceFactory;
   retryDelayMs?: number;
@@ -31,16 +40,22 @@ export interface UseAlertStreamOptions {
 export function useAlertStream({
   cursor,
   onAlertEvent,
+  onStreamGap,
   factory,
   retryDelayMs,
 }: UseAlertStreamOptions): AlertStreamStatus {
   const [status, setStatus] = useState<AlertStreamStatus>('connecting');
   const clientRef = useRef<AlertStreamClient | null>(null);
   const handlerRef = useRef(onAlertEvent);
+  const gapHandlerRef = useRef(onStreamGap);
 
   useEffect(() => {
     handlerRef.current = onAlertEvent;
   }, [onAlertEvent]);
+
+  useEffect(() => {
+    gapHandlerRef.current = onStreamGap;
+  }, [onStreamGap]);
 
   useEffect(() => {
     if (cursor === null) {
@@ -56,6 +71,9 @@ export function useAlertStream({
         retryDelayMs,
         onEvent: (event) => {
           handlerRef.current(event);
+        },
+        onGap: (gap) => {
+          gapHandlerRef.current?.(gap);
         },
         onStatus: setStatus,
       });
