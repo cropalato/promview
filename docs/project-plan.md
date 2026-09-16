@@ -55,9 +55,10 @@ The current implementation provides:
 - assignment, recorded as free text with the deciding operator kept separately
 - append-only operator notes, each carrying the occurrence it was written against
 - operator-local close, excluded from the default list and reopened by a materially changed delivery
+- bulk acknowledge, assign, close and note over an explicit selection, reported per alert
 - stream event retention with a watermark, and a `stream.gap` signal for clients resuming past it
 
-Bulk actions and authorization administration APIs remain planned work. The console can display an assignee and a note count but has no controls to assign, close, or add a note yet, and does not act on the `stream.gap` signal; those are client-side work against APIs that already exist.
+Authorization administration APIs remain planned work. The console can display an assignee and a note count but has no controls to assign, close, or add a note yet, and does not act on the `stream.gap` signal; those are client-side work against APIs that already exist.
 
 ## Goals
 

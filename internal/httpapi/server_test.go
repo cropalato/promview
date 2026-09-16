@@ -39,6 +39,9 @@ type fakeStore struct {
 	assignee     string
 	noteBody     string
 	closed       bool
+	bulkIDs      []int64
+	bulkOutcomes []alerts.BulkOutcome
+	bulkErr      error
 	cancel       context.CancelFunc
 	pingErr      error
 	sourceToken  string
@@ -132,6 +135,30 @@ func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal
 func (store *fakeStore) GetAlertDetail(_ context.Context, principal auth.Principal, _ int64) (alerts.Detail, error) {
 	store.principal = principal
 	return store.detail, store.detailErr
+}
+
+func (store *fakeStore) BulkAcknowledge(_ context.Context, principal auth.Principal, ids []int64, _ bool) ([]alerts.BulkOutcome, error) {
+	store.principal = principal
+	store.bulkIDs = ids
+	return store.bulkOutcomes, store.bulkErr
+}
+
+func (store *fakeStore) BulkAssign(_ context.Context, principal auth.Principal, ids []int64, _ string) ([]alerts.BulkOutcome, error) {
+	store.principal = principal
+	store.bulkIDs = ids
+	return store.bulkOutcomes, store.bulkErr
+}
+
+func (store *fakeStore) BulkClose(_ context.Context, principal auth.Principal, ids []int64, _ bool) ([]alerts.BulkOutcome, error) {
+	store.principal = principal
+	store.bulkIDs = ids
+	return store.bulkOutcomes, store.bulkErr
+}
+
+func (store *fakeStore) BulkNote(_ context.Context, principal auth.Principal, ids []int64, _ string) ([]alerts.BulkOutcome, error) {
+	store.principal = principal
+	store.bulkIDs = ids
+	return store.bulkOutcomes, store.bulkErr
 }
 
 func (store *fakeStore) CloseAlert(_ context.Context, principal auth.Principal, _ int64, closed bool) (alerts.Detail, error) {
@@ -1007,5 +1034,78 @@ func TestStreamAlertsStaysQuietWhenNothingWasMissed(t *testing.T) {
 
 	if strings.Contains(response.Body.String(), "stream.gap") {
 		t.Fatalf("a caught-up client was told to re-snapshot: %q", response.Body.String())
+	}
+}
+
+// A selection where one alert is out of scope must not cost the operator the
+// rest, and the reply says so per alert rather than as one verdict.
+func TestBulkCloseReportsEachAlert(t *testing.T) {
+	store := &fakeStore{bulkOutcomes: []alerts.BulkOutcome{
+		{ID: 1, Status: alerts.BulkApplied},
+		{ID: 2, Status: alerts.BulkUnchanged},
+		{ID: 3, Status: alerts.BulkNotFound},
+	}}
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{
+		Subject: "operator-1", Roles: []string{"operator"},
+	}}, nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/alerts/bulk/close",
+		strings.NewReader(`{"ids":["1","2","3"],"closed":true}`))
+	request.Header.Set("Authorization", "Bearer session-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	// 207 rather than 200: something in the selection did not apply, and a
+	// caller should be able to tell without walking the list.
+	if response.Code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, want := range []string{`"applied":1`, `"unchanged":1`, `"notFound":1`, `"status":"notFound"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body = %s, want %s", body, want)
+		}
+	}
+	if len(store.bulkIDs) != 3 {
+		t.Errorf("ids reaching the store = %v, want three", store.bulkIDs)
+	}
+}
+
+// Every alert applying is an ordinary success, not a partial one.
+func TestBulkAcknowledgeAllAppliedIsOK(t *testing.T) {
+	store := &fakeStore{bulkOutcomes: []alerts.BulkOutcome{
+		{ID: 1, Status: alerts.BulkApplied},
+		{ID: 2, Status: alerts.BulkApplied},
+	}}
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{
+		Subject: "operator-1", Roles: []string{"operator"},
+	}}, nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/alerts/bulk/acknowledge",
+		strings.NewReader(`{"ids":["1","2"],"acknowledged":true}`))
+	request.Header.Set("Authorization", "Bearer session-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBulkRejectsBadSelections(t *testing.T) {
+	handler := New(config.Config{AuthMode: "oidc"}, &fakeStore{}, fakeAuthenticator{principal: auth.Principal{
+		Subject: "operator-1", Roles: []string{"operator"},
+	}}, nil)
+	for _, body := range []string{
+		`{"ids":[],"closed":true}`,
+		`{"ids":["nope"],"closed":true}`,
+		`{"ids":["0"],"closed":true}`,
+		`{"ids":["1"]}`,
+		`{"ids":["1"],"closed":true,"extra":1}`,
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/alerts/bulk/close", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer session-token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("body %s -> status %d, want 400", body, response.Code)
+		}
 	}
 }

@@ -15,6 +15,26 @@ var ErrNotFound = errors.New("alert not found")
 // opposed to one that fails because of what the caller may see.
 var ErrInvalid = errors.New("invalid request")
 
+// What happened to one alert in a bulk request.
+const (
+	// BulkApplied means the alert changed.
+	BulkApplied = "applied"
+	// BulkUnchanged means it already held the requested state. Reported apart
+	// from applied so an operator can tell "I changed forty" from "I changed
+	// two and the rest were already done".
+	BulkUnchanged = "unchanged"
+	// BulkNotFound means no alert with that id is visible to this operator.
+	// Deliberately indistinguishable from one that does not exist, so a bulk
+	// reply cannot be read to discover what lies outside a scope.
+	BulkNotFound = "notFound"
+)
+
+// BulkOutcome reports one alert's fate in a bulk request.
+type BulkOutcome struct {
+	ID     int64  `json:"id"`
+	Status string `json:"status"`
+}
+
 // Source status values. Firing and resolved are reported by the source itself;
 // expired is the console's own conclusion after the source went quiet for longer
 // than its configured window, which is not the same claim as resolved.

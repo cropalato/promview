@@ -31,6 +31,7 @@ same UI. Alertmanager keeps routing, grouping, inhibition and notification.
 - [Assignment](#assignment)
 - [Notes](#notes)
 - [Close](#close)
+- [Bulk Actions](#bulk-actions)
 - [Alert Expiry](#alert-expiry)
 - [Alertmanager Reconciliation](#alertmanager-reconciliation)
 - [Silences](#silences)
@@ -296,6 +297,47 @@ deliberately does not: those arrive every `repeat_interval` and carry no new
 information, and reopening on one would mean a close never outlived the next
 notification.
 
+## Bulk Actions
+
+One operator decision applied to a selection. Every single-alert action has a
+bulk form taking the same body plus the ids:
+
+```sh
+curl -X POST 'http://localhost:8080/api/v1/alerts/bulk/close' \
+  -H 'Content-Type: application/json' \
+  -d '{"ids":["42","43","44"],"closed":true}'
+```
+
+| Endpoint | Body |
+| --- | --- |
+| `POST /api/v1/alerts/bulk/acknowledge` | `{"ids":[…],"acknowledged":true}` |
+| `PUT /api/v1/alerts/bulk/assignee` | `{"ids":[…],"assignee":"platform-rota"}` |
+| `POST /api/v1/alerts/bulk/close` | `{"ids":[…],"closed":true}` |
+| `POST /api/v1/alerts/bulk/notes` | `{"ids":[…],"body":"same root cause"}` |
+
+**Selection is by explicit id, never by filter.** "Close everything matching this
+query" reads the same whether it matches four alerts or four thousand, and the
+operator cannot see which until it has happened. At most 500 ids per request.
+
+**Every alert is judged on its own.** One outside the operator's scope does not
+fail the rest — it comes back as `notFound`, the same answer the single-alert
+endpoint gives, so a bulk reply cannot be read to discover what exists outside a
+scope. The response reports each:
+
+```json
+{"applied":1,"unchanged":1,"notFound":1,
+ "results":[{"id":42,"status":"applied"},
+            {"id":43,"status":"unchanged"},
+            {"id":44,"status":"notFound"}]}
+```
+
+`unchanged` is reported apart from `applied` so an operator can tell "I changed
+forty" from "I changed two and the rest were already done". The status is `200`
+when everything was visible and `207` when anything came back `notFound`.
+
+The whole request is one transaction: a bulk action is one decision, and half of
+it surviving a failure is a state nobody asked for.
+
 ## Alert Expiry
 
 Alertmanager suppresses resolved notifications for silenced alerts, so an alert that
@@ -552,7 +594,7 @@ Alpha, and honest about it. What works today:
 | Assign | Working |
 | Notes | Working |
 | Close (local) | Working |
-| Bulk actions | Planned |
+| Bulk actions | Working |
 | Authorization administration API | Planned (CLI only) |
 | Stream event retention | Planned |
 
