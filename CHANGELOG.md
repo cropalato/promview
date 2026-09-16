@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.40] - 2026-09-16
+
 ### Added
 
 - **alerts:** every operator action now has a bulk form — `POST /api/v1/alerts/bulk/acknowledge`, `PUT /api/v1/alerts/bulk/assignee`, `POST /api/v1/alerts/bulk/close` and `POST /api/v1/alerts/bulk/notes` — each taking the same body as its single-alert counterpart plus the ids to apply it to. The alternative is an operator clicking through forty rows after one incident, which is how alerts stop being acknowledged at all. Selection is by explicit id and never by filter: "close everything matching this query" reads the same whether it matches four alerts or four thousand, and the operator cannot see which until it has happened. At most 500 ids, the same ceiling as a page, because a selection is made from one. Every alert is judged on its own and reported on its own: one outside the operator's scope does not fail the rest, and comes back as `notFound` rather than forbidden — the same answer the single-alert endpoint gives, so a bulk reply cannot be read to discover what exists outside a scope. `unchanged` is reported apart from `applied` so an operator can tell "I changed forty" from "I changed two and the rest were already done", and the status is 207 rather than 200 when anything came back `notFound`, matching how a partly applied group silence answers. The request is one transaction, since a bulk action is one decision and half of it surviving a failure is a state nobody asked for. Validation is shared with the single-alert paths rather than reimplemented, so a note written to forty alerts is held to exactly the rules one written to a single alert is.

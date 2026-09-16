@@ -199,7 +199,7 @@ serialized pre-install and pre-upgrade migration hook:
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
   --create-namespace \
-  --version 0.1.0-alpha.39
+  --version 0.1.0-alpha.40
 ```
 
 The chart version is the application version. Create the PostgreSQL Secret

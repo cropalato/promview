@@ -139,7 +139,7 @@ Promview ships a Helm chart for an external PostgreSQL database:
 ```sh
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.39
+  --version 0.1.0-alpha.40
 ```
 
 Create the required database Secret before installation. The pinned chart version is
