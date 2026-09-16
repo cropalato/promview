@@ -147,6 +147,7 @@ describe('fetchAlerts', () => {
             severity: 'critical',
           },
           suppressed: false,
+          closed: false,
           silencedBy: [],
           lastSeen: '2026-08-14T11:00:00Z',
         },
@@ -294,5 +295,21 @@ describe('silenced alerts in the query', () => {
     // agree with what is on screen, and only the server can make them agree.
     expect(buildAlertsUrl({ suppressed: false })).toContain('suppressed=false');
     expect(buildAlertsUrl({ suppressed: true })).toContain('suppressed=true');
+  });
+});
+
+describe('closed filter', () => {
+  it('omits the parameter by default, so the server applies its own', () => {
+    expect(buildAlertsUrl({ limit: 50 })).toBe('/api/v1/alerts?limit=50');
+  });
+
+  it('asks for closed alerts, which is the only way back to one', () => {
+    expect(buildAlertsUrl({ limit: 50, closed: true })).toBe('/api/v1/alerts?limit=50&closed=true');
+  });
+
+  it('can state the open-only default explicitly', () => {
+    expect(buildAlertsUrl({ limit: 50, closed: false })).toBe(
+      '/api/v1/alerts?limit=50&closed=false',
+    );
   });
 });

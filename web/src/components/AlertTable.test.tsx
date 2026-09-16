@@ -17,6 +17,7 @@ const firingAlert: AlertSummary = {
   notes: 2,
   labels: { alertname: 'HighErrorRate', team: 'core', prometheus_cluster: 'yul' },
   suppressed: false,
+  closed: false,
   silencedBy: [],
   lastSeen: new Date().toISOString(),
 };
