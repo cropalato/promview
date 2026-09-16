@@ -54,7 +54,11 @@ type Alert struct {
 	AssignedTo string
 	AssignedAt *time.Time
 	AssignedBy string
-	RawData    json.RawMessage
+	// NoteCount is how many notes the alert carries. On the summary rather than
+	// the notes themselves: the list shows that there is something to read, and
+	// opening the alert is what reads it.
+	NoteCount int
+	RawData   json.RawMessage
 }
 
 type Cursor struct {
@@ -242,4 +246,19 @@ type Detail struct {
 	// alert is suppressed by a silence somebody made elsewhere, or by an
 	// inhibition, and the console says so rather than inventing an author.
 	Silences []SilenceRecord
+	// Notes are what operators wrote about this alert, oldest first, across
+	// every occurrence. Each carries the occurrence it was written against, so
+	// a note about a previous incident does not read as though it describes
+	// this one.
+	Notes []Note
+}
+
+// Note is one operator's written judgement about an alert. Append-only: what
+// somebody relied on at the time is worth less if it can be rewritten after.
+type Note struct {
+	ID         int64     `json:"id"`
+	Occurrence int       `json:"occurrence"`
+	Author     string    `json:"author"`
+	Body       string    `json:"body"`
+	CreatedAt  time.Time `json:"createdAt"`
 }

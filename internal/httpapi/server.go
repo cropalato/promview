@@ -36,6 +36,7 @@ type Store interface {
 	GetAlertDetail(context.Context, auth.Principal, int64) (alerts.Detail, error)
 	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
 	AssignAlert(context.Context, auth.Principal, int64, string) (alerts.Detail, error)
+	AddNote(context.Context, auth.Principal, int64, string) (alerts.Detail, error)
 	SilenceScopeForAlert(context.Context, auth.Principal, int64) (alerts.SilenceScope, error)
 	SilenceScopeForGroup(context.Context, auth.Principal, []string, map[string]string) (alerts.SilenceScope, error)
 	SilenceRemovalScope(context.Context, auth.Principal, int64, string) (alerts.SilenceTarget, error)
@@ -112,6 +113,7 @@ func NewObserved(
 	mux.Handle("GET /api/v1/alerts/{id}", api.requireAuthentication(http.HandlerFunc(api.getAlert)))
 	mux.Handle("GET /api/v1/alerts/{id}/events", api.requireAuthentication(http.HandlerFunc(api.getAlertEvents)))
 	mux.Handle("POST /api/v1/alerts/{id}/acknowledge", api.requireAuthentication(http.HandlerFunc(api.acknowledgeAlert)))
+	mux.Handle("POST /api/v1/alerts/{id}/notes", api.requireAuthentication(http.HandlerFunc(api.addAlertNote)))
 	mux.Handle("PUT /api/v1/alerts/{id}/assignee", api.requireAuthentication(http.HandlerFunc(api.assignAlert)))
 	mux.Handle("POST /api/v1/alerts/{id}/silence", api.requireAuthentication(http.HandlerFunc(api.silenceAlert)))
 	mux.Handle("DELETE /api/v1/alerts/{id}/silences/{silenceId}", api.requireAuthentication(http.HandlerFunc(api.removeAlertSilence)))
@@ -243,6 +245,7 @@ func (api *API) getAlert(w http.ResponseWriter, r *http.Request) {
 		"alert":    newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
 		"history":  detail.History,
 		"silences": silenceRecordsResponse(detail.Silences),
+		"notes":    detail.Notes,
 	})
 }
 
@@ -254,6 +257,58 @@ func silenceRecordsResponse(records []alerts.SilenceRecord) []alerts.SilenceReco
 		return []alerts.SilenceRecord{}
 	}
 	return records
+}
+
+// addAlertNote appends one operator note. POST rather than PUT because each
+// call adds a note rather than restating the set: notes are append-only, and
+// there is deliberately no endpoint that edits or removes one.
+func (api *API) addAlertNote(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeServerError(w, r, "principal is unavailable", nil)
+		return
+	}
+	if !principal.CanOperate() {
+		writeError(w, http.StatusForbidden, "operator access required")
+		return
+	}
+	if !validMutationOrigin(r) {
+		writeError(w, http.StatusForbidden, "invalid request origin")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "alert id is invalid")
+		return
+	}
+	var body struct {
+		Body *string `json:"body"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Body == nil || decoder.Decode(&struct{}{}) != io.EOF {
+		writeError(w, http.StatusBadRequest, "body must be a string")
+		return
+	}
+	detail, err := api.store.AddNote(r.Context(), principal, id, *body.Body)
+	if errors.Is(err, alerts.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "alert not found")
+		return
+	}
+	if errors.Is(err, alerts.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeServerError(w, r, "add alert note", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"alert":    newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
+		"history":  detail.History,
+		"silences": silenceRecordsResponse(detail.Silences),
+		"notes":    detail.Notes,
+	})
 }
 
 // assignAlert sets or clears who owns an alert. PUT rather than POST because
@@ -304,6 +359,7 @@ func (api *API) assignAlert(w http.ResponseWriter, r *http.Request) {
 		"alert":    newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
 		"history":  detail.History,
 		"silences": silenceRecordsResponse(detail.Silences),
+		"notes":    detail.Notes,
 	})
 }
 
@@ -348,6 +404,7 @@ func (api *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
 		"alert":    newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
 		"history":  detail.History,
 		"silences": silenceRecordsResponse(detail.Silences),
+		"notes":    detail.Notes,
 	})
 }
 
@@ -732,6 +789,9 @@ type alertResponse struct {
 	// Assignee is on the summary because "what is on my plate" is a question
 	// asked of the list, not of one alert at a time.
 	Assignee string `json:"assignee"`
+	// Notes is a count, not the notes. The list says there is something to
+	// read; opening the alert is what reads it.
+	Notes int `json:"notes"`
 }
 
 type alertDetailResponse struct {
@@ -801,6 +861,7 @@ func newAlertResponse(alert alerts.Alert) alertResponse {
 		Suppressed:   alert.Suppressed,
 		SilencedBy:   silencedBy,
 		Assignee:     alert.AssignedTo,
+		Notes:        alert.NoteCount,
 	}
 }
 
