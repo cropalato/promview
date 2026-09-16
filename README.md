@@ -210,6 +210,11 @@ promview source set --slug primary --name Primary --token "$TOKEN" --stale-after
 An individual alert can shorten its own window with a numeric `timeout` label (in
 seconds) on the rule, matching how Alerta reads the same label.
 
+The window is measured from the last delivery *or* the last time reconciliation
+confirmed the alert on its Alertmanager, whichever is later. That is what stops a
+silenced alert — one the source deliberately sends no notifications for — being
+retired while it is demonstrably still firing.
+
 ## Alertmanager Reconciliation
 
 Expiry infers an ending from silence; reconciliation confirms one. Given a source's
@@ -231,6 +236,21 @@ export PROMVIEW_RECONCILE_TIMEOUT=10s
 
 The API is read-only and used unauthenticated, so a source behind authentication is
 not supported yet. A source without a URL is left to expiry alone.
+
+Reconciliation also corrects expiry. It reads the source's `expired` alerts
+alongside the firing ones and returns to firing any the Alertmanager still holds,
+since expiry only ever inferred that ending and the source is now contradicting
+it. The alert keeps its occurrence and its acknowledgement: a new occurrence is
+what follows a *resolved* alert, where the source said it ended, and nothing
+ended here. A `resolved` alert is never revived, for the same reason.
+
+So that this does not become a cycle — the silence that caused the wrong expiry
+is usually still in force — reconciliation records when it last confirmed each
+alert, and expiry measures staleness from that as well as from the last delivery.
+An alert the source still holds is not retired at all. A source that cannot be
+reached stops providing that evidence and goes stale exactly as before, which is
+what keeps expiry a working backstop rather than something reconciliation
+silently disables.
 
 Two rules keep a healthy Alertmanager from emptying the console. An alert must be
 absent from two consecutive readings before it is resolved, so a dropped request
@@ -421,10 +441,12 @@ Alpha, and honest about it. What works today:
 | Authorization administration API | Planned (CLI only) |
 | Stream event retention | Planned |
 
-Known gap: reconciliation does not revive an `expired` alert the Alertmanager
-still holds, so a deployment with frequent silences should enable reconciliation
-on every source or lengthen the expiry window. It is written up in
-[`docs/project-plan.md`](docs/project-plan.md).
+A source being reconciled no longer has its alerts retired by expiry behind its
+back: reconciliation records that the Alertmanager still holds an alert, and
+expiry measures staleness from that as well as from the last delivery. An alert
+expiry retired before this is returned to firing on the next pass, keeping its
+occurrence and its acknowledgement. Expiry is unchanged where it is still the
+only signal — a source with no Alertmanager URL, or one that cannot be reached.
 
 Issues and discussion are welcome — this is a young project and real deployment
 feedback is the most useful thing it can get.

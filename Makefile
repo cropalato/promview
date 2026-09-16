@@ -20,7 +20,7 @@ test-race:
 	go test -race ./cmd/... ./internal/...
 
 test-postgres:
-	go test ./internal/postgres -run 'TestPendingMigrations|TestStoreIngestAndList|TestStoreExpireStaleAlerts|TestStoreGroupAlerts|TestStorePreferences|TestStoreReconcileSource|TestStoreUpdateSource|TestStoreSilenceScope|TestStoreSilenceVisibility|TestStoreSyncSilences|TestStoreDesktopAuthCodes'
+	go test ./internal/postgres -run 'TestPendingMigrations|TestStoreIngestAndList|TestStoreExpireStaleAlerts|TestStoreGroupAlerts|TestStorePreferences|TestStoreReconcileSource|TestStoreReviveExpiredAlerts|TestStoreUpdateSource|TestStoreSilenceScope|TestStoreSilenceVisibility|TestStoreSyncSilences|TestStoreDesktopAuthCodes'
 
 build:
 	mkdir -p build

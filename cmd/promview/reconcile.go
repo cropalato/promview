@@ -176,12 +176,13 @@ func (r *reconciler) reconcileSource(ctx context.Context, slug, baseURL string, 
 	for fingerprint := range missing {
 		delete(counters, fingerprint)
 	}
-	if result.Resolved > 0 || result.Suppressed > 0 || result.Released > 0 {
+	if result.Resolved > 0 || result.Suppressed > 0 || result.Released > 0 || result.Revived > 0 {
 		slog.Info("reconciled alerts with alertmanager",
 			"source", slug,
 			"resolved", result.Resolved,
 			"suppressed", result.Suppressed,
 			"released", result.Released,
+			"revived", result.Revived,
 		)
 	}
 }

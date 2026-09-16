@@ -37,6 +37,18 @@ const expiryWindow = `COALESCE(
 			$1::interval
 		)`
 
+// lastEvidence is when promview last had any reason to believe the alert still
+// exists: a webhook delivery, or a reconciliation pass that found it on the
+// source Alertmanager. Expiry measures staleness from this rather than from
+// last_seen alone, because a silenced alert produces no notifications at all -
+// which is exactly the case where expiry used to retire an alert that was
+// demonstrably still firing, and nothing brought it back.
+//
+// An alert whose source cannot be reached has no reconciled_at moving, so it
+// goes stale on last_seen as it always did. Reconciliation narrows what expiry
+// catches; it does not switch expiry off.
+const lastEvidence = `GREATEST(alert.last_seen, COALESCE(alert.reconciled_at, alert.last_seen))`
+
 // expiryBatchSize bounds one sweep transaction so a large backlog is worked
 // through in steady chunks instead of one long-running lock-heavy statement.
 const expiryBatchSize = 500
@@ -76,7 +88,7 @@ func (store *Store) expireStaleBatch(ctx context.Context, defaultStaleAfter time
 			JOIN alert_sources AS source ON source.slug = alert.source_slug
 			WHERE alert.source_status = 'firing'
 			  AND `+expiryWindow+` > interval '0'
-			  AND alert.last_seen < $2::timestamptz - `+expiryWindow+`
+			  AND `+lastEvidence+` < $2::timestamptz - `+expiryWindow+`
 			ORDER BY alert.last_seen
 			LIMIT $3
 			FOR UPDATE OF alert SKIP LOCKED
