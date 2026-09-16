@@ -58,7 +58,13 @@ type Alert struct {
 	// the notes themselves: the list shows that there is something to read, and
 	// opening the alert is what reads it.
 	NoteCount int
-	RawData   json.RawMessage
+	// Closed is an operator's judgement that the alert is handled. It is
+	// separate from SourceStatus because an alert can be both still firing and
+	// already dealt with, and one field cannot say both.
+	Closed   bool
+	ClosedAt *time.Time
+	ClosedBy string
+	RawData  json.RawMessage
 }
 
 type Cursor struct {
@@ -88,9 +94,13 @@ type Query struct {
 	// default on purpose: hiding them by default is how an alert disappears
 	// without anybody deciding it should.
 	Suppressed *bool
-	Matches    []LabelMatcher
-	Sort       string
-	Order      string
+	// Closed filters on the operator's own judgement. Nil means the default,
+	// which excludes closed alerts: closing an alert that stayed in the list
+	// would be an action with no visible effect.
+	Closed  *bool
+	Matches []LabelMatcher
+	Sort    string
+	Order   string
 	// GroupBy collapses the result into one row per distinct combination of
 	// these label keys, plus the special source key. Empty lists alerts individually.
 	GroupBy     []string

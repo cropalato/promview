@@ -584,6 +584,22 @@ func (store *Store) Ingest(ctx context.Context, alerts []alertmanager.IncomingAl
 					return fmt.Errorf("compare alert %s/%s: %w", alert.SourceSlug, alert.Fingerprint, err)
 				}
 				if changed {
+					// A close is the operator's judgement about the alert as it
+					// stood. A delivery that materially changes it - new labels,
+					// a new annotation, a status transition - is a different
+					// alert than the one they closed, so it comes back.
+					//
+					// An identical repeat deliberately does not reopen. Those
+					// arrive every repeat_interval and carry no new information,
+					// and reopening on one would mean a close never outlived the
+					// next notification.
+					if alert.Status == "firing" {
+						if _, err := tx.Exec(ctx,
+							"UPDATE alerts SET closed = false, closed_at = NULL, closed_by = '' WHERE id = $1 AND closed", id,
+						); err != nil {
+							return fmt.Errorf("reopen closed alert %s/%s: %w", alert.SourceSlug, alert.Fingerprint, err)
+						}
+					}
 					streamType := "alert.updated"
 					if historyType == "alert.resolved" {
 						streamType = "alert.resolved"
@@ -645,7 +661,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 	listSQL := `
 		SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen, alert.repeat_count,
-		       alert.occurrence, alert.acknowledged, alert.suppressed, alert.silenced_by, alert.acknowledged_at, alert.acknowledged_by, alert.assigned_to, alert.assigned_at, alert.assigned_by, (SELECT count(*) FROM alert_notes WHERE alert_notes.alert_id = alert.id) AS note_count, alert.raw_data
+		       alert.occurrence, alert.acknowledged, alert.suppressed, alert.silenced_by, alert.acknowledged_at, alert.acknowledged_by, alert.assigned_to, alert.assigned_at, alert.assigned_by, (SELECT count(*) FROM alert_notes WHERE alert_notes.alert_id = alert.id) AS note_count, alert.closed, alert.closed_at, alert.closed_by, alert.raw_data
 		FROM alerts AS alert` + listWhere + fmt.Sprintf(`
 		ORDER BY `+sort.expression+" "+strings.ToUpper(query.Order)+`, alert.id `+strings.ToUpper(query.Order)+`
 		LIMIT $%d`, len(listArgs))
@@ -665,7 +681,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 			&item.ID, &item.SourceSlug, &item.Fingerprint, &item.SourceStatus,
 			&labelsJSON, &annotationsJSON, &item.StartsAt, &item.EndsAt,
 			&item.GeneratorURL, &item.ExternalURL, &item.FirstSeen, &item.LastSeen, &item.RepeatCount,
-			&item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.SilencedBy, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.AssignedTo, &item.AssignedAt, &item.AssignedBy, &item.NoteCount, &item.RawData,
+			&item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.SilencedBy, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.AssignedTo, &item.AssignedAt, &item.AssignedBy, &item.NoteCount, &item.Closed, &item.ClosedAt, &item.ClosedBy, &item.RawData,
 		); err != nil {
 			return alerts.ListResult{}, fmt.Errorf("scan alert: %w", err)
 		}
@@ -712,14 +728,14 @@ func (store *Store) GetAlertDetail(ctx context.Context, principal auth.Principal
 	err := store.pool.QueryRow(ctx, `
 		SELECT alert.id, alert.source_slug, alert.fingerprint, alert.source_status, alert.labels, alert.annotations,
 		       alert.starts_at, alert.ends_at, alert.generator_url, alert.external_url, alert.first_seen, alert.last_seen,
-		       alert.repeat_count, alert.occurrence, alert.acknowledged, alert.suppressed, alert.silenced_by, alert.acknowledged_at, alert.acknowledged_by, alert.assigned_to, alert.assigned_at, alert.assigned_by, (SELECT count(*) FROM alert_notes WHERE alert_notes.alert_id = alert.id) AS note_count, alert.raw_data
+		       alert.repeat_count, alert.occurrence, alert.acknowledged, alert.suppressed, alert.silenced_by, alert.acknowledged_at, alert.acknowledged_by, alert.assigned_to, alert.assigned_at, alert.assigned_by, (SELECT count(*) FROM alert_notes WHERE alert_notes.alert_id = alert.id) AS note_count, alert.closed, alert.closed_at, alert.closed_by, alert.raw_data
 		FROM alerts AS alert
 		WHERE alert.id = $1 AND (`+access+`)
 	`, args...).Scan(
 		&item.ID, &item.SourceSlug, &item.Fingerprint, &item.SourceStatus,
 		&labelsJSON, &annotationsJSON, &item.StartsAt, &item.EndsAt,
 		&item.GeneratorURL, &item.ExternalURL, &item.FirstSeen, &item.LastSeen,
-		&item.RepeatCount, &item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.SilencedBy, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.AssignedTo, &item.AssignedAt, &item.AssignedBy, &item.NoteCount, &item.RawData,
+		&item.RepeatCount, &item.Occurrence, &item.Acknowledged, &item.Suppressed, &item.SilencedBy, &item.AcknowledgedAt, &item.AcknowledgedBy, &item.AssignedTo, &item.AssignedAt, &item.AssignedBy, &item.NoteCount, &item.Closed, &item.ClosedAt, &item.ClosedBy, &item.RawData,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return alerts.Detail{}, alerts.ErrNotFound
@@ -1014,6 +1030,14 @@ func alertFilters(principal auth.Principal, query alerts.Query, alias string) (s
 	}
 	if query.Suppressed != nil {
 		add(alias+".suppressed = $%d", *query.Suppressed)
+	}
+	// Closed alerts are out of the list unless asked for. Nil is the default
+	// rather than "show everything" because an alert that stayed in the list
+	// after being closed would make closing an action with no visible effect.
+	if query.Closed == nil {
+		conditions = append(conditions, "NOT "+alias+".closed")
+	} else {
+		add(alias+".closed = $%d", *query.Closed)
 	}
 	for _, matcher := range query.Matches {
 		args = append(args, matcher.Name, matcher.Value)

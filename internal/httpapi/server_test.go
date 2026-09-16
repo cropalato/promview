@@ -38,6 +38,7 @@ type fakeStore struct {
 	retainedFrom int64
 	assignee     string
 	noteBody     string
+	closed       bool
 	cancel       context.CancelFunc
 	pingErr      error
 	sourceToken  string
@@ -130,6 +131,12 @@ func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal
 
 func (store *fakeStore) GetAlertDetail(_ context.Context, principal auth.Principal, _ int64) (alerts.Detail, error) {
 	store.principal = principal
+	return store.detail, store.detailErr
+}
+
+func (store *fakeStore) CloseAlert(_ context.Context, principal auth.Principal, _ int64, closed bool) (alerts.Detail, error) {
+	store.principal = principal
+	store.closed = closed
 	return store.detail, store.detailErr
 }
 

@@ -37,6 +37,7 @@ type Store interface {
 	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
 	AssignAlert(context.Context, auth.Principal, int64, string) (alerts.Detail, error)
 	AddNote(context.Context, auth.Principal, int64, string) (alerts.Detail, error)
+	CloseAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
 	SilenceScopeForAlert(context.Context, auth.Principal, int64) (alerts.SilenceScope, error)
 	SilenceScopeForGroup(context.Context, auth.Principal, []string, map[string]string) (alerts.SilenceScope, error)
 	SilenceRemovalScope(context.Context, auth.Principal, int64, string) (alerts.SilenceTarget, error)
@@ -113,6 +114,7 @@ func NewObserved(
 	mux.Handle("GET /api/v1/alerts/{id}", api.requireAuthentication(http.HandlerFunc(api.getAlert)))
 	mux.Handle("GET /api/v1/alerts/{id}/events", api.requireAuthentication(http.HandlerFunc(api.getAlertEvents)))
 	mux.Handle("POST /api/v1/alerts/{id}/acknowledge", api.requireAuthentication(http.HandlerFunc(api.acknowledgeAlert)))
+	mux.Handle("POST /api/v1/alerts/{id}/close", api.requireAuthentication(http.HandlerFunc(api.closeAlert)))
 	mux.Handle("POST /api/v1/alerts/{id}/notes", api.requireAuthentication(http.HandlerFunc(api.addAlertNote)))
 	mux.Handle("PUT /api/v1/alerts/{id}/assignee", api.requireAuthentication(http.HandlerFunc(api.assignAlert)))
 	mux.Handle("POST /api/v1/alerts/{id}/silence", api.requireAuthentication(http.HandlerFunc(api.silenceAlert)))
@@ -257,6 +259,53 @@ func silenceRecordsResponse(records []alerts.SilenceRecord) []alerts.SilenceReco
 		return []alerts.SilenceRecord{}
 	}
 	return records
+}
+
+// closeAlert files an alert as handled, or reopens one. The body states the
+// desired state rather than the verb, so reopening is the same endpoint.
+func (api *API) closeAlert(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeServerError(w, r, "principal is unavailable", nil)
+		return
+	}
+	if !principal.CanOperate() {
+		writeError(w, http.StatusForbidden, "operator access required")
+		return
+	}
+	if !validMutationOrigin(r) {
+		writeError(w, http.StatusForbidden, "invalid request origin")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "alert id is invalid")
+		return
+	}
+	var body struct {
+		Closed *bool `json:"closed"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Closed == nil || decoder.Decode(&struct{}{}) != io.EOF {
+		writeError(w, http.StatusBadRequest, "closed must be a boolean")
+		return
+	}
+	detail, err := api.store.CloseAlert(r.Context(), principal, id, *body.Closed)
+	if errors.Is(err, alerts.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "alert not found")
+		return
+	}
+	if err != nil {
+		writeServerError(w, r, "close alert", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"alert":    newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
+		"history":  detail.History,
+		"silences": silenceRecordsResponse(detail.Silences),
+		"notes":    detail.Notes,
+	})
 }
 
 // addAlertNote appends one operator note. POST rather than PUT because each
@@ -802,6 +851,9 @@ type alertDetailResponse struct {
 	AcknowledgedBy string          `json:"acknowledgedBy"`
 	AssignedAt     *time.Time      `json:"assignedAt"`
 	AssignedBy     string          `json:"assignedBy"`
+	Closed         bool            `json:"closed"`
+	ClosedAt       *time.Time      `json:"closedAt"`
+	ClosedBy       string          `json:"closedBy"`
 	Actions        alertActions    `json:"actions"`
 	RawData        json.RawMessage `json:"rawData"`
 }
@@ -817,6 +869,7 @@ type alertActions struct {
 	// console can offer the controls it is actually allowed to use rather than
 	// inferring one right from another.
 	CanAssign bool `json:"canAssign"`
+	CanClose  bool `json:"canClose"`
 }
 
 // alertGroupResponse is one collapsed row. SampleAlertID is a string like every
@@ -874,7 +927,10 @@ func newAlertDetailResponse(alert alerts.Alert, canOperate bool, canSilence bool
 		AcknowledgedBy: alert.AcknowledgedBy,
 		AssignedAt:     alert.AssignedAt,
 		AssignedBy:     alert.AssignedBy,
-		Actions:        alertActions{CanAcknowledge: canOperate, CanSilence: canOperate && canSilence, CanAssign: canOperate},
+		Closed:         alert.Closed,
+		ClosedAt:       alert.ClosedAt,
+		ClosedBy:       alert.ClosedBy,
+		Actions:        alertActions{CanAcknowledge: canOperate, CanSilence: canOperate && canSilence, CanAssign: canOperate, CanClose: canOperate},
 		RawData:        alert.RawData,
 	}
 }
@@ -910,6 +966,18 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		return alerts.Query{}, errors.New("suppressed must be true or false")
 	}
 
+	// Absent means the default, which is open alerts only. `closed=true` is how
+	// somebody goes looking for what has already been filed.
+	var closed *bool
+	switch raw := values.Get("closed"); raw {
+	case "":
+	case "true", "false":
+		value := raw == "true"
+		closed = &value
+	default:
+		return alerts.Query{}, errors.New("closed must be true or false")
+	}
+
 	query := alerts.Query{
 		Limit:      limit,
 		Source:     strings.TrimSpace(values.Get("source")),
@@ -917,6 +985,7 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		Severity:   strings.TrimSpace(values.Get("severity")),
 		Team:       strings.TrimSpace(values.Get("team")),
 		Suppressed: suppressed,
+		Closed:     closed,
 		Sort:       values.Get("sort"),
 		Order:      values.Get("order"),
 	}
