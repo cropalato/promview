@@ -1,0 +1,47 @@
+name: Docker Hub description
+
+# The Hub listing is the first thing anyone pulling the image reads, and it is
+# the one artifact nothing in this repository used to own. It drifted: it
+# advertised a username placeholder, a version 33 releases old, and arm64 images
+# that have not been built since alpha.12. Sourcing it from a file in the tree
+# means a wrong claim there is a diff like any other.
+#
+# Kept out of release.yml deliberately. A documentation fix should not wait for
+# the next tag, and a failure to update prose should not paint a release red.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/dockerhub.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  description:
+    runs-on: ubuntu-latest
+    env:
+      # Updating the description is not something a Docker Hub personal access
+      # token can do - the API endpoint behind it accepts account credentials
+      # only - so this cannot reuse DOCKERHUB_TOKEN, which the release job uses
+      # to push images. Until DOCKERHUB_PASSWORD exists the job is skipped
+      # rather than failed: an unset secret is a repository that has not opted
+      # in, not a broken workflow.
+      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: env.DOCKERHUB_PASSWORD == ''
+        run: echo "DOCKERHUB_PASSWORD is not set; skipping the description update." >> "${GITHUB_STEP_SUMMARY}"
+
+      - if: env.DOCKERHUB_PASSWORD != ''
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          repository: ${{ secrets.DOCKERHUB_USERNAME }}/promview
+          readme-filepath: docs/dockerhub.md
+          short-description: "Operational console for Prometheus Alertmanager alerts."
