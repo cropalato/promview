@@ -4,8 +4,8 @@ go 1.25.0
 
 require (
 	github.com/coreos/go-oidc/v3 v3.15.0
-	github.com/go-jose/go-jose/v4 v4.0.5
-	github.com/jackc/pgx/v5 v5.7.6
+	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/oauth2 v0.36.0
 )
@@ -21,7 +21,6 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
-	golang.org/x/crypto v0.37.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
