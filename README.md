@@ -13,6 +13,8 @@ server-sent events, and lets an on-call operator filter, group, acknowledge and
 silence what is firing — in a browser, or in a desktop tray client sharing the
 same UI. Alertmanager keeps routing, grouping, inhibition and notification.
 
+![The Promview console showing fifteen firing alerts from two Alertmanager sources, sorted by severity with four criticals at the top, above columns for state, summary, team, instance, age and source](docs/images/console.png)
+
 > [!WARNING]
 > Promview is **alpha**. The API, the schema and the configuration surface may
 > change between releases. Pin an exact version; do not track a moving tag in
