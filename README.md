@@ -30,6 +30,7 @@ same UI. Alertmanager keeps routing, grouping, inhibition and notification.
 - [Acknowledgement](#acknowledgement)
 - [Assignment](#assignment)
 - [Notes](#notes)
+- [Close](#close)
 - [Alert Expiry](#alert-expiry)
 - [Alertmanager Reconciliation](#alertmanager-reconciliation)
 - [Silences](#silences)
@@ -264,6 +265,36 @@ assignment and acknowledgement do not.
 The alert list carries a note *count* rather than the notes, because the list's
 job is to show there is something to read and opening the alert is what reads
 it. The full notes are on the detail response.
+
+## Close
+
+An operator can file an alert as handled without touching Alertmanager:
+
+```sh
+curl -X POST 'http://localhost:8080/api/v1/alerts/42/close' \
+  -H 'Content-Type: application/json' \
+  -d '{"closed":true}'
+```
+
+Closing is Promview-local. The source keeps reporting the alert exactly as
+before and its status stays `firing`; `closed` is a separate flag, because an
+alert can honestly be both still firing and already dealt with, and one field
+cannot say both. Closing is not silencing: nothing is written to Alertmanager
+and notifications continue.
+
+Closed alerts leave the default list — otherwise closing would be an action with
+no visible effect. `?closed=true` goes looking for them:
+
+```sh
+curl 'http://localhost:8080/api/v1/alerts?closed=true'
+```
+
+Two things reopen a closed alert. An operator, with `{"closed":false}`. Or a
+delivery that **materially changes** it — new labels, a new annotation, a status
+transition — because that is not the alert they closed. An identical repeat
+deliberately does not: those arrive every `repeat_interval` and carry no new
+information, and reopening on one would mean a close never outlived the next
+notification.
 
 ## Alert Expiry
 
@@ -520,7 +551,8 @@ Alpha, and honest about it. What works today:
 | Helm chart, Compose, desktop client | Working |
 | Assign | Working |
 | Notes | Working |
-| Close, bulk actions | Planned |
+| Close (local) | Working |
+| Bulk actions | Planned |
 | Authorization administration API | Planned (CLI only) |
 | Stream event retention | Planned |
 
