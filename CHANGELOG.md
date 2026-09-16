@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.37] - 2026-09-16
+
 ### Added
 
 - **packaging:** the published image now carries a moving `alpha` tag pointing at the newest pre-release, so trying Promview no longer starts with finding out which alpha is current. It is applied only to tags carrying a hyphen, which is exactly the set the metadata action's own `latest=auto` declines to move `latest` for: the two pointers can never name the same image, and neither claims to be something it is not. `latest` still appears by itself at the first release without a pre-release suffix, and there has not been one.
