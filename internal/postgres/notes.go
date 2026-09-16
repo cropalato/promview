@@ -28,15 +28,12 @@ func (store *Store) AddNote(ctx context.Context, principal auth.Principal, id in
 	if !principal.CanOperate() {
 		return alerts.Detail{}, alerts.ErrNotFound
 	}
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return alerts.Detail{}, fmt.Errorf("%w: a note cannot be empty", alerts.ErrInvalid)
-	}
-	if len(body) > maxNoteLength {
-		return alerts.Detail{}, fmt.Errorf("%w: a note cannot exceed %d characters", alerts.ErrInvalid, maxNoteLength)
+	body, err := validNoteBody(body)
+	if err != nil {
+		return alerts.Detail{}, err
 	}
 	author := operatorName(principal)
-	err := pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
 		access, args := operateAccessCondition(principal, "alert.labels", []any{id})
 		var alert alerts.Alert
 		var labelsJSON, annotationsJSON []byte
@@ -114,4 +111,17 @@ func (store *Store) listNotes(ctx context.Context, alertID int64) ([]alerts.Note
 		return nil, fmt.Errorf("iterate notes for alert %d: %w", alertID, err)
 	}
 	return notes, nil
+}
+
+// validNoteBody normalises and bounds a note. Shared with the bulk path so a
+// note written to forty alerts is held to the same rules as one written to one.
+func validNoteBody(body string) (string, error) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "", fmt.Errorf("%w: a note cannot be empty", alerts.ErrInvalid)
+	}
+	if len(body) > maxNoteLength {
+		return "", fmt.Errorf("%w: a note cannot exceed %d characters", alerts.ErrInvalid, maxNoteLength)
+	}
+	return body, nil
 }

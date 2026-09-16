@@ -30,12 +30,12 @@ func (store *Store) AssignAlert(ctx context.Context, principal auth.Principal, i
 	if !principal.CanOperate() {
 		return alerts.Detail{}, alerts.ErrNotFound
 	}
-	assignee = strings.TrimSpace(assignee)
-	if len(assignee) > maxAssigneeLength {
-		return alerts.Detail{}, fmt.Errorf("%w: assignee is longer than %d characters", alerts.ErrInvalid, maxAssigneeLength)
+	assignee, err := validAssignee(assignee)
+	if err != nil {
+		return alerts.Detail{}, err
 	}
 	actor := operatorName(principal)
-	err := pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
 		access, args := operateAccessCondition(principal, "alert.labels", []any{id})
 		var alert alerts.Alert
 		var labelsJSON, annotationsJSON []byte
@@ -110,4 +110,14 @@ func operatorName(principal auth.Principal) string {
 		return principal.DisplayName
 	}
 	return "unknown"
+}
+
+// validAssignee normalises and bounds an owner. Shared with the bulk path so
+// the two cannot disagree about what a valid assignment is.
+func validAssignee(assignee string) (string, error) {
+	assignee = strings.TrimSpace(assignee)
+	if len(assignee) > maxAssigneeLength {
+		return "", fmt.Errorf("%w: assignee is longer than %d characters", alerts.ErrInvalid, maxAssigneeLength)
+	}
+	return assignee, nil
 }
