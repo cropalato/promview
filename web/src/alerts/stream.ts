@@ -22,6 +22,17 @@ export const ALERT_STREAM_EVENT_TYPES = [
 
 export type AlertStreamEventType = (typeof ALERT_STREAM_EVENT_TYPES)[number];
 
+/**
+ * Retention deletes stream events past `PROMVIEW_STREAM_RETENTION`. A client
+ * resuming from a cursor already deleted is sent this instead of the events it
+ * asked for, because they no longer exist.
+ *
+ * Deliberately not a member of `ALERT_STREAM_EVENT_TYPES`: it is not an alert
+ * lifecycle event, carries a different payload, and folding it into that union
+ * would put a non-alert through every alert code path.
+ */
+export const STREAM_GAP_EVENT_TYPE = 'stream.gap';
+
 /** Event types whose payloads carry the denormalized alert context. */
 export type AlertStreamNotificationEventType = Exclude<AlertStreamEventType, 'alert.removed'>;
 
@@ -65,6 +76,41 @@ export interface AlertStreamRemovedEvent extends AlertStreamEventEnvelope {
  * while `alert.removed` is redacted down to the envelope.
  */
 export type AlertStreamEvent = AlertStreamNotificationEvent | AlertStreamRemovedEvent;
+
+/**
+ * The stream telling a client it missed events that have since been deleted.
+ * `resumeFrom` is the cursor the client asked for; `retainedFrom` is the oldest
+ * position the stream can still serve honestly. The only correct response is to
+ * take a fresh snapshot: the gap cannot be replayed, and carrying on would leave
+ * the console quietly disagreeing with the server about what is firing.
+ */
+export interface StreamGapEvent {
+  resumeFrom: number;
+  retainedFrom: number;
+}
+
+/** Parses a gap payload, returning null for anything malformed. */
+export function parseStreamGapEvent(data: string): StreamGapEvent | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const resumeFrom = record.resumeFrom;
+  const retainedFrom = record.retainedFrom;
+  if (typeof resumeFrom !== 'number' || typeof retainedFrom !== 'number') {
+    return null;
+  }
+  if (!Number.isFinite(resumeFrom) || !Number.isFinite(retainedFrom)) {
+    return null;
+  }
+  return { resumeFrom, retainedFrom };
+}
 
 /**
  * Live connection state: `connecting` until the first open, `connected`
@@ -200,6 +246,13 @@ export interface AlertStreamClientOptions {
   cursor: number;
   onEvent: (event: AlertStreamEvent) => void;
   onStatus: (status: AlertStreamStatus) => void;
+  /**
+   * Called when the stream reports that events between the resume position and
+   * `retainedFrom` were deleted. The subscriber must refetch a snapshot; the
+   * client has already advanced its own cursor so a later reconnect does not
+   * ask for the dead position again.
+   */
+  onGap?: (event: StreamGapEvent) => void;
   factory?: EventSourceFactory;
   retryDelayMs?: number;
 }
@@ -261,6 +314,23 @@ export function createAlertStreamClient(options: AlertStreamClientOptions): Aler
     options.onEvent(event);
   };
 
+  const handleGap = (message: StreamMessageEvent): void => {
+    if (closed) {
+      return;
+    }
+    const gap = parseStreamGapEvent(message.data);
+    if (gap === null) {
+      return;
+    }
+    // Move past the deleted range before telling anyone. A reconnect between
+    // now and the subscriber's refetch would otherwise resume from the same
+    // dead cursor and be told about the same gap again.
+    if (gap.retainedFrom > cursor) {
+      cursor = gap.retainedFrom;
+    }
+    options.onGap?.(gap);
+  };
+
   const connect = (): void => {
     if (closed) {
       return;
@@ -290,6 +360,9 @@ export function createAlertStreamClient(options: AlertStreamClientOptions): Aler
         handleEvent(type, message);
       });
     }
+    next.addEventListener(STREAM_GAP_EVENT_TYPE, (message) => {
+      handleGap(message);
+    });
   };
 
   connect();

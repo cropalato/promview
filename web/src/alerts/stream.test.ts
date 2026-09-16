@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeEventSource } from '../test/fakeEventSource';
-import { buildAlertStreamUrl, createAlertStreamClient, parseAlertStreamEvent } from './stream';
+import {
+  buildAlertStreamUrl,
+  createAlertStreamClient,
+  parseAlertStreamEvent,
+  parseStreamGapEvent,
+  STREAM_RETRY_DELAY_MS,
+} from './stream';
 import type {
   AlertStreamEvent,
   AlertStreamNotificationEvent,
@@ -354,5 +360,66 @@ describe('createAlertStreamClient', () => {
     first.emit('alert.created', streamEventPayload({ type: 'alert.created' }), '4');
     expect(statuses).toHaveLength(statusCount);
     expect(events).toEqual([]);
+  });
+});
+
+describe('stream.gap', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeEventSource.reset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('parses a gap payload and rejects a malformed one', () => {
+    expect(parseStreamGapEvent(JSON.stringify({ resumeFrom: 7, retainedFrom: 40 }))).toEqual({
+      resumeFrom: 7,
+      retainedFrom: 40,
+    });
+    expect(parseStreamGapEvent('not json')).toBeNull();
+    expect(parseStreamGapEvent(JSON.stringify({ resumeFrom: '7', retainedFrom: 40 }))).toBeNull();
+    expect(parseStreamGapEvent(JSON.stringify({ resumeFrom: 7 }))).toBeNull();
+  });
+
+  it('tells the subscriber to resnapshot and moves past the deleted range', () => {
+    const gaps: unknown[] = [];
+    const client = createAlertStreamClient({
+      cursor: 7,
+      onEvent: () => {},
+      onStatus: () => {},
+      onGap: (gap) => gaps.push(gap),
+      factory: (url) => new FakeEventSource(url),
+    });
+
+    FakeEventSource.latest().emitOpen();
+    FakeEventSource.latest().emit(
+      'stream.gap',
+      JSON.stringify({ resumeFrom: 7, retainedFrom: 40 }),
+      '',
+    );
+    expect(gaps).toEqual([{ resumeFrom: 7, retainedFrom: 40 }]);
+
+    // A reconnect must not ask for the dead cursor again, or the server will
+    // report the same gap forever.
+    FakeEventSource.latest().emitError();
+    vi.advanceTimersByTime(STREAM_RETRY_DELAY_MS);
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=40');
+    client.close();
+  });
+
+  it('ignores a malformed gap rather than resnapshotting on noise', () => {
+    const gaps: unknown[] = [];
+    const client = createAlertStreamClient({
+      cursor: 7,
+      onEvent: () => {},
+      onStatus: () => {},
+      onGap: (gap) => gaps.push(gap),
+      factory: (url) => new FakeEventSource(url),
+    });
+    FakeEventSource.latest().emitOpen();
+    FakeEventSource.latest().emit('stream.gap', '{', '');
+    expect(gaps).toEqual([]);
+    client.close();
   });
 });
