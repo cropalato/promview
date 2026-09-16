@@ -14,6 +14,9 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ### Documentation
 
+- The README is organized for someone deciding whether to run Promview rather than for someone already working on it. It opened with a Go and Node toolchain list and a `make verify` walkthrough, so a reader wanting to know what this is had to scroll past the contributor workflow to reach `docker compose up`; those sections now sit under **Development** at the end. Added: build and release badges, a **Why Promview** section stating the narrow claim (it stores state, spans several Alertmanagers, keeps labels verbatim, enforces scope in SQL, ships as one binary) and what it explicitly is not, a **Project Status** table separating what works from what is planned, the known reconciliation gap stated in the README rather than only in the plan, a documentation index, and a contents list.
+- Four subjects were filed under **OIDC Authentication** that had nothing to do with authentication — list pagination and label matchers, acknowledgement, the SSE stream, and resetting the development database — because they had been appended to the end of the file as it grew. They now have sections of their own. The stale browser-notification sentence describing critical-only alerts was dropped: notification policy has been an opt-in selector since the preferences work, which the Console Preferences section already describes.
+- The Helm example pinned `0.1.0-alpha.30`, six releases behind, and is now `0.1.0-alpha.36`.
 - The Docker Hub listing now documents what the image actually is: amd64-only and why, a Compose stack that pulls the published image rather than building from a checkout nobody pulling an image has, the full environment variable surface with its real defaults, both listening ports, and the alpha status with the advice to pin an exact tag. The previous text described none of it.
 
 ## [0.1.0-alpha.36] - 2026-09-15
