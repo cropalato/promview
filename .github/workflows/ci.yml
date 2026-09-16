@@ -119,6 +119,12 @@ jobs:
           version: v4.2.4
       - run: make verify-helm
 
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: make changelog-check
+
   # Advisory scanning across all four toolchains. Deliberately one job: an
   # advisory is an advisory whichever manifest it arrives through, and three
   # separate red jobs would say the same thing three times.

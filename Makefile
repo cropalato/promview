@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build vuln vuln-go vuln-web vuln-desktop
+.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build changelog-check vuln vuln-go vuln-web vuln-desktop
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
@@ -46,6 +46,12 @@ verify-desktop:
 compose-check:
 	docker compose config --quiet
 
+# The release notes are built from CHANGELOG.md by a script that otherwise
+# runs once per release and nowhere else. This is what keeps a change to it
+# from being exercised for the first time by the release that needs it.
+changelog-check:
+	./scripts/check-changelog.sh
+
 migration-check:
 	./scripts/check-migrations.sh
 
@@ -66,7 +72,7 @@ helm-package:
 
 verify-helm: helm-lint helm-template helm-package
 
-verify: verify-go verify-web verify-desktop compose-check verify-helm
+verify: verify-go verify-web verify-desktop compose-check verify-helm changelog-check
 
 # Advisory scanning, deliberately not part of `verify`. It reads a database over
 # the network, and an advisory published this morning would otherwise fail a
