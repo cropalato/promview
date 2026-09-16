@@ -24,24 +24,26 @@ jobs:
   description:
     runs-on: ubuntu-latest
     env:
-      # Updating the description is not something a Docker Hub personal access
-      # token can do - the API endpoint behind it accepts account credentials
-      # only - so this cannot reuse DOCKERHUB_TOKEN, which the release job uses
-      # to push images. Until DOCKERHUB_PASSWORD exists the job is skipped
-      # rather than failed: an unset secret is a repository that has not opted
-      # in, not a broken workflow.
-      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+      # The same access token the release job pushes images with. Docker Hub's
+      # description endpoint takes a token-issued JWT, verified by updating this
+      # repository's listing with one - so no second credential is needed. The
+      # token does need write scope on the repository; a read-only one
+      # authenticates and then fails the PATCH.
+      #
+      # An unset secret skips rather than fails: a fork has no credential and is
+      # not a broken workflow.
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
 
-      - if: env.DOCKERHUB_PASSWORD == ''
-        run: echo "DOCKERHUB_PASSWORD is not set; skipping the description update." >> "${GITHUB_STEP_SUMMARY}"
+      - if: env.DOCKERHUB_TOKEN == ''
+        run: echo "DOCKERHUB_TOKEN is not set; skipping the description update." >> "${GITHUB_STEP_SUMMARY}"
 
-      - if: env.DOCKERHUB_PASSWORD != ''
+      - if: env.DOCKERHUB_TOKEN != ''
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ secrets.DOCKERHUB_USERNAME }}/promview
           readme-filepath: docs/dockerhub.md
           short-description: "Operational console for Prometheus Alertmanager alerts."
