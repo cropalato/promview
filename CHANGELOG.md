@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **alerts:** an operator can record who owns an alert. `PUT /api/v1/alerts/{id}/assignee` sets it and an empty assignee clears it, which is why it is a PUT rather than two verbs: the request states the assignment in full, and sending it twice leaves the same owner. The assignee is free text rather than a reference to a Promview user, because an alert is routinely handed to somebody who has never signed in — a vendor, a team rota address, the name in a runbook — and a foreign key would turn every one of those into an error instead of an assignment. The operator who decided is recorded separately as `assignedBy`, since "who owns this" and "who said so" are different questions and the second is the accountability trail. `assignee` is on the list payload as well as the detail, because "what is on my plate" is asked of the list; the console already had a column waiting for it and now fills it. Assigning to the existing owner writes nothing and wakes no console. Assignment is cleared when a resolved alert fires again, alongside the acknowledgement: that is a new occurrence, and the previous owner never agreed to own it.
+
 ## [0.1.0-alpha.38] - 2026-09-16
 
 ### Added

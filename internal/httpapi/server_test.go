@@ -36,6 +36,7 @@ type fakeStore struct {
 	written      *preferences.Preferences
 	afterID      int64
 	retainedFrom int64
+	assignee     string
 	cancel       context.CancelFunc
 	pingErr      error
 	sourceToken  string
@@ -128,6 +129,12 @@ func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal
 
 func (store *fakeStore) GetAlertDetail(_ context.Context, principal auth.Principal, _ int64) (alerts.Detail, error) {
 	store.principal = principal
+	return store.detail, store.detailErr
+}
+
+func (store *fakeStore) AssignAlert(_ context.Context, principal auth.Principal, _ int64, assignee string) (alerts.Detail, error) {
+	store.principal = principal
+	store.assignee = assignee
 	return store.detail, store.detailErr
 }
 

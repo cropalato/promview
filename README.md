@@ -28,6 +28,7 @@ same UI. Alertmanager keeps routing, grouping, inhibition and notification.
 - [Filtering, Sorting, And Grouping](#filtering-sorting-and-grouping)
 - [Live Updates](#live-updates)
 - [Acknowledgement](#acknowledgement)
+- [Assignment](#assignment)
 - [Alert Expiry](#alert-expiry)
 - [Alertmanager Reconciliation](#alertmanager-reconciliation)
 - [Silences](#silences)
@@ -213,6 +214,30 @@ count means the window is shorter than the disconnections this deployment sees.
 ## Acknowledgement
 
 Authorized operators can acknowledge or unacknowledge an alert from its detail view. This records Promview-local state and timeline history but does not alter Alertmanager routing, notifications, or silences.
+
+## Assignment
+
+An authorized operator can record who owns an alert:
+
+```sh
+curl -X PUT 'http://localhost:8080/api/v1/alerts/42/assignee' \
+  -H 'Content-Type: application/json' \
+  -d '{"assignee":"platform-rota"}'
+```
+
+The assignee is free text, not a Promview user. An alert is routinely handed to
+somebody who has never signed in here — a vendor, a rota address, the name in a
+runbook — and requiring an account would turn each of those into an error
+instead of an assignment. Who *decided* is recorded separately as `assignedBy`,
+from the signed-in operator, because "who owns this" and "who said so" are
+different questions and the second one is the accountability trail.
+
+An empty assignee clears it; there is no separate unassign verb. Assigning to
+whoever already owns the alert changes nothing and wakes no console.
+
+Assignment is Promview-local and never reaches Alertmanager. It is cleared when
+a resolved alert fires again, along with the acknowledgement: that is a new
+occurrence, and the previous owner did not agree to own it.
 
 ## Alert Expiry
 
@@ -467,7 +492,8 @@ Alpha, and honest about it. What works today:
 | Create and remove silences | Working |
 | OIDC sign-in, label-scoped roles enforced in SQL | Working |
 | Helm chart, Compose, desktop client | Working |
-| Assign, close, notes, bulk actions | Planned |
+| Assign | Working |
+| Close, notes, bulk actions | Planned |
 | Authorization administration API | Planned (CLI only) |
 | Stream event retention | Planned |
 

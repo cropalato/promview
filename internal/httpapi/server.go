@@ -35,6 +35,7 @@ type Store interface {
 	GroupAlerts(context.Context, auth.Principal, alerts.Query) (alerts.GroupResult, error)
 	GetAlertDetail(context.Context, auth.Principal, int64) (alerts.Detail, error)
 	AcknowledgeAlert(context.Context, auth.Principal, int64, bool) (alerts.Detail, error)
+	AssignAlert(context.Context, auth.Principal, int64, string) (alerts.Detail, error)
 	SilenceScopeForAlert(context.Context, auth.Principal, int64) (alerts.SilenceScope, error)
 	SilenceScopeForGroup(context.Context, auth.Principal, []string, map[string]string) (alerts.SilenceScope, error)
 	SilenceRemovalScope(context.Context, auth.Principal, int64, string) (alerts.SilenceTarget, error)
@@ -111,6 +112,7 @@ func NewObserved(
 	mux.Handle("GET /api/v1/alerts/{id}", api.requireAuthentication(http.HandlerFunc(api.getAlert)))
 	mux.Handle("GET /api/v1/alerts/{id}/events", api.requireAuthentication(http.HandlerFunc(api.getAlertEvents)))
 	mux.Handle("POST /api/v1/alerts/{id}/acknowledge", api.requireAuthentication(http.HandlerFunc(api.acknowledgeAlert)))
+	mux.Handle("PUT /api/v1/alerts/{id}/assignee", api.requireAuthentication(http.HandlerFunc(api.assignAlert)))
 	mux.Handle("POST /api/v1/alerts/{id}/silence", api.requireAuthentication(http.HandlerFunc(api.silenceAlert)))
 	mux.Handle("DELETE /api/v1/alerts/{id}/silences/{silenceId}", api.requireAuthentication(http.HandlerFunc(api.removeAlertSilence)))
 	mux.Handle("POST /api/v1/groups/silence", api.requireAuthentication(http.HandlerFunc(api.silenceGroup)))
@@ -252,6 +254,57 @@ func silenceRecordsResponse(records []alerts.SilenceRecord) []alerts.SilenceReco
 		return []alerts.SilenceRecord{}
 	}
 	return records
+}
+
+// assignAlert sets or clears who owns an alert. PUT rather than POST because
+// the request states the assignment in full: sending the same body twice leaves
+// the same owner, and clearing is the empty string rather than a second verb.
+func (api *API) assignAlert(w http.ResponseWriter, r *http.Request) {
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeServerError(w, r, "principal is unavailable", nil)
+		return
+	}
+	if !principal.CanOperate() {
+		writeError(w, http.StatusForbidden, "operator access required")
+		return
+	}
+	if !validMutationOrigin(r) {
+		writeError(w, http.StatusForbidden, "invalid request origin")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "alert id is invalid")
+		return
+	}
+	var body struct {
+		Assignee *string `json:"assignee"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Assignee == nil || decoder.Decode(&struct{}{}) != io.EOF {
+		writeError(w, http.StatusBadRequest, "assignee must be a string")
+		return
+	}
+	detail, err := api.store.AssignAlert(r.Context(), principal, id, *body.Assignee)
+	if errors.Is(err, alerts.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "alert not found")
+		return
+	}
+	if errors.Is(err, alerts.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeServerError(w, r, "assign alert", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"alert":    newAlertDetailResponse(detail.Alert, auth.CanOperateLabels(principal, detail.Alert.Labels), api.silencer != nil),
+		"history":  detail.History,
+		"silences": silenceRecordsResponse(detail.Silences),
+	})
 }
 
 func (api *API) acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
@@ -676,6 +729,9 @@ type alertResponse struct {
 	// empty list means inhibited instead, and the console says which: an
 	// inhibition lifts itself, a silence was somebody's decision.
 	SilencedBy []string `json:"silencedBy"`
+	// Assignee is on the summary because "what is on my plate" is a question
+	// asked of the list, not of one alert at a time.
+	Assignee string `json:"assignee"`
 }
 
 type alertDetailResponse struct {
@@ -684,6 +740,8 @@ type alertDetailResponse struct {
 	Acknowledged   bool            `json:"acknowledged"`
 	AcknowledgedAt *time.Time      `json:"acknowledgedAt"`
 	AcknowledgedBy string          `json:"acknowledgedBy"`
+	AssignedAt     *time.Time      `json:"assignedAt"`
+	AssignedBy     string          `json:"assignedBy"`
 	Actions        alertActions    `json:"actions"`
 	RawData        json.RawMessage `json:"rawData"`
 }
@@ -695,6 +753,10 @@ type alertActions struct {
 	// all. They are reported separately because they can differ: a deployment
 	// with no Alertmanager configured can still acknowledge.
 	CanSilence bool `json:"canSilence"`
+	// CanAssign is the same per-alert operator check. Reported separately so a
+	// console can offer the controls it is actually allowed to use rather than
+	// inferring one right from another.
+	CanAssign bool `json:"canAssign"`
 }
 
 // alertGroupResponse is one collapsed row. SampleAlertID is a string like every
@@ -738,6 +800,7 @@ func newAlertResponse(alert alerts.Alert) alertResponse {
 		RepeatCount:  alert.RepeatCount,
 		Suppressed:   alert.Suppressed,
 		SilencedBy:   silencedBy,
+		Assignee:     alert.AssignedTo,
 	}
 }
 
@@ -748,7 +811,9 @@ func newAlertDetailResponse(alert alerts.Alert, canOperate bool, canSilence bool
 		Acknowledged:   alert.Acknowledged,
 		AcknowledgedAt: alert.AcknowledgedAt,
 		AcknowledgedBy: alert.AcknowledgedBy,
-		Actions:        alertActions{CanAcknowledge: canOperate, CanSilence: canOperate && canSilence},
+		AssignedAt:     alert.AssignedAt,
+		AssignedBy:     alert.AssignedBy,
+		Actions:        alertActions{CanAcknowledge: canOperate, CanSilence: canOperate && canSilence, CanAssign: canOperate},
 		RawData:        alert.RawData,
 	}
 }
