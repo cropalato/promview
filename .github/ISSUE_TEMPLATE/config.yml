@@ -1,0 +1,14 @@
+# Blank issues stay off: the two templates ask for the version, the deployment
+# shape and the auth mode, and a report missing those usually costs a round trip
+# before it can be read at all.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/cropalato/promview/security/advisories/new
+    about: Privately, never as a public issue.
+  - name: Documentation
+    url: https://github.com/cropalato/promview/tree/main/docs
+    about: Alertmanager setup, Kubernetes, authorization, OIDC, and metrics.
+  - name: Deployment questions
+    url: https://github.com/cropalato/promview/blob/main/README.md
+    about: Silence buttons missing, alerts expiring early, OIDC not binding — the README covers the usual gates.

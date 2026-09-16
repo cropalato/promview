@@ -1,0 +1,47 @@
+name: Feature request
+description: Suggest something Promview should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Promview is deliberately narrow: it receives Alertmanager webhooks, and
+        leaves routing, grouping, inhibition, silence policy and notification to
+        Alertmanager. It does not poll Prometheus and does not accept
+        non-Prometheus alert formats.
+
+        [`docs/project-plan.md`](https://github.com/cropalato/promview/blob/main/docs/project-plan.md)
+        records what is planned and what is explicitly out of scope — worth a
+        look first, since some of this is already written down as planned work.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What goes wrong on shift today. Describe the situation rather than the
+        feature — the shape of the fix is usually clearer from the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. A rough shape is fine.
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do instead right now
+      description: Including "nothing, we live with it" — that is useful signal.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked docs/project-plan.md and this is not already planned
+          required: true
+        - label: I searched existing issues
+          required: true
