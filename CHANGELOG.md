@@ -6,6 +6,11 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **stream:** stream events are now deleted once they pass `PROMVIEW_STREAM_RETENTION`, default 24h, `0` to keep everything. They exist only so a client that lost its connection can resume, which makes almost all of them dead weight within minutes, and nothing had ever removed one. A day covers the disconnections a resume is actually for — a closed laptop, a rolling deploy, a proxy that dropped every connection at once — and past that a fresh snapshot is cheaper than replaying history. The sweep shares the expiry sweep's ticker rather than adding a knob: a retention window is measured in hours and the interval enforcing it in minutes, so the exact interval never mattered. `promview_stream_events_pruned_total` counts what it removes.
+- **stream:** a client resuming from a cursor that retention has deleted is now told so, with a `stream.gap` event carrying its own cursor and the oldest point the stream can serve. This is the half that made deletion safe to ship at all: the events between are gone, and handing back only the survivors would have left a console reconnected, reporting no error, and quietly wrong about which alerts are firing — worse than the unbounded growth being fixed. The correct response is a fresh snapshot, resumed from its `streamCursor`. A client at or past the watermark has missed nothing and is never interrupted, so a caught-up console is not asked to discard a view that is still correct. The watermark is a stored column rather than `min(id)`, because the table being emptied completely is exactly when the question matters and exactly when `min(id)` has no answer. `promview_stream_gaps_total` counts them, and a rising count means the window is shorter than the disconnections a deployment actually sees.
+
 ## [0.1.0-alpha.37] - 2026-09-16
 
 ### Added

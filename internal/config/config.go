@@ -48,6 +48,11 @@ type Config struct {
 	// not say. It is a deployment choice: the right length is however long the
 	// team's usual maintenance window runs.
 	SilenceDefaultDuration time.Duration
+	// StreamRetention is how long a stream event is kept so a disconnected
+	// client can resume through it. Zero disables pruning, which is the escape
+	// hatch for a deployment that would rather grow the table than ever ask a
+	// client to re-snapshot.
+	StreamRetention time.Duration
 	// SilenceMaxDuration bounds what an operator may ask for. A silence is the
 	// one action here that hides alerts rather than surfacing them, and an
 	// unbounded one is indistinguishable from deleting the rule.
@@ -88,6 +93,11 @@ func Load() (Config, error) {
 		// Thirty days: past that an operator is not silencing an alert, they are
 		// declining to fix it, and the rule is the thing to change.
 		SilenceMaxDuration: 30 * 24 * time.Hour,
+		// A day covers a laptop closed over a weekend night, a rolling deploy,
+		// or a proxy that dropped every connection at once, which are the
+		// disconnections a resume is actually for. Past that a client is better
+		// served by a fresh snapshot than by replaying a day of history.
+		StreamRetention: 24 * time.Hour,
 	}
 	if raw := os.Getenv("PROMVIEW_OIDC_COOKIE_SECURE"); raw != "" {
 		secure, err := strconv.ParseBool(raw)
@@ -125,6 +135,14 @@ func Load() (Config, error) {
 			return Config{}, errors.New("PROMVIEW_SILENCE_MAX_DURATION must be a positive duration such as 720h")
 		}
 		cfg.SilenceMaxDuration = window
+	}
+
+	if raw := os.Getenv("PROMVIEW_STREAM_RETENTION"); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil || value < 0 {
+			return Config{}, errors.New("PROMVIEW_STREAM_RETENTION must be a non-negative duration such as 24h")
+		}
+		cfg.StreamRetention = value
 	}
 
 	if raw := os.Getenv("PROMVIEW_RECONCILE_INTERVAL"); raw != "" {

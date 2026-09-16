@@ -148,6 +148,7 @@ func run() error {
 				StreamOpened: instruments.StreamOpened,
 				StreamClosed: instruments.StreamClosed,
 				StreamPolled: instruments.StreamPolled,
+				StreamGapped: instruments.StreamGapped,
 			},
 			cfg, store, authenticator, apiSilencer, authenticationHandler,
 		),
@@ -192,6 +193,12 @@ func run() error {
 		runExpirySweeps(ctx, store, cfg.AlertStaleAfter, cfg.AlertExpiryInterval)
 	}()
 
+	pruneDone := make(chan struct{})
+	go func() {
+		defer close(pruneDone)
+		runStreamPruning(ctx, store, instruments, cfg.StreamRetention, cfg.AlertExpiryInterval)
+	}()
+
 	reconcileDone := make(chan struct{})
 	go func() {
 		defer close(reconcileDone)
@@ -220,9 +227,56 @@ func run() error {
 			_ = metricsServer.Shutdown(shutdownCtx)
 		}
 		<-sweepDone
+		<-pruneDone
 		<-reconcileDone
 		<-refreshDone
 		return err
+	}
+}
+
+// streamPruneStore is the slice of the store the retention loop needs.
+type streamPruneStore interface {
+	PruneStreamEvents(ctx context.Context, retention time.Duration, now time.Time) (int, error)
+}
+
+// runStreamPruning deletes stream events past the retention window on a ticker.
+// It shares the expiry sweep's interval rather than introducing a knob of its
+// own: both are housekeeping against the same clock, and a retention window is
+// measured in hours while the interval that enforces it is measured in minutes,
+// so the exact interval never mattered.
+//
+// A zero window disables pruning, and the table grows without bound in exchange
+// for never asking a client to re-snapshot.
+func runStreamPruning(
+	ctx context.Context,
+	store streamPruneStore,
+	instruments *metrics.Metrics,
+	retention, interval time.Duration,
+) {
+	if retention == 0 {
+		slog.Info("stream event retention disabled", "reason", "PROMVIEW_STREAM_RETENTION is zero")
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pruned, err := store.PruneStreamEvents(ctx, retention, time.Now().UTC())
+			instruments.StreamPruned(pruned)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				slog.Error("stream event retention sweep failed", "error", err)
+				continue
+			}
+			if pruned > 0 {
+				slog.Info("pruned stream events", "count", pruned, "retention", retention)
+			}
+		}
 	}
 }
 

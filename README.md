@@ -180,6 +180,36 @@ Only created or materially changed alerts produce stream events. A repeated
 identical delivery updates timestamps and counts without waking every open
 console.
 
+### Stream Retention
+
+Stream events exist so a client that lost its connection can resume. They are
+deleted once they are older than the retention window:
+
+```sh
+export PROMVIEW_STREAM_RETENTION=24h   # 0 keeps every event forever
+```
+
+A day covers the disconnections a resume is actually for — a closed laptop, a
+rolling deploy, a proxy that dropped every connection at once. Past that, a
+fresh snapshot is cheaper than replaying history.
+
+Deleting events creates a case the stream has to handle honestly. A client
+resuming from a cursor that has been pruned cannot be sent what no longer
+exists, and sending it only the survivors would leave it reconnected, reporting
+no error, and quietly wrong about which alerts are firing. Promview records the
+highest id it has deleted, and a client resuming from below that is sent a
+`stream.gap` event instead:
+
+```text
+event: stream.gap
+data: {"resumeFrom":7,"retainedFrom":40}
+```
+
+The correct response is to take a fresh snapshot and resume from its
+`streamCursor`. A client already at or past the watermark has missed nothing and
+is never interrupted. `promview_stream_gaps_total` counts these, and a rising
+count means the window is shorter than the disconnections this deployment sees.
+
 ## Acknowledgement
 
 Authorized operators can acknowledge or unacknowledge an alert from its detail view. This records Promview-local state and timeline history but does not alter Alertmanager routing, notifications, or silences.
