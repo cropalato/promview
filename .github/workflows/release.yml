@@ -282,6 +282,10 @@ jobs:
     needs: [publish, desktop, desktop-arch]
     runs-on: ubuntu-latest
     steps:
+      # The changelog is read from here, so the release job needs the tree it
+      # never used to check out.
+      - uses: actions/checkout@v7
+
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
@@ -301,13 +305,28 @@ jobs:
             exit 1
           fi
           printf 'attaching %s\n' "${files[@]}"
+
+          # Every release said the same three sentences about images and
+          # signing, and nothing about what had changed - while the changelog
+          # said it all, in the one place a reader of a release never looks.
+          # The `if` is what keeps a missing entry from being fatal: a release
+          # with thin notes still ships its binaries, and the omission is
+          # reported rather than silently shipped.
+          version="${GITHUB_REF_NAME#v}"
+          if section=$(scripts/changelog-section.sh "${version}"); then
+            printf '%s\n\n---\n\n' "${section}" > notes.md
+          else
+            echo "::warning::CHANGELOG.md has no entry for ${version}"
+            : > notes.md
+          fi
+
           {
             printf 'Server image: `%s/%s:%s`\n' "ghcr.io" "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
             printf 'Helm chart: `oci://ghcr.io/cropalato/charts/promview`\n\n'
             printf 'The desktop installers below are **unsigned**. Windows SmartScreen\n'
             printf 'warns on first run, and macOS is not built at all: signing needs\n'
             printf 'certificates this project does not have yet.\n'
-          } > notes.md
+          } >> notes.md
           # Re-runnable: a release left behind by a failed upload is filled in
           # rather than colliding with a second create.
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
