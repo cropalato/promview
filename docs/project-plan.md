@@ -193,26 +193,45 @@ holds firing ones is not believed: a restarting Alertmanager looks exactly like 
 fleet going quiet, and a restart easily outlasts the consecutive-readings rule.
 Such a reading syncs suppression only.
 
-### Known gap: expired alerts are not revived
+### Reviving alerts expiry retired
 
-Reconciliation only examines alerts stored as `firing`. An alert that expiry
-retired while the Alertmanager still holds it is therefore never brought back,
-and stays hidden from the console while genuinely firing.
+Expiry is an inference, so a reading that contradicts it wins. Reconciliation
+examines a source's `expired` alerts alongside its firing ones and returns to
+`firing` any the Alertmanager still holds, clearing the `ends_at` expiry
+invented. Alerts the live view does not carry stay expired; `resolved` alerts
+are not examined at all, because that status came from the source rather than
+from inference.
 
-This is not hypothetical. Measured against production on 2026-08-19, with
+Revival keeps the occurrence and the acknowledgement. A new occurrence is what a
+firing alert following a *resolved* one gets, because the source said that one
+ended; here nothing ended, so advancing it would discard an acknowledgement for
+an alert that never stopped firing. Ingestion has always taken this view - a
+webhook for an expired alert is an ordinary update - and reconciliation now
+agrees with it.
+
+The problem this addresses was measured against production on 2026-08-19, with
 reconciliation enabled: 87 firing alerts all present in the Alertmanager and none
 suppressed, and 30 `expired` alerts all still live in the Alertmanager and all
-suppressed. They are silenced maintenance-window hosts - silenced, so no
-notifications arrive, so expiry retires them after 12h, and nothing revives them.
+suppressed. They were silenced maintenance-window hosts - silenced, so no
+notifications arrived, so expiry retired them after 12h, and nothing brought them
+back.
 
-The fix is for reconciliation to return an `expired` alert to `firing` when the
-Alertmanager still holds it. Expiry is a guess, and the source contradicting it
-is decisive. A `resolved` alert is deliberately left alone, because that status
-came from the source rather than from inference.
+Reviving alone would have flapped, because the silence that caused the wrong
+expiry is still in force: the alert would be retired again one window later, and
+revived again, forever. So reconciliation also records `reconciled_at` on every
+alert it confirms live, and expiry measures staleness from the later of that and
+`last_seen`. An alert the source still holds is never retired in the first place;
+revival is left for the alerts expiry got to first.
 
-Until then, a deployment with frequent silences should either enable
-reconciliation on every source or lengthen the expiry window, since expiry will
-keep retiring live alerts that reconciliation cannot recover.
+`reconciled_at` is a separate column rather than a wider reading of `last_seen`,
+which means one specific thing - when a webhook last delivered this alert - and
+is also the console's default sort key and pagination cursor. Restamping it each
+pass would reshuffle the table under a reader and move rows across cursor
+boundaries.
+
+Expiry remains the backstop it was. A source with no Alertmanager URL, or one
+that cannot be reached, has no `reconciled_at` moving and goes stale on
+`last_seen` exactly as before.
 
 ## Authentication
 
