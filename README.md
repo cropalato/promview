@@ -1,70 +1,90 @@
 # Promview
 
-Promview is a focused operational console for alerts delivered by Prometheus Alertmanager. The current implementation includes authenticated webhook ingestion, PostgreSQL current-state storage, a cursor-paginated query API, resumable live updates, browser notifications for critical alerts, health endpoints, and a React console that renders firing alerts.
+[![CI](https://github.com/cropalato/promview/actions/workflows/ci.yml/badge.svg)](https://github.com/cropalato/promview/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cropalato/promview?include_prereleases&sort=semver)](https://github.com/cropalato/promview/releases)
+[![Docker pulls](https://img.shields.io/docker/pulls/cropalato/promview)](https://hub.docker.com/r/cropalato/promview)
+[![License](https://img.shields.io/github/license/cropalato/promview)](LICENSE)
 
-The Go module is `github.com/cropalato/promview`. See [`docs/project-plan.md`](docs/project-plan.md) for the planned lifecycle, authentication, authorization, API, and desktop client work.
+**An operational console for the alerts Prometheus Alertmanager is already sending you.**
 
-## Requirements
+Point one or more Alertmanagers at Promview as a webhook receiver. It keeps
+current alert state in PostgreSQL, serves a live console over REST and resumable
+server-sent events, and lets an on-call operator filter, group, acknowledge and
+silence what is firing — in a browser, or in a desktop tray client sharing the
+same UI. Alertmanager keeps routing, grouping, inhibition and notification.
 
-- Go 1.25 or newer
-- Node.js 22 or newer
-- Docker with Compose
-- Helm 3.14 or newer when packaging or installing the Kubernetes chart
-- PostgreSQL client tools only when running migration verification directly
+> [!WARNING]
+> Promview is **alpha**. The API, the schema and the configuration surface may
+> change between releases. Pin an exact version; do not track a moving tag in
+> production. See [Project Status](#project-status).
 
-## Local Verification
+## Contents
+
+- [Why Promview](#why-promview)
+- [Quick Start](#quick-start)
+- [Run On Kubernetes](#run-on-kubernetes)
+- [Filtering, Sorting, And Grouping](#filtering-sorting-and-grouping)
+- [Live Updates](#live-updates)
+- [Acknowledgement](#acknowledgement)
+- [Alert Expiry](#alert-expiry)
+- [Alertmanager Reconciliation](#alertmanager-reconciliation)
+- [Silences](#silences)
+- [Console Preferences](#console-preferences)
+- [Desktop Client](#desktop-client)
+- [OIDC Authentication](#oidc-authentication)
+- [Project Status](#project-status)
+- [Documentation](#documentation)
+- [Development](#development)
+- [License](#license)
+
+## Why Promview
+
+Alertmanager is very good at deciding who to wake up. It is not where an on-call
+engineer wants to spend a shift: its own UI shows what is firing right now, with
+no memory of what fired an hour ago and no record of who looked at it.
+
+Promview is the layer above that, and it is deliberately narrow:
+
+- **It stores state.** A dashboard that reads the live Alertmanager API can only
+  show the present. Promview keeps current alerts, occurrences, and a lifecycle
+  history, so "when did this start" and "who acknowledged it" have answers.
+- **It spans Alertmanagers.** Several installations feed one console, each with
+  its own credential, and identity is `source + fingerprint` so two independent
+  fleets cannot collide.
+- **It keeps your labels.** Every label and annotation is preserved as sent.
+  Nothing is folded into a fixed schema of resources, events and tags, so the
+  filter bar speaks the same vocabulary as your alerting rules.
+- **Authorization is a label selector.** A role is combined with Prometheus
+  label matchers and enforced in SQL, so a team-scoped viewer cannot list,
+  count, stream, or open an alert outside its scope. Scope is not a UI filter.
+- **It is one binary.** A Go server with the compiled React console embedded,
+  plus a PostgreSQL you already run. No nginx, no process supervisor, no plugin
+  runtime.
+
+It is **not** a replacement for Alertmanager, and it does not poll Prometheus.
+For the reference investigation this design came out of — what Alerta does, what
+is worth reusing and what is not — see
+[`docs/alerta-research.md`](docs/alerta-research.md).
+
+## Quick Start
 
 ```sh
-make verify
-```
-
-This runs Go formatting checks, tests, and build; frontend formatting, linting, typechecking, tests, and build; and Docker Compose configuration validation.
-
-Focused commands:
-
-```sh
-make verify-go
-make verify-web
-go test ./internal/alertmanager -run TestDecodeAndNormalize
-npm --prefix web run test -- src/config/runtimeConfig.test.ts
-make compose-check
-make docker-build
-make verify-helm
-```
-
-Migration verification requires a disposable PostgreSQL database because it applies up, down, and up migrations:
-
-```sh
-export PROMVIEW_TEST_DATABASE_URL='postgres://promview:promview@localhost:5432/promview_test?sslmode=disable'
-make migration-check
-make test-postgres
-```
-
-Every command above has a matching GitHub Actions job in `.github/workflows/ci.yml`.
-
-Do not use `go test ./...` after installing frontend dependencies: Go can discover `.go` files inside `web/node_modules`. Use the package boundaries in `make verify-go` instead.
-
-## Run On Kubernetes
-
-Promview ships a Helm chart for an external PostgreSQL database:
-
-```sh
-helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
-  --namespace promview \
-  --version 0.1.0-alpha.30
-```
-
-Create the required database Secret before installation. The pinned chart version is
-also the application version, so upgrading means moving that pin wherever it is held.
-See [`docs/kubernetes.md`](docs/kubernetes.md) and [`charts/promview/README.md`](charts/promview/README.md) for the complete procedure, upgrades, OIDC values, migration lifecycle, and production checklist.
-
-## Run With Docker Compose
-
-```sh
+git clone https://github.com/cropalato/promview.git
+cd promview
 docker compose up --build
 ```
 
-Open <http://localhost:8080>. The development stack uses open anonymous read-only mode.
+Open <http://localhost:8080>. The development stack runs in open mode: anonymous
+read-only, with ingestion still authenticated.
+
+To run the published image instead of building from a checkout, see the Compose
+stack in [`docs/dockerhub.md`](docs/dockerhub.md). Images are published for
+**linux/amd64** to both registries:
+
+```sh
+docker pull cropalato/promview:0.1.0-alpha.36
+docker pull ghcr.io/cropalato/promview:0.1.0-alpha.36
+```
 
 Send an Alertmanager-compatible webhook to the bootstrapped `demo` source:
 
@@ -98,11 +118,37 @@ The webhook URL source slug and bearer token must identify the same enabled sour
 
 For the complete Prometheus rule, Alertmanager routing, authentication, TLS, validation, and token-rotation procedure, see [`docs/prometheus-alertmanager.md`](docs/prometheus-alertmanager.md).
 
+Inspect the current principal:
+
+```sh
+curl 'http://localhost:8080/api/v1/me'
+```
+
+Open mode returns an anonymous global viewer and keeps ingestion authenticated. OIDC is the only interactive authentication mode; provider tokens remain on the server.
+
+## Run On Kubernetes
+
+Promview ships a Helm chart for an external PostgreSQL database:
+
+```sh
+helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
+  --namespace promview \
+  --version 0.1.0-alpha.36
+```
+
+Create the required database Secret before installation. The pinned chart version is
+also the application version, so upgrading means moving that pin wherever it is held.
+See [`docs/kubernetes.md`](docs/kubernetes.md) and [`charts/promview/README.md`](charts/promview/README.md) for the complete procedure, upgrades, OIDC values, migration lifecycle, and production checklist.
+
+## Filtering, Sorting, And Grouping
+
 List firing alerts:
 
 ```sh
 curl 'http://localhost:8080/api/v1/alerts?status=firing&limit=100'
 ```
+
+The list endpoint supports opaque cursor pagination, source/status filters, and repeated label matchers. Use `match=label=value` or `match=label!=value` for ANDed positive and negative label filters, plus `sort` and `order=asc|desc` for supported columns. The browser console applies these filters and sorts server-side; detail labels can add or replace a positive or negative filter.
 
 Collapse a fan-out into one row per alert name and source, and expand one group
 by asking for its members:
@@ -118,13 +164,23 @@ never reports members the caller cannot open. Expanding a group is the ordinary 
 query with a matcher, which is why sorting, cursors and the detail view behave
 identically inside a group.
 
-Inspect the current principal:
+## Live Updates
+
+Live alert changes are available as resumable server-sent events:
 
 ```sh
-curl 'http://localhost:8080/api/v1/me'
+curl --no-buffer 'http://localhost:8080/api/v1/stream?cursor=0'
 ```
 
-Open mode returns an anonymous global viewer and keeps ingestion authenticated. OIDC is the only interactive authentication mode; provider tokens remain on the server.
+Each alerts snapshot includes `streamCursor`. Start the stream from that value to avoid missing changes between the snapshot and live updates. Reconnects may instead send `Last-Event-ID`.
+
+Only created or materially changed alerts produce stream events. A repeated
+identical delivery updates timestamps and counts without waking every open
+console.
+
+## Acknowledgement
+
+Authorized operators can acknowledge or unacknowledge an alert from its detail view. This records Promview-local state and timeline history but does not alter Alertmanager routing, notifications, or silences.
 
 ## Alert Expiry
 
@@ -201,7 +257,28 @@ promview source set --slug demo --name Demo --token <ingest-token> \
 
 The Alertmanager token is stored as given rather than hashed, because it has to be replayed on every request. Treat `alert_sources.alertmanager_token` as a secret at rest. A source with no token sends no credential, which is the right setting for an Alertmanager that allows anonymous writes.
 
-## Desktop Sign-In
+## Console Preferences
+
+Column choice and order, row density, grouping keys, the console palette, and notification policy are stored per user in `user_preferences` and served by `GET`/`PUT /api/v1/preferences`, so they follow an operator between machines.
+
+Notification policy is an opt-in plus a label selector, edited in the view menu with the same syntax as the filter bar. It matches on `severity`, `alertname`, `source`, and `team` — the fields a stream event carries — and a selector naming anything else is refused rather than silently never firing. An empty selector notifies about nothing. Browser permission is separate: it belongs to one browser profile, no server can grant it, and the dedupe ledger that stops a replayed event notifying twice stays local for the same reason.
+
+Permission is requested only after the user selects the notification control. Page-open notifications require HTTPS or localhost and an open Promview tab; closed-browser delivery would require a future Web Push service worker.
+
+This requires a user to key against, which means `PROMVIEW_AUTH_MODE=oidc`. In `open` mode every reader is the same anonymous principal, the endpoint answers `404`, and the console keeps its preferences in the browser instead — the choices still work, they just do not travel.
+
+The palette defaults to `system`, which follows the operating system's light/dark setting as the console always has. The alternatives are `dark`, `light`, `nord`, `gruvbox`, `solarized-light`, `high-contrast`, and `colorblind-safe`, picked from the status bar at the bottom of the console.
+
+## Desktop Client
+
+The same console ships as a Tauri desktop and tray client. Unsigned installers
+for Linux (`.deb`, `.rpm`) and Windows (`.msi`, `.exe`) are attached to every
+[release](https://github.com/cropalato/promview/releases); Arch users can build
+`promview-desktop-bin` from
+[`desktop/packaging/aur`](desktop/packaging/aur). macOS is not built: signing
+needs certificates this project does not have.
+
+### Desktop Sign-In
 
 A desktop client cannot receive the cookie the browser flow ends in, so it signs
 in through a loopback redirect:
@@ -223,7 +300,7 @@ minted credential to whatever it accepts. Only `127.0.0.1`, `::1`, or
 userinfo. A hostname that merely resolves to a loopback address is refused: that
 is a promise which can change.
 
-## Desktop Client Configuration
+### Desktop Client Configuration
 
 The desktop shell has no origin to be relative to — unlike the console a server
 serves, it is a local webview that must be told where to look. `PROMVIEW_SERVER_URL`
@@ -269,16 +346,6 @@ Three things are worth knowing from here, with the rest in
   the NVIDIA driver and renders a blank window, so the shell probes for that at
   startup and switches the renderer off. `"on"` says the guess is wrong about a
   machine.
-
-## Console Preferences
-
-Column choice and order, row density, grouping keys, the console palette, and notification policy are stored per user in `user_preferences` and served by `GET`/`PUT /api/v1/preferences`, so they follow an operator between machines.
-
-Notification policy is an opt-in plus a label selector, edited in the view menu with the same syntax as the filter bar. It matches on `severity`, `alertname`, `source`, and `team` — the fields a stream event carries — and a selector naming anything else is refused rather than silently never firing. An empty selector notifies about nothing. Browser permission is separate: it belongs to one browser profile, no server can grant it, and the dedupe ledger that stops a replayed event notifying twice stays local for the same reason.
-
-This requires a user to key against, which means `PROMVIEW_AUTH_MODE=oidc`. In `open` mode every reader is the same anonymous principal, the endpoint answers `404`, and the console keeps its preferences in the browser instead — the choices still work, they just do not travel.
-
-The palette defaults to `system`, which follows the operating system's light/dark setting as the console always has. The alternatives are `dark`, `light`, `nord`, `gruvbox`, `solarized-light`, `high-contrast`, and `colorblind-safe`, picked from the status bar at the bottom of the console.
 
 ## OIDC Authentication
 
@@ -333,22 +400,101 @@ See [`docs/authorization.md`](docs/authorization.md) for binding administration,
 
 Production issuer and redirect URLs must use HTTPS. Loopback HTTP is supported for provider testing by setting `PROMVIEW_OIDC_COOKIE_SECURE=false`; insecure cookies are rejected for non-loopback redirect hosts.
 
-The list endpoint supports opaque cursor pagination, source/status filters, and repeated label matchers. Use `match=label=value` or `match=label!=value` for ANDed positive and negative label filters, plus `sort` and `order=asc|desc` for supported columns. The browser console applies these filters and sorts server-side; detail labels can add or replace a positive or negative filter.
+## Project Status
 
-Authorized operators can acknowledge or unacknowledge an alert from its detail view. This records Promview-local state and timeline history but does not alter Alertmanager routing, notifications, or silences.
+Alpha, and honest about it. What works today:
 
-Live alert changes are available as resumable server-sent events:
+| Area | State |
+| --- | --- |
+| Authenticated webhook ingestion, multiple sources | Working |
+| Current state, occurrences, lifecycle history | Working |
+| Filtering, sorting, cursor pagination, grouping | Working |
+| Resumable SSE and live console refresh | Working |
+| Expiry and Alertmanager reconciliation | Working |
+| Acknowledge / unacknowledge | Working |
+| Create and remove silences | Working |
+| OIDC sign-in, label-scoped roles enforced in SQL | Working |
+| Helm chart, Compose, desktop client | Working |
+| Assign, close, notes, bulk actions | Planned |
+| Authorization administration API | Planned (CLI only) |
+| Stream event retention | Planned |
+
+Known gap: reconciliation does not revive an `expired` alert the Alertmanager
+still holds, so a deployment with frequent silences should enable reconciliation
+on every source or lengthen the expiry window. It is written up in
+[`docs/project-plan.md`](docs/project-plan.md).
+
+Issues and discussion are welcome — this is a young project and real deployment
+feedback is the most useful thing it can get.
+
+## Documentation
+
+| Document | Covers |
+| --- | --- |
+| [`docs/project-plan.md`](docs/project-plan.md) | Lifecycle, data model, API, and planned work |
+| [`docs/prometheus-alertmanager.md`](docs/prometheus-alertmanager.md) | Prometheus rules, Alertmanager routing, TLS, token rotation |
+| [`docs/kubernetes.md`](docs/kubernetes.md) | Helm installation, upgrades, production checklist |
+| [`docs/authorization.md`](docs/authorization.md) | Roles, selectors, binding administration |
+| [`docs/okta-oidc.md`](docs/okta-oidc.md) | Worked OIDC provider setup |
+| [`docs/metrics.md`](docs/metrics.md) | Exported Prometheus metrics |
+| [`docs/desktop-client-plan.md`](docs/desktop-client-plan.md) | Desktop client design |
+| [`docs/alerta-research.md`](docs/alerta-research.md) | Reference investigation behind the design |
+| [`docs/dockerhub.md`](docs/dockerhub.md) | Published image: tags, ports, full configuration |
+
+## Development
+
+### Requirements
+
+- Go 1.25 or newer
+- Node.js 22 or newer
+- Docker with Compose
+- Helm 3.14 or newer when packaging or installing the Kubernetes chart
+- PostgreSQL client tools only when running migration verification directly
+
+### Verification
 
 ```sh
-curl --no-buffer 'http://localhost:8080/api/v1/stream?cursor=0'
+make verify
 ```
 
-Each alerts snapshot includes `streamCursor`. Start the stream from that value to avoid missing changes between the snapshot and live updates. Reconnects may instead send `Last-Event-ID`.
+This runs Go formatting checks, tests, and build; frontend formatting, linting, typechecking, tests, and build; Docker Compose configuration validation; and the Helm chart checks.
 
-The top bar can enable browser notifications for newly created critical alerts. Permission is requested only after the user selects the notification control. Page-open notifications require HTTPS or localhost and an open Promview tab; closed-browser delivery would require a future Web Push service worker.
+Focused commands:
+
+```sh
+make verify-go
+make verify-web
+make verify-desktop
+go test ./internal/alertmanager -run TestDecodeAndNormalize
+npm --prefix web run test -- src/config/runtimeConfig.test.ts
+make compose-check
+make docker-build
+make verify-helm
+```
+
+Migration verification requires a disposable PostgreSQL database because it applies up, down, and up migrations:
+
+```sh
+export PROMVIEW_TEST_DATABASE_URL='postgres://promview:promview@localhost:5432/promview_test?sslmode=disable'
+make migration-check
+make test-postgres
+```
+
+Every command above has a matching GitHub Actions job in `.github/workflows/ci.yml`, which is the executable source of truth for what must pass.
+
+Do not use `go test ./...` after installing frontend dependencies: Go can discover `.go` files inside `web/node_modules`. Use the package boundaries in `make verify-go` instead.
 
 To reset the development database and rerun initialization:
 
 ```sh
 docker compose down --volumes
 ```
+
+The Go module is `github.com/cropalato/promview`. Repository conventions live in
+[`AGENTS.md`](AGENTS.md); the project uses
+[Conventional Commits](https://www.conventionalcommits.org/) and records user-visible
+changes in [`CHANGELOG.md`](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE)
