@@ -1,0 +1,75 @@
+version: 2
+
+# Five manifests across four package managers, none of which had anything
+# watching them. Each ecosystem gets one grouped pull request for minor and
+# patch updates, because a repository this size cannot absorb one pull request
+# per dependency and a queue nobody reads is the same as no updates at all.
+# Major versions stay ungrouped: those are the ones that need reading.
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps-web)"
+    groups:
+      web:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps-desktop)"
+    groups:
+      desktop:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /desktop/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps-desktop)"
+    groups:
+      tauri:
+        update-types: [minor, patch]
+
+  # The workflows pin floating major tags, so this is what notices a v7 that
+  # moved under the repository rather than a v8 that was published.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  # The Dockerfile's three base images: node, golang, and the alpine the binary
+  # actually ships on. The last one is the one that matters - it carries the
+  # ca-certificates the server needs to reach an Alertmanager over TLS.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(deps)"

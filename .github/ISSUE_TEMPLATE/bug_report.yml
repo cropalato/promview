@@ -1,0 +1,93 @@
+name: Bug report
+description: Something behaves differently from what is documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Promview is alpha and deployment reports are the
+        most useful thing it can get.
+
+        **Do not report a security vulnerability here.**
+        Use the [private advisory form](https://github.com/cropalato/promview/security/advisories/new).
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release you are running, or the commit if you built it.
+      placeholder: 0.1.0-alpha.36
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How is it running
+      options:
+        - Docker Compose
+        - Helm chart on Kubernetes
+        - Container run directly
+        - Built from source
+        - Desktop client
+    validations:
+      required: true
+
+  - type: dropdown
+    id: auth_mode
+    attributes:
+      label: PROMVIEW_AUTH_MODE
+      description: Scope is enforced per principal, so the mode usually matters.
+      options:
+        - open
+        - oidc
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >
+        The steps that produce it. A webhook payload, a curl against
+        /api/v1/alerts, or the console action you took is worth more than a
+        description of it.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: >
+        Server logs around the failure. Redact bearer tokens, session cookies,
+        and anything from an internal hostname you would rather not publish.
+      render: text
+
+  - type: textarea
+    id: sources
+    attributes:
+      label: Source configuration
+      description: >
+        For anything about expiry, reconciliation, or silences: how many
+        Alertmanager sources, whether they have an `alertmanager_url`, and the
+        stale-after window in use. Never paste a token.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I am not reporting a security vulnerability
+          required: true
+        - label: I searched existing issues
+          required: true
