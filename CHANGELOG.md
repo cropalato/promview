@@ -6,6 +6,14 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Documentation
+
+- Documentation that had fallen behind the code is brought up to date: the metrics reference gained `promview_stream_gaps_total` and `promview_stream_events_pruned_total`, the authorization guide stopped describing the operator role as acknowledge-only when it now covers assign, close, note and silence, the Helm chart gained a `stream.retention` value so the retention window is configurable on Kubernetes at all, and the Docker Hub listing's environment table gained `PROMVIEW_STREAM_RETENTION`. The project plan no longer lists assignment, close and notes as planned work, and says plainly what is left: the console can display an assignee and a note count but has no controls to use any of the three, and does not act on `stream.gap`.
+
+### Build System
+
+- `make docs-check` fails when an installation example names a release older than the current one, and runs in CI. This had drifted four separate times — the Docker Hub listing shipped a version 33 releases old, the README's Helm example six, the Kubernetes guide nine — and each was a reader following an instruction that installed something other than what the page described. Image tags in examples now follow the moving `alpha` pointer, which cannot go stale; chart versions have to be exact, so those are what the check watches. Prose naming a version historically is deliberately not checked: "carried in values since 0.1.0-alpha.35" is a fact about the past and rewriting it would be wrong.
+
 ## [0.1.0-alpha.39] - 2026-09-16
 
 ### Added

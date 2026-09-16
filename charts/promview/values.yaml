@@ -80,6 +80,13 @@ alertExpiry:
   staleAfter: 12h
   interval: 1m
 
+# Stream events exist so a client that lost its connection can resume, and are
+# deleted once they are older than this. A client resuming from a cursor already
+# deleted is told to take a fresh snapshot rather than being handed an
+# incomplete stream. "0" keeps every event forever.
+stream:
+  retention: 24h
+
 # Reading each source's Alertmanager confirms what is still firing, which is the
 # only way to learn that a silenced alert ended. Sources carry their own URL in
 # the database; "0" disables the loop entirely.

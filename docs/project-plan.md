@@ -52,8 +52,12 @@ The current implementation provides:
 - server-side alert grouping with expandable members, counts computed under the caller's own read scope
 - per-user column, density, and grouping preferences, with a browser fallback where there is no user
 - table columns bound to arbitrary alert labels, and density resolved from the area the console has
+- assignment, recorded as free text with the deciding operator kept separately
+- append-only operator notes, each carrying the occurrence it was written against
+- operator-local close, excluded from the default list and reopened by a materially changed delivery
+- stream event retention with a watermark, and a `stream.gap` signal for clients resuming past it
 
-Assignment, local close, notes, bulk actions, and authorization administration APIs remain planned work.
+Bulk actions and authorization administration APIs remain planned work. The console can display an assignee and a note count but has no controls to assign, close, or add a note yet, and does not act on the `stream.gap` signal; those are client-side work against APIs that already exist.
 
 ## Goals
 

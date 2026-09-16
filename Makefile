@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build changelog-check vuln vuln-go vuln-web vuln-desktop
+.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build changelog-check docs-check vuln vuln-go vuln-web vuln-desktop
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
@@ -52,6 +52,12 @@ compose-check:
 changelog-check:
 	./scripts/check-changelog.sh
 
+# Installation examples that name a release older than the current one are how a
+# reader ends up installing something other than what the page describes. It has
+# happened four times; this is what stops the fifth.
+docs-check:
+	./scripts/check-doc-versions.sh
+
 migration-check:
 	./scripts/check-migrations.sh
 
@@ -72,7 +78,7 @@ helm-package:
 
 verify-helm: helm-lint helm-template helm-package
 
-verify: verify-go verify-web verify-desktop compose-check verify-helm changelog-check
+verify: verify-go verify-web verify-desktop compose-check verify-helm changelog-check docs-check
 
 # Advisory scanning, deliberately not part of `verify`. It reads a database over
 # the network, and an advisory published this morning would otherwise fail a
