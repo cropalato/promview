@@ -38,6 +38,12 @@ export interface AlertSummary {
   /** A silence or inhibition is holding this alert back at the source. */
   suppressed: boolean;
   /**
+   * An operator filed this alert as handled. Separate from `state`, which is
+   * what the source reports: an alert can be both still firing and already
+   * dealt with. Closed alerts are out of the default list.
+   */
+  closed: boolean;
+  /**
    * Ids of the silences currently matching. Suppressed with none of these
    * means an inhibition is holding it back instead, which the console shows
    * differently: an inhibition lifts itself when its parent clears, a silence

@@ -85,6 +85,13 @@ export interface AlertsQuery {
    */
   suppressed?: boolean;
   /**
+   * Restricts to alerts an operator has closed, or excludes them. Leaving it
+   * unset is the server's own default, which excludes them: an alert that
+   * stayed in the list after being closed would make closing an action with no
+   * visible effect. Setting it true is how a closed alert is found again.
+   */
+  closed?: boolean;
+  /**
    * Serialized label matchers (`severity=critical`, `team!=infra`), sent as
    * repeated `match` parameters. All matchers must hold for an alert to
    * appear.
@@ -176,6 +183,9 @@ export function buildAlertsUrl(query: AlertsQuery = {}): string {
   }
   if (query.suppressed !== undefined) {
     params.set('suppressed', query.suppressed ? 'true' : 'false');
+  }
+  if (query.closed !== undefined) {
+    params.set('closed', query.closed ? 'true' : 'false');
   }
   for (const matcher of query.match ?? []) {
     if (matcher !== '') {
@@ -331,6 +341,7 @@ function parseAlert(value: unknown, index: number): AlertSummary {
     notes: 0,
     labels,
     suppressed: raw.suppressed === true,
+    closed: raw.closed === true,
     silencedBy: Array.isArray(raw.silencedBy)
       ? raw.silencedBy.filter((entry): entry is string => typeof entry === 'string')
       : [],
