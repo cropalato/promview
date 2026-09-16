@@ -77,6 +77,8 @@ type Metrics struct {
 	streamClients    prometheus.Gauge
 	streamPolls      prometheus.Counter
 	streamEventsSent prometheus.Counter
+	streamGaps       prometheus.Counter
+	streamPruned     prometheus.Counter
 }
 
 // New builds the collectors on a registry of their own.
@@ -150,6 +152,17 @@ func New(version string) *Metrics {
 			Name: "promview_stream_events_sent_total",
 			Help: "Events delivered to event-stream clients.",
 		}),
+		streamGaps: prometheus.NewCounter(prometheus.CounterOpts{
+			// Every one of these is a console that was told to throw away what
+			// it had and ask again. A rising count means retention is shorter
+			// than the disconnections this deployment actually sees.
+			Name: "promview_stream_gaps_total",
+			Help: "Clients told to re-snapshot because their cursor had been pruned.",
+		}),
+		streamPruned: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "promview_stream_events_pruned_total",
+			Help: "Stream events deleted by the retention sweep.",
+		}),
 	}
 
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -171,6 +184,8 @@ func New(version string) *Metrics {
 		m.streamClients,
 		m.streamPolls,
 		m.streamEventsSent,
+		m.streamGaps,
+		m.streamPruned,
 		buildInfo,
 	)
 	return m
@@ -277,6 +292,23 @@ func (m *Metrics) StreamPolled(events int) {
 	if events > 0 {
 		m.streamEventsSent.Add(float64(events))
 	}
+}
+
+// StreamGapped records one client told to re-snapshot because the events it
+// asked to resume from no longer exist.
+func (m *Metrics) StreamGapped() {
+	if m == nil {
+		return
+	}
+	m.streamGaps.Inc()
+}
+
+// StreamPruned records how many events one retention sweep removed.
+func (m *Metrics) StreamPruned(events int) {
+	if m == nil || events <= 0 {
+		return
+	}
+	m.streamPruned.Add(float64(events))
 }
 
 // WatchPool reports a database pool's state, read at scrape time.

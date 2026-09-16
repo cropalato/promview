@@ -53,7 +53,7 @@ The current implementation provides:
 - per-user column, density, and grouping preferences, with a browser fallback where there is no user
 - table columns bound to arbitrary alert labels, and density resolved from the area the console has
 
-Assignment, local close, notes, bulk actions, authorization administration APIs, and stream retention remain planned work.
+Assignment, local close, notes, bulk actions, and authorization administration APIs remain planned work.
 
 ## Goals
 
@@ -319,6 +319,8 @@ SSE events use a monotonic ID and typed payload:
 ```
 
 Support `Last-Event-ID`, detect retention gaps, and instruct clients to refresh their snapshot when a cursor can no longer be resumed. Frontends should batch high-volume updates rather than render once per event.
+
+Retention deletes stream events past `PROMVIEW_STREAM_RETENTION` and records the highest id removed. A client resuming from below that watermark is sent a `stream.gap` event carrying its own cursor and the oldest point the stream can honestly serve, and should re-snapshot; one at or past it has missed nothing and is left alone. The watermark is stored rather than derived from `min(id)`, because the table being emptied entirely is exactly when the question matters and exactly when `min(id)` has no answer.
 
 ## Browser UI
 

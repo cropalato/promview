@@ -73,6 +73,9 @@ type Observers struct {
 	// many events it returned. Every open console does this on a timer, so it
 	// is the polling load rather than a sign of activity.
 	StreamPolled func(events int)
+	// StreamGapped records one client told to re-snapshot because its resume
+	// point had been pruned.
+	StreamGapped func()
 }
 
 func New(
@@ -506,6 +509,31 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 		batch, err := api.store.StreamEvents(r.Context(), principal, afterID, 100)
 		if err != nil {
 			return
+		}
+		// The client asked to resume from a point retention has since deleted,
+		// so the events between are gone and the stream cannot deliver them.
+		// Saying nothing would leave it reconnected, apparently healthy, and
+		// quietly wrong about what is firing - so it is told to take a fresh
+		// snapshot, and the cursor is advanced to the oldest point the stream
+		// can honestly serve. Announced once per gap: afterID moves past the
+		// watermark here, so the next poll is an ordinary one.
+		if afterID > 0 && afterID < batch.RetainedFrom {
+			payload, err := json.Marshal(map[string]any{
+				"resumeFrom":   afterID,
+				"retainedFrom": batch.RetainedFrom,
+			})
+			if err != nil {
+				return
+			}
+			if _, err := fmt.Fprintf(w, "event: stream.gap\ndata: %s\n\n", payload); err != nil {
+				return
+			}
+			flusher.Flush()
+			if api.observers.StreamGapped != nil {
+				api.observers.StreamGapped()
+			}
+			afterID = batch.RetainedFrom
+			continue
 		}
 		if api.observers.StreamPolled != nil {
 			api.observers.StreamPolled(len(batch.Events))

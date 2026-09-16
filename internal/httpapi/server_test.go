@@ -35,6 +35,7 @@ type fakeStore struct {
 	prefErr      error
 	written      *preferences.Preferences
 	afterID      int64
+	retainedFrom int64
 	cancel       context.CancelFunc
 	pingErr      error
 	sourceToken  string
@@ -118,7 +119,11 @@ func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal
 	if store.cancel != nil {
 		store.cancel()
 	}
-	return alerts.StreamBatch{Events: store.events, ScannedThrough: afterID + int64(len(store.events))}, nil
+	return alerts.StreamBatch{
+		Events:         store.events,
+		ScannedThrough: afterID + int64(len(store.events)),
+		RetainedFrom:   store.retainedFrom,
+	}, nil
 }
 
 func (store *fakeStore) GetAlertDetail(_ context.Context, principal auth.Principal, _ int64) (alerts.Detail, error) {
@@ -942,5 +947,44 @@ func TestPutPreferencesRejectsUnusableLayouts(t *testing.T) {
 				t.Fatalf("a rejected layout reached the store: %#v", store.written)
 			}
 		})
+	}
+}
+
+// TestStreamAlertsAnnouncesARetentionGap covers the case retention creates: a
+// client resuming from a cursor whose events have been deleted. Handing back
+// only the survivors would leave it reconnected, reporting no error, and quietly
+// wrong about what is firing.
+func TestStreamAlertsAnnouncesARetentionGap(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	store := &fakeStore{
+		// Everything through 40 has been pruned; this client left off at 7.
+		retainedFrom: 40,
+		cancel:       cancel,
+	}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream?cursor=7", nil).WithContext(ctx)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	body := response.Body.String()
+	for _, want := range []string{"event: stream.gap", `"resumeFrom":7`, `"retainedFrom":40`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream body = %q, want %q", body, want)
+		}
+	}
+}
+
+// A client already at or past the watermark has lost nothing, and telling it to
+// re-snapshot would throw away a correct view for no reason.
+func TestStreamAlertsStaysQuietWhenNothingWasMissed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	store := &fakeStore{retainedFrom: 7, cancel: cancel}
+	handler := New(config.Config{AuthMode: "open"}, store, auth.OpenAuthenticator{}, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/stream?cursor=7", nil).WithContext(ctx)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if strings.Contains(response.Body.String(), "stream.gap") {
+		t.Fatalf("a caught-up client was told to re-snapshot: %q", response.Body.String())
 	}
 }

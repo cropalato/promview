@@ -839,16 +839,20 @@ func (store *Store) AcknowledgeAlert(ctx context.Context, principal auth.Princip
 
 func (store *Store) StreamEvents(ctx context.Context, principal auth.Principal, afterID int64, limit int) (alerts.StreamBatch, error) {
 	var scannedThrough int64
+	var retainedFrom int64
+	// The watermark rides along on the window query rather than costing a second
+	// round trip: this runs on every poll of every open stream.
 	if err := store.pool.QueryRow(ctx, `
-		SELECT COALESCE(max(candidate.id), $1)
+		SELECT COALESCE(max(candidate.id), $1),
+		       COALESCE((SELECT deleted_through FROM stream_event_retention WHERE singleton), 0)
 		FROM (
 			SELECT id FROM stream_events WHERE id > $1 ORDER BY id LIMIT $2
 		) AS candidate
-	`, afterID, limit).Scan(&scannedThrough); err != nil {
+	`, afterID, limit).Scan(&scannedThrough, &retainedFrom); err != nil {
 		return alerts.StreamBatch{}, fmt.Errorf("scan stream event window: %w", err)
 	}
 	if scannedThrough == afterID {
-		return alerts.StreamBatch{ScannedThrough: afterID}, nil
+		return alerts.StreamBatch{ScannedThrough: afterID, RetainedFrom: retainedFrom}, nil
 	}
 	if !principal.Anonymous {
 		var err error
@@ -907,7 +911,7 @@ func (store *Store) StreamEvents(ctx context.Context, principal auth.Principal, 
 	if err := rows.Err(); err != nil {
 		return alerts.StreamBatch{}, fmt.Errorf("iterate stream events: %w", err)
 	}
-	return alerts.StreamBatch{Events: events, ScannedThrough: scannedThrough}, nil
+	return alerts.StreamBatch{Events: events, ScannedThrough: scannedThrough, RetainedFrom: retainedFrom}, nil
 }
 
 func insertStreamEvent(

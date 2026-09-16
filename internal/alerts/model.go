@@ -209,6 +209,10 @@ type StreamEvent struct {
 type StreamBatch struct {
 	Events         []StreamEvent
 	ScannedThrough int64
+	// RetainedFrom is the highest stream event id retention has deleted. A
+	// caller resuming from below it has missed events that no longer exist and
+	// must take a fresh snapshot; the stream cannot tell it what it lost.
+	RetainedFrom int64
 }
 
 type HistoryEvent struct {
