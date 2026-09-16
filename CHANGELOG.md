@@ -6,6 +6,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-alpha.38] - 2026-09-16
+
 ### Added
 
 - **stream:** stream events are now deleted once they pass `PROMVIEW_STREAM_RETENTION`, default 24h, `0` to keep everything. They exist only so a client that lost its connection can resume, which makes almost all of them dead weight within minutes, and nothing had ever removed one. A day covers the disconnections a resume is actually for — a closed laptop, a rolling deploy, a proxy that dropped every connection at once — and past that a fresh snapshot is cheaper than replaying history. The sweep shares the expiry sweep's ticker rather than adding a knob: a retention window is measured in hours and the interval enforcing it in minutes, so the exact interval never mattered. `promview_stream_events_pruned_total` counts what it removes.
