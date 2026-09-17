@@ -309,6 +309,10 @@ func (store *Store) SetRoleBinding(ctx context.Context, binding auth.RoleBinding
 		return err
 	}
 	return pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
+		// Demoting the only administrator is the same lockout as deleting it.
+		if err := guardLastAdministrator(ctx, tx, binding.Name, binding.Role == auth.RoleAdministrator); err != nil {
+			return err
+		}
 		for _, matcher := range binding.Matchers {
 			if matcher.Operator == "=~" || matcher.Operator == "!~" {
 				if _, err := tx.Exec(ctx, "SELECT '' ~ $1", matcher.Value); err != nil {
@@ -348,10 +352,15 @@ func (store *Store) SetRoleBinding(ctx context.Context, binding auth.RoleBinding
 }
 
 func (store *Store) DeleteRoleBinding(ctx context.Context, name string) error {
-	if _, err := store.pool.Exec(ctx, "DELETE FROM role_bindings WHERE name = $1", name); err != nil {
-		return fmt.Errorf("delete role binding %s: %w", name, err)
-	}
-	return nil
+	return pgx.BeginFunc(ctx, store.pool, func(tx pgx.Tx) error {
+		if err := guardLastAdministrator(ctx, tx, name, false); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "DELETE FROM role_bindings WHERE name = $1", name); err != nil {
+			return fmt.Errorf("delete role binding %s: %w", name, err)
+		}
+		return nil
+	})
 }
 
 func (store *Store) AuthorizationDiagnostics(ctx context.Context) (auth.AuthorizationDiagnostics, error) {

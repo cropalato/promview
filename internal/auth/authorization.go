@@ -79,6 +79,23 @@ func (principal Principal) CanRead() bool {
 	return false
 }
 
+// CanAdminister reports whether the principal may change who can do what.
+//
+// Administrator only, and never anonymous: open mode has no identity to hold
+// accountable for a policy change, and a deployment that let one be made
+// without a name would have an audit trail that says nothing.
+func (principal Principal) CanAdminister() bool {
+	if principal.Anonymous {
+		return false
+	}
+	for _, grant := range principal.Grants {
+		if grant.Role == RoleAdministrator {
+			return true
+		}
+	}
+	return false
+}
+
 func (principal Principal) CanOperate() bool {
 	if principal.Anonymous {
 		return false
@@ -215,7 +232,23 @@ func ParseLabelMatcher(raw string) (LabelMatcher, error) {
 	return LabelMatcher{}, errors.New("selector must use =, !=, =~, or !~")
 }
 
+// ErrInvalidRoleBinding marks a binding the caller can fix by sending a
+// different one, as opposed to a failure that is ours. Wrapped rather than
+// replaced so the specific message still reaches whoever has to act on it.
+var ErrInvalidRoleBinding = errors.New("invalid role binding")
+
+// ErrLastAdministrator is returned when a change would leave a deployment with
+// no administrator binding, and so with nobody able to undo it.
+var ErrLastAdministrator = errors.New("refusing to remove the last administrator binding")
+
 func ValidateRoleBinding(binding RoleBinding) error {
+	if err := validateRoleBinding(binding); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidRoleBinding, err)
+	}
+	return nil
+}
+
+func validateRoleBinding(binding RoleBinding) error {
 	if !bindingNamePattern.MatchString(binding.Name) {
 		return errors.New("binding name must use lowercase letters, digits, underscores, or hyphens")
 	}
