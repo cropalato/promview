@@ -46,7 +46,10 @@ import { applyTheme } from './preferences/theme';
 import type { Theme } from './preferences/theme';
 import { useAlertGroups } from './hooks/useAlertGroups';
 import { useGroupChildren } from './hooks/useGroupChildren';
+import { useAlertSelection } from './hooks/useAlertSelection';
 import { useAlertStream } from './hooks/useAlertStream';
+import { BulkActionBar } from './components/BulkActionBar';
+import { bulkAcknowledge, bulkAssign, bulkClose, bulkNote } from './alerts/bulk';
 import { useColumnWidths } from './hooks/useColumnWidths';
 import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import { useSession } from './hooks/useSession';
@@ -394,6 +397,19 @@ export default function App({ navigate }: AppProps = {}) {
     return byId;
   }, [loadedAlerts]);
   const loadedAlertById = useCallback((id: string) => alertsById.get(id), [alertsById]);
+  // Selection is offered on the flat list only. Whether ticking a collapsed
+  // group means its members or the group itself is a real question, and
+  // answering it badly is worse than not offering it there yet.
+  const { selection, selectedIds, clear: clearSelection } = useAlertSelection(loadedAlerts);
+  // A bulk action changes rows the list is showing, so the page is re-read the
+  // way a stream event re-reads it.
+  const afterBulk = useCallback(
+    <T,>(outcome: T): T => {
+      scheduleLiveRefresh();
+      return outcome;
+    },
+    [scheduleLiveRefresh],
+  );
   // Label keys seen in the loaded alerts, offered when adding a label column so
   // an operator does not have to remember exact spellings.
   const labelSuggestions = useMemo(() => {
@@ -684,28 +700,42 @@ export default function App({ navigate }: AppProps = {}) {
                 ) : grouped ? (
                   <p className="alerts-panel-copy">Loading groups…</p>
                 ) : (
-                  <AlertTable
-                    alerts={loadedAlerts}
-                    columns={columns}
-                    columnWidths={columnWidths}
-                    onColumnResize={setColumnWidth}
-                    onColumnResizeReset={resetColumnWidth}
-                    filterActive={filterActive}
-                    filterQuery={appliedFilterText}
-                    selectedId={effectiveSelectedAlertId}
-                    onSelect={(alert) => openAlert(alert.id)}
-                    onClearFilter={clearFilter}
-                    sort={sort}
-                    onSortChange={setSort}
-                    pagination={{
-                      loaded: alertsState.data.alerts.length,
-                      total: alertsState.data.total,
-                      hasMore: alertsState.data.nextCursor !== '',
-                      loadingMore: alertsState.loadingMore,
-                      error: alertsState.moreError,
-                      onLoadMore: loadMore,
-                    }}
-                  />
+                  <>
+                    <BulkActionBar
+                      count={selectedIds.length}
+                      canOperate={canOperate(
+                        sessionState.status === 'ready' ? sessionState.session : undefined,
+                      )}
+                      onAcknowledge={() => bulkAcknowledge(selectedIds, true).then(afterBulk)}
+                      onClose={() => bulkClose(selectedIds, true).then(afterBulk)}
+                      onAssign={(assignee) => bulkAssign(selectedIds, assignee).then(afterBulk)}
+                      onNote={(body) => bulkNote(selectedIds, body).then(afterBulk)}
+                      onClear={clearSelection}
+                    />
+                    <AlertTable
+                      alerts={loadedAlerts}
+                      selection={selection}
+                      columns={columns}
+                      columnWidths={columnWidths}
+                      onColumnResize={setColumnWidth}
+                      onColumnResizeReset={resetColumnWidth}
+                      filterActive={filterActive}
+                      filterQuery={appliedFilterText}
+                      selectedId={effectiveSelectedAlertId}
+                      onSelect={(alert) => openAlert(alert.id)}
+                      onClearFilter={clearFilter}
+                      sort={sort}
+                      onSortChange={setSort}
+                      pagination={{
+                        loaded: alertsState.data.alerts.length,
+                        total: alertsState.data.total,
+                        hasMore: alertsState.data.nextCursor !== '',
+                        loadingMore: alertsState.loadingMore,
+                        error: alertsState.moreError,
+                        onLoadMore: loadMore,
+                      }}
+                    />
+                  </>
                 )}
               </>
             )}

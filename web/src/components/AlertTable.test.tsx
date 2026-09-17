@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AlertSummary } from '../alerts/types';
+import type { AlertSelection } from './AlertTable';
 import { AlertTable } from './AlertTable';
 import type { AlertPagination } from './AlertTable';
 
@@ -320,5 +321,45 @@ describe('AlertTable column resizing', () => {
     expect(resizeProps.onColumnResize).toHaveBeenCalledWith('summary', 316);
     fireEvent.keyDown(handle, { key: 'Home' });
     expect(resizeProps.onColumnResizeReset).toHaveBeenCalledWith('summary');
+  });
+});
+
+describe('selection', () => {
+  const selection = (overrides: Partial<AlertSelection> = {}): AlertSelection => ({
+    selectedIds: new Set<string>(),
+    allSelected: false,
+    onToggle: () => {},
+    onToggleAll: () => {},
+    ...overrides,
+  });
+
+  it('adds no column at all when selection is not offered', () => {
+    render(<AlertTable alerts={[firingAlert]} />);
+    expect(screen.queryByLabelText('Select every loaded alert')).toBeNull();
+  });
+
+  it('ticks a row without opening its detail', () => {
+    const onToggle = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <AlertTable alerts={[firingAlert]} onSelect={onSelect} selection={selection({ onToggle })} />,
+    );
+    fireEvent.click(screen.getByLabelText(`Select ${firingAlert.name}`));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    // Opening the drawer on a tick would cover the list an operator is still
+    // selecting from.
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('reflects what is already selected', () => {
+    render(
+      <AlertTable
+        alerts={[firingAlert]}
+        selection={selection({ selectedIds: new Set(['1']), allSelected: true })}
+      />,
+    );
+    expect((screen.getByLabelText('Select every loaded alert') as HTMLInputElement).checked).toBe(
+      true,
+    );
   });
 });

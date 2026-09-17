@@ -58,7 +58,7 @@ The current implementation provides:
 - bulk acknowledge, assign, close and note over an explicit selection, reported per alert
 - stream event retention with a watermark, and a `stream.gap` signal for clients resuming past it
 
-Authorization administration APIs remain planned work. The console can now assign, close and note from the alert drawer, reach closed alerts through an Open/Closed filter, and re-snapshot when the stream reports a retention gap. What remains client-side is row selection and a bulk action bar: the bulk endpoints exist and are reachable only by hand until they have one.
+Authorization administration APIs remain planned work. The console can now assign, close and note from the alert drawer, reach closed alerts through an Open/Closed filter, and re-snapshot when the stream reports a retention gap. Row selection and a bulk action bar exist on the flat list; whether a collapsed group selects itself or its members is left open rather than guessed.
 
 ## Goals
 
