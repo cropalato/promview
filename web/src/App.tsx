@@ -36,6 +36,7 @@ import { AccessPanel } from './components/AccessPanel';
 import { SignInForm } from './components/SignInForm';
 import { TopBar } from './components/TopBar';
 import type { ConnectionState } from './components/TopBar';
+import { OpenModeBanner } from './components/OpenModeBanner';
 import { PulseMark } from './components/icons';
 import { useAlertDetail } from './hooks/useAlertDetail';
 import { useAlertNotifications } from './hooks/useAlertNotifications';
@@ -119,13 +120,15 @@ export default function App({ navigate }: AppProps = {}) {
   // console back to the sign-in gate, which pauses fetches and closes the
   // stream again.
   const consoleUnlocked = configState.status === 'ready' && !sessionGated;
-  // The anonymous principal open mode answers with is not an identity anybody
-  // signed into, so the top bar gets nothing to name or to sign out of: the
-  // control would only ever revoke a session that was never issued.
-  const verifiedSession =
-    sessionState.status === 'ready' && !sessionState.session.anonymous
-      ? sessionState.session
-      : undefined;
+  // Whatever the server says the principal is, anonymous or not. Every
+  // permission question below asks this rather than testing for anonymity,
+  // because an open-mode deployment can elevate its anonymous principal and the
+  // server honours the roles it gave it.
+  const readySession = sessionState.status === 'ready' ? sessionState.session : undefined;
+  // Sign-out is the one thing anonymity still decides: that principal was never
+  // signed into, so the control could only ever revoke a session that was never
+  // issued.
+  const revocableSession = readySession !== undefined && !readySession.anonymous;
 
   // Under a host shell, sign-in goes through the host to the system browser
   // instead of navigating the webview to the identity provider. Pending means
@@ -471,17 +474,14 @@ export default function App({ navigate }: AppProps = {}) {
   // covering. Held in state rather than the URL, so it is not deep-linkable —
   // the one thing here that is a convenience rather than a decision.
   const [showAccess, setShowAccess] = useState(false);
-  const administrator = canAdminister(
-    sessionState.status === 'ready' ? sessionState.session : undefined,
-  );
-  const silenceAvailable =
-    config?.silenceEnabled === true &&
-    canOperate(sessionState.status === 'ready' ? sessionState.session : undefined);
+  const administrator = canAdminister(readySession);
+  const silenceAvailable = config?.silenceEnabled === true && canOperate(readySession);
   // Lifting a silence is offered only where all three hold: the deployment can
   // write to an Alertmanager, the server is new enough to have the endpoint,
   // and the server says this operator may act on this alert. The last is the
   // same per-alert permission the silence button reads — creating and lifting
-  // a silence are one right — and open mode never carries it.
+  // a silence are one right — and the server answers it for the open-mode
+  // principal the same way it answers it for anyone else.
   const removeSilenceReady =
     config?.silenceEnabled === true &&
     config?.silenceRemoveSupported === true &&
@@ -544,8 +544,8 @@ export default function App({ navigate }: AppProps = {}) {
         productName={config?.productName ?? DEFAULT_PRODUCT_NAME}
         connection={connection}
         authMode={config?.authMode}
-        session={verifiedSession}
-        onSignOut={signOut}
+        session={readySession}
+        onSignOut={revocableSession ? signOut : undefined}
         signOutPending={signOutState === 'pending'}
         notificationOptIn={{
           state: notificationOptInState,
@@ -554,6 +554,14 @@ export default function App({ navigate }: AppProps = {}) {
         onOpenAccess={administrator ? () => setShowAccess(true) : undefined}
       />
       <main id="main" className="console">
+        {/* Outside the boot/console branch below, because an elevated open mode
+            is a property of the deployment rather than of whatever the console
+            happens to be showing: it has to be on screen next to the alert list
+            an operator is acting on, not only on the screen they passed
+            through on the way there. */}
+        {config !== undefined ? (
+          <OpenModeBanner role={config.openModeRole} author={config.openModeAuthor} />
+        ) : null}
         {administrator && showAccess ? (
           <AccessPanel onClose={() => setShowAccess(false)} />
         ) : configState.status === 'loading' ? (
@@ -726,9 +734,7 @@ export default function App({ navigate }: AppProps = {}) {
                   <>
                     <BulkActionBar
                       count={selectedIds.length}
-                      canOperate={canOperate(
-                        sessionState.status === 'ready' ? sessionState.session : undefined,
-                      )}
+                      canOperate={canOperate(readySession)}
                       onAcknowledge={() => bulkAcknowledge(selectedIds, true).then(afterBulk)}
                       onClose={() => bulkClose(selectedIds, true).then(afterBulk)}
                       onAssign={(assignee) => bulkAssign(selectedIds, assignee).then(afterBulk)}
@@ -757,9 +763,10 @@ export default function App({ navigate }: AppProps = {}) {
                       onOpenAlert={openAlert}
                       onSilenceGroup={
                         // Both halves matter: the deployment has to be able to
-                        // write a silence at all, and this operator has to be
-                        // allowed to. In open mode every reader is an anonymous
-                        // viewer, so the control would only ever answer 403.
+                        // write a silence at all, and this principal has to be
+                        // allowed to — which an elevated open mode's anonymous
+                        // principal is, so this asks its roles rather than
+                        // whether anybody signed in.
                         silenceAvailable
                           ? (group) =>
                               openGroupSilence(
@@ -785,9 +792,7 @@ export default function App({ navigate }: AppProps = {}) {
                   <>
                     <BulkActionBar
                       count={selectedIds.length}
-                      canOperate={canOperate(
-                        sessionState.status === 'ready' ? sessionState.session : undefined,
-                      )}
+                      canOperate={canOperate(readySession)}
                       onAcknowledge={() => bulkAcknowledge(selectedIds, true).then(afterBulk)}
                       onClose={() => bulkClose(selectedIds, true).then(afterBulk)}
                       onAssign={(assignee) => bulkAssign(selectedIds, assignee).then(afterBulk)}

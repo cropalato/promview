@@ -105,7 +105,10 @@ func run() error {
 	// any of /api/v1/auth/*. Every other mode needs both, which is why the
 	// manager is built here rather than inside the branch that picks how people
 	// prove who they are.
-	var authenticator auth.Authenticator = auth.OpenAuthenticator{}
+	warnAboutOpenModeElevation(cfg, instruments)
+	var authenticator auth.Authenticator = auth.OpenAuthenticator{
+		Role: auth.Role(cfg.OpenModeRole), Author: cfg.OpenModeAuthor,
+	}
 	var authenticationHandler http.Handler
 	// Non-nil only in the modes that check credentials. Its buckets are keyed
 	// by attacker-chosen usernames, so it has to be swept or it is a way to
@@ -336,6 +339,39 @@ func runStreamPruning(
 // loop can be tested without a database.
 type expiryStore interface {
 	ExpireStaleAlerts(ctx context.Context, defaultStaleAfter time.Duration, now time.Time) (int, error)
+}
+
+// warnAboutOpenModeElevation says loudly what an elevated open mode means.
+//
+// Two warnings rather than one, because the two are not the same decision. An
+// operator-elevated deployment lets anyone who can reach the port acknowledge
+// and silence, which is recoverable. An administrator-elevated one lets them
+// rewrite who can do what, and the binding they write outlives the lab: switch
+// that deployment to OIDC later and it carries a grant nobody can account for.
+//
+// The gauge matters more than either line. A warning printed once at startup is
+// not something anybody can alert on, and the deployment this is meant to catch
+// is one nobody is looking at.
+func warnAboutOpenModeElevation(cfg config.Config, instruments *metrics.Metrics) {
+	if cfg.AuthMode != "open" {
+		return
+	}
+	elevated := cfg.OpenModeRole != string(auth.RoleViewer)
+	instruments.OpenModeElevated(cfg.OpenModeRole, elevated)
+	if !elevated {
+		return
+	}
+	slog.Warn(
+		"OPEN MODE ELEVATION ENABLED: every unauthenticated reader can act, and nothing they do can be attributed to a person",
+		"role", cfg.OpenModeRole, "recorded_as", cfg.OpenModeAuthor, "listen", cfg.ListenAddress,
+	)
+	if cfg.OpenModeRole == string(auth.RoleAdministrator) {
+		slog.Warn(
+			"OPEN MODE GRANTS ADMINISTRATOR: anyone who can reach this port can change who has access, "+
+				"and the bindings they write outlive this deployment's open mode",
+			"listen", cfg.ListenAddress,
+		)
+	}
 }
 
 // runLoginLimiterSweeps drops rate-limit buckets nobody has touched.

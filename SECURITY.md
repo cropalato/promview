@@ -81,6 +81,13 @@ them are welcome as issues, but they are not vulnerabilities:
 
 - Serve Promview over TLS. OIDC issuer and redirect URLs must be HTTPS, and
   `PROMVIEW_SESSION_COOKIE_SECURE=false` is accepted only for loopback testing.
+- **`PROMVIEW_OPEN_MODE_ROLE` above `viewer` grants that role to everyone who can
+  reach the port, with no sign-in.** It exists for labs. Nothing done under it
+  can be attributed to a person, and `administrator` lets any reader rewrite who
+  has access, with bindings that outlive the lab. Alert on
+  `promview_open_mode_elevated == 1` across the fleet: a startup warning is not
+  something anybody watches, and this is the setting that rides into production
+  unnoticed.
 - Rotate a source token with `promview source set`; bootstrap configuration will
   not overwrite a rotated credential.
 - Create at least one administrator binding before the first OIDC login.

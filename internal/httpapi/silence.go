@@ -382,8 +382,15 @@ func (api *API) silenceWindow(durationSeconds int64) (time.Duration, error) {
 
 // silenceAuthor is who the Alertmanager will record. Email first: it is what
 // identifies a person across the tools an incident actually spans.
+// silenceAuthor is the name Alertmanager records against a silence.
+//
+// An anonymous reader with no operator grant has no name to record, and
+// Alertmanager refuses an unnamed silence - so a plain open-mode deployment
+// still cannot silence anything, exactly as before. An elevated one does have a
+// name: deliberately the mode's, not a person's, because that is honestly all
+// the deployment knows about who did this.
 func silenceAuthor(principal auth.Principal) string {
-	if principal.Anonymous {
+	if principal.Anonymous && !principal.CanOperate() {
 		return ""
 	}
 	for _, candidate := range []string{principal.Email, principal.Subject, principal.DisplayName} {

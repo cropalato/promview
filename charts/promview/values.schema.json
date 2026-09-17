@@ -79,6 +79,18 @@
             "boolean",
             "null"
           ]
+        },
+        "openModeRole": {
+          "type": "string",
+          "enum": [
+            "viewer",
+            "operator",
+            "administrator"
+          ]
+        },
+        "openModeAuthor": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

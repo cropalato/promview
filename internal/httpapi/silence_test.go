@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -640,5 +641,128 @@ func TestConfigReportsWhetherSignInIsRequired(t *testing.T) {
 					payload.AuthMode, payload.RequiresSignIn, mode, want)
 			}
 		})
+	}
+}
+
+// Open mode elevation, exercised through the handler rather than the capability
+// check, because the request path is where it either works or silently does not.
+func openModeHandler(t *testing.T, role string, store *fakeStore) (http.Handler, *fakeSilencer) {
+	t.Helper()
+	cfg := silenceConfig()
+	cfg.AuthMode = "open"
+	cfg.OpenModeRole = role
+	cfg.OpenModeAuthor = "lab-console"
+	principal, err := auth.OpenAuthenticator{
+		Role: auth.Role(role), Author: cfg.OpenModeAuthor,
+	}.Authenticate(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	silencer := newFakeSilencer()
+	return New(cfg, store, fakeAuthenticator{principal: principal}, silencer), silencer
+}
+
+// A plain open-mode deployment must be able to do nothing but read, and turning
+// elevation on must not be what discovers that it could all along.
+func TestOpenModeWithoutElevationCannotAct(t *testing.T) {
+	store := &fakeStore{silenceScope: oneTarget()}
+	handler, _ := openModeHandler(t, "viewer", store)
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"},"comment":"maintenance"}`
+	response := postSilence(handler, "/api/v1/groups/silence", body)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestElevatedOpenModeCanSilence(t *testing.T) {
+	store := &fakeStore{silenceScope: oneTarget()}
+	handler, silencer := openModeHandler(t, "operator", store)
+	body := `{"groupBy":["alertname"],"key":{"alertname":"HighCPU"},"comment":"maintenance"}`
+	response := postSilence(handler, "/api/v1/groups/silence", body)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body = %s", response.Code, response.Body.String())
+	}
+	// Alertmanager refuses an unnamed silence, so the author is the point: the
+	// mode's name is what lands in createdBy, and it reads as a mode rather
+	// than as somebody who was never there.
+	for baseURL, silence := range silencer.created {
+		if silence.CreatedBy != "lab-console" {
+			t.Fatalf("createdBy = %q for %s", silence.CreatedBy, baseURL)
+		}
+	}
+	if len(silencer.created) == 0 {
+		t.Fatal("no silence reached an Alertmanager")
+	}
+}
+
+// Alertmanager refuses an unnamed silence, so an elevated open mode has to
+// produce one - deliberately the mode's name, not a person's.
+func TestSilenceAuthorFollowsTheOperatorGrant(t *testing.T) {
+	for role, want := range map[string]string{
+		"viewer":        "",
+		"operator":      "lab-console",
+		"administrator": "lab-console",
+	} {
+		t.Run(role, func(t *testing.T) {
+			principal, err := auth.OpenAuthenticator{
+				Role: auth.Role(role), Author: "lab-console",
+			}.Authenticate(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := silenceAuthor(principal); got != want {
+				t.Fatalf("silenceAuthor() = %q, want %q", got, want)
+			}
+		})
+	}
+	// A signed-in operator is still named after themselves, not the mode.
+	if got := silenceAuthor(operator().principal); got != "ada@example.com" {
+		t.Fatalf("silenceAuthor() = %q for a signed-in operator", got)
+	}
+}
+
+// Administering is the elevation with the longest reach: the bindings written
+// under it outlive the lab. That it works at all is the deployment's choice,
+// warned about loudly at startup; that operator-elevation does NOT reach it is
+// the part worth pinning.
+func TestOpenModeAdministrationFollowsTheGrantedRole(t *testing.T) {
+	for role, want := range map[string]int{
+		"viewer":        http.StatusForbidden,
+		"operator":      http.StatusForbidden,
+		"administrator": http.StatusOK,
+	} {
+		t.Run(role, func(t *testing.T) {
+			store := &fakeStore{}
+			handler, _ := openModeHandler(t, role, store)
+			request := httptest.NewRequest(http.MethodPut, "/api/v1/access/bindings/platform",
+				strings.NewReader(`{"subjectKind":"user","userID":1,"role":"viewer"}`))
+			request.Header.Set("Authorization", "Bearer session-token")
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != want {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, want, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestConfigReportsTheOpenModeRole(t *testing.T) {
+	cfg := silenceConfig()
+	cfg.AuthMode = "open"
+	cfg.OpenModeRole = "operator"
+	cfg.OpenModeAuthor = "lab-console"
+	handler := New(cfg, &fakeStore{}, operator(), newFakeSilencer())
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/config", nil))
+	var payload struct {
+		OpenModeRole   string `json:"openModeRole"`
+		OpenModeAuthor string `json:"openModeAuthor"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.OpenModeRole != "operator" || payload.OpenModeAuthor != "lab-console" {
+		t.Fatalf("payload = %#v", payload)
 	}
 }

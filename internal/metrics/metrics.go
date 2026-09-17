@@ -74,6 +74,8 @@ type Metrics struct {
 	silenceRemovals *prometheus.CounterVec
 	silenceRecords  *prometheus.CounterVec
 
+	openModeElevated *prometheus.GaugeVec
+
 	loginAttempts *prometheus.CounterVec
 	loginDuration *prometheus.HistogramVec
 
@@ -113,6 +115,14 @@ func New(version string) *Metrics {
 			Name: "promview_reconcile_last_success_timestamp_seconds",
 			Help: "When each source last reconciled successfully, in seconds since the epoch.",
 		}, []string{"source"}),
+		openModeElevated: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			// A warning printed once at startup is not something anybody can
+			// alert on, and a lab setting that rode into production is exactly
+			// the thing nobody is looking for. A fleet-wide query on this is
+			// how it gets caught.
+			Name: "promview_open_mode_elevated",
+			Help: "1 when open mode grants more than viewer, labelled with the role it grants.",
+		}, []string{"role"}),
 		loginAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
 			// Brute force against an endpoint nobody counts is invisible: the
 			// server stays healthy, the logs stay quiet, and the only trace is
@@ -197,6 +207,7 @@ func New(version string) *Metrics {
 		m.httpDuration,
 		m.reconcileRuns,
 		m.reconcileLastSuccess,
+		m.openModeElevated,
 		m.loginAttempts,
 		m.loginDuration,
 		m.silenceWrites,
@@ -269,6 +280,20 @@ const (
 	LoginDenied    = "denied"
 	LoginError     = "error"
 )
+
+// OpenModeElevated records what an open-mode deployment grants, as a gauge that
+// is always present so a query for it does not have to distinguish "not
+// elevated" from "too old to report".
+func (m *Metrics) OpenModeElevated(role string, elevated bool) {
+	if m == nil {
+		return
+	}
+	value := 0.0
+	if elevated {
+		value = 1
+	}
+	m.openModeElevated.WithLabelValues(role).Set(value)
+}
 
 // LoginAttempted records one sign-in attempt and how long answering it took.
 func (m *Metrics) LoginAttempted(mode, result string, elapsed time.Duration) {

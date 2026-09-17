@@ -185,29 +185,31 @@ function parseRetryAfter(header: string | null): number | undefined {
 const ROLE_RANK: Record<string, number> = { viewer: 0, operator: 1, administrator: 2 };
 
 /**
- * Whether the session may act on alerts, rather than only read them.
+ * canOperate and canAdminister are a mirror of `internal/auth/authorization.go`
+ * (CanOperate and CanAdminister) and must not drift from it. The server is the
+ * authority and re-checks both on every mutation; these two only decide whether
+ * the console offers the control at all, and a console that disagrees with the
+ * server is wrong in one of two ways — offering a control whose every request
+ * answers 403, or hiding one the deployment deliberately granted.
  *
- * The server is the authority and re-checks this on every mutation; this only
- * decides whether the console offers the control. Offering one that always
- * answers 403 is worse than not offering it, and in open mode every reader is
- * an anonymous viewer, so nothing here can operate.
+ * Both decide on the roles alone, with no test for anonymity. An open-mode
+ * deployment can be told to hand its anonymous principal an operator or
+ * administrator role, and the server honours it; refusing here would hide every
+ * control such a deployment exists to offer.
  */
 export function canOperate(session: SessionInfo | undefined): boolean {
-  if (session === undefined || session.anonymous) {
+  if (session === undefined) {
     return false;
   }
   return session.roles.some((role) => role === 'operator' || role === 'administrator');
 }
 
 /**
- * Whether the console offers the binding administration view.
- *
- * Administrator only, and never anonymous: the server refuses an operator too,
- * because changing who can do what is not an operator action. Offering a view
- * whose every request answers 403 is worse than not offering it.
+ * Administrator only: the server refuses an operator too, because changing who
+ * can do what is not an operator action.
  */
 export function canAdminister(session: SessionInfo | undefined): boolean {
-  if (session === undefined || session.anonymous) {
+  if (session === undefined) {
     return false;
   }
   return session.roles.some((role) => role === 'administrator');
