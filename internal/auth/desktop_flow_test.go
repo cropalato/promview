@@ -46,7 +46,7 @@ func desktopHandler(codes DesktopCodeRepository) (*OIDCHandler, *fakeOIDCTransac
 	transactions := &fakeOIDCTransactionRepository{}
 	return NewOIDCHandler(
 		transactions,
-		&fakeOIDCIdentityRepository{},
+		&fakeDirectoryIdentityRepository{},
 		NewSessionManager(&fakeSessionRepository{}, time.Hour),
 		&fakeOIDCProvider{},
 		false,

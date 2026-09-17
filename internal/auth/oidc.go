@@ -35,19 +35,13 @@ type OIDCProviderConfig struct {
 	GroupsClaim      string
 }
 
-type OIDCIdentity struct {
-	Issuer      string
-	Subject     string
-	Username    string
-	Email       string
-	DisplayName string
-	Groups      []string
-	Nonce       string
-}
-
 type OIDCProvider interface {
 	AuthorizationURL(state, nonce, codeChallenge string) string
-	Exchange(context.Context, string, string) (OIDCIdentity, error)
+	// Exchange returns the identity and, separately, the nonce the provider
+	// echoed. The nonce is transport state that belongs to this one round trip;
+	// keeping it inside the identity put it within reach of everything
+	// downstream that has no business seeing it.
+	Exchange(context.Context, string, string) (DirectoryIdentity, string, error)
 }
 
 type OIDCTransaction struct {
@@ -66,13 +60,9 @@ type OIDCTransactionRepository interface {
 	ConsumeOIDCTransaction(context.Context, []byte, time.Time) (OIDCTransaction, error)
 }
 
-type OIDCIdentityRepository interface {
-	ResolveOIDCIdentity(context.Context, OIDCIdentity) (Principal, error)
-}
-
 type OIDCHandler struct {
 	repository   OIDCTransactionRepository
-	identities   OIDCIdentityRepository
+	identities   DirectoryIdentityRepository
 	sessions     *SessionManager
 	provider     OIDCProvider
 	cookieSecure bool
@@ -84,7 +74,7 @@ type OIDCHandler struct {
 
 func NewOIDCHandler(
 	repository OIDCTransactionRepository,
-	identities OIDCIdentityRepository,
+	identities DirectoryIdentityRepository,
 	sessions *SessionManager,
 	provider OIDCProvider,
 	cookieSecure bool,
@@ -214,16 +204,16 @@ func (handler *OIDCHandler) callback(response http.ResponseWriter, request *http
 		http.Error(response, "identity provider rejected sign-in", http.StatusBadRequest)
 		return
 	}
-	identity, err := handler.provider.Exchange(request.Context(), request.URL.Query().Get("code"), transaction.CodeVerifier)
+	identity, nonce, err := handler.provider.Exchange(request.Context(), request.URL.Query().Get("code"), transaction.CodeVerifier)
 	if err != nil {
 		http.Error(response, "identity provider validation failed", http.StatusBadGateway)
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(transaction.Nonce), []byte(identity.Nonce)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(transaction.Nonce), []byte(nonce)) != 1 {
 		http.Error(response, "identity provider validation failed", http.StatusBadGateway)
 		return
 	}
-	principal, err := handler.identities.ResolveOIDCIdentity(request.Context(), identity)
+	principal, err := handler.identities.ResolveDirectoryIdentity(request.Context(), identity)
 	if errors.Is(err, ErrAccessDenied) {
 		http.Error(response, "read access denied", http.StatusForbidden)
 		return
@@ -361,35 +351,34 @@ func (provider *discoveredOIDCProvider) AuthorizationURL(state, nonce, codeChall
 	)
 }
 
-func (provider *discoveredOIDCProvider) Exchange(ctx context.Context, code, codeVerifier string) (OIDCIdentity, error) {
+func (provider *discoveredOIDCProvider) Exchange(ctx context.Context, code, codeVerifier string) (DirectoryIdentity, string, error) {
 	ctx = coreoidc.ClientContext(ctx, provider.httpClient)
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, provider.httpClient)
 	token, err := provider.oauthConfig.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
 	if err != nil {
-		return OIDCIdentity{}, fmt.Errorf("exchange authorization code: %w", err)
+		return DirectoryIdentity{}, "", fmt.Errorf("exchange authorization code: %w", err)
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok || rawIDToken == "" {
-		return OIDCIdentity{}, errors.New("token response has no ID token")
+		return DirectoryIdentity{}, "", errors.New("token response has no ID token")
 	}
 	idToken, err := provider.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return OIDCIdentity{}, fmt.Errorf("verify ID token: %w", err)
+		return DirectoryIdentity{}, "", fmt.Errorf("verify ID token: %w", err)
 	}
 	var claims map[string]json.RawMessage
 	if err := idToken.Claims(&claims); err != nil {
-		return OIDCIdentity{}, fmt.Errorf("decode ID token claims: %w", err)
+		return DirectoryIdentity{}, "", fmt.Errorf("decode ID token claims: %w", err)
 	}
 	nonce := stringClaim(claims, "nonce")
 	if nonce == "" {
-		return OIDCIdentity{}, errors.New("ID token has no nonce")
+		return DirectoryIdentity{}, "", errors.New("ID token has no nonce")
 	}
-	return OIDCIdentity{
+	return DirectoryIdentity{
 		Issuer: idToken.Issuer, Subject: idToken.Subject,
 		Username: stringClaim(claims, provider.usernameClaim), Email: stringClaim(claims, provider.emailClaim),
 		DisplayName: stringClaim(claims, provider.displayNameClaim), Groups: stringsClaim(claims, provider.groupsClaim),
-		Nonce: nonce,
-	}, nil
+	}, nonce, nil
 }
 
 func stringClaim(claims map[string]json.RawMessage, name string) string {

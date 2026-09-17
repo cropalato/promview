@@ -62,7 +62,7 @@ func TestRouterNotFoundForRoutesTheModeDoesNotImplement(t *testing.T) {
 func TestRouterDelegatesToTheOIDCHandler(t *testing.T) {
 	provider := &fakeOIDCProvider{}
 	oidc := NewOIDCHandler(
-		&fakeOIDCTransactionRepository{}, &fakeOIDCIdentityRepository{},
+		&fakeOIDCTransactionRepository{}, &fakeDirectoryIdentityRepository{},
 		NewSessionManager(&fakeSessionRepository{}, time.Hour), provider, false, time.Hour, nil,
 	)
 	router := NewRouter(RouterConfig{Sessions: NewSessionManager(&fakeSessionRepository{}, time.Hour), OIDC: oidc})

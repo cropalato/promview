@@ -288,7 +288,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := store.SetRoleBinding(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	oidcPrincipal, err := store.ResolveOIDCIdentity(ctx, auth.OIDCIdentity{
+	oidcPrincipal, err := store.ResolveDirectoryIdentity(ctx, auth.DirectoryIdentity{
 		Issuer: "https://identity.example.com", Subject: "user-1", Email: "user@example.com",
 		DisplayName: "User One", Groups: []string{"platform-viewers"},
 	})
@@ -306,7 +306,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := store.SetRoleBinding(ctx, paymentsBinding); err != nil {
 		t.Fatal(err)
 	}
-	paymentsPrincipal, err := store.ResolveOIDCIdentity(ctx, auth.OIDCIdentity{
+	paymentsPrincipal, err := store.ResolveDirectoryIdentity(ctx, auth.DirectoryIdentity{
 		Issuer: "https://identity.example.com", Subject: "user-2", DisplayName: "Payments User",
 		Groups: []string{"payments-viewers"},
 	})
@@ -361,7 +361,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err != nil || session.Principal.Subject != oidcPrincipal.Subject || !session.Principal.CanRead() {
 		t.Fatalf("session = %#v, error = %v", session, err)
 	}
-	if _, err := store.ResolveOIDCIdentity(ctx, auth.OIDCIdentity{
+	if _, err := store.ResolveDirectoryIdentity(ctx, auth.DirectoryIdentity{
 		Issuer: "https://identity.example.com", Subject: "user-1", DisplayName: "User One",
 		Groups: []string{"unmapped"},
 	}); !errors.Is(err, auth.ErrAccessDenied) {
@@ -370,7 +370,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if _, err := store.FindSession(ctx, auth.HashSessionToken(token), time.Now().UTC()); !errors.Is(err, auth.ErrUnauthenticated) {
 		t.Fatalf("session after group removal error = %v, want unauthenticated", err)
 	}
-	if oidcPrincipal, err = store.ResolveOIDCIdentity(ctx, auth.OIDCIdentity{
+	if oidcPrincipal, err = store.ResolveDirectoryIdentity(ctx, auth.DirectoryIdentity{
 		Issuer: "https://identity.example.com", Subject: "user-1", DisplayName: "User One",
 		Groups: []string{"platform-viewers"},
 	}); err != nil {

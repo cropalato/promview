@@ -219,7 +219,7 @@ func (store *Store) ConsumeOIDCTransaction(ctx context.Context, stateHash []byte
 	return transaction, nil
 }
 
-func (store *Store) ResolveOIDCIdentity(ctx context.Context, identity auth.OIDCIdentity) (auth.Principal, error) {
+func (store *Store) ResolveDirectoryIdentity(ctx context.Context, identity auth.DirectoryIdentity) (auth.Principal, error) {
 	if identity.Issuer == "" || identity.Subject == "" {
 		return auth.Principal{}, errors.New("OIDC issuer and subject are required")
 	}
@@ -379,7 +379,7 @@ func (store *Store) AuthorizationDiagnostics(ctx context.Context) (auth.Authoriz
 	var currentIdentityID int64
 	for rows.Next() {
 		var identityID int64
-		var identity auth.OIDCIdentityDiagnostic
+		var identity auth.DirectoryIdentityDiagnostic
 		var group *string
 		if err := rows.Scan(&identityID, &identity.UserID, &identity.Issuer, &identity.Subject, &identity.Username, &identity.Email, &identity.DisplayName, &identity.LastSeenAt, &group); err != nil {
 			return diagnostics, fmt.Errorf("scan OIDC identity: %w", err)

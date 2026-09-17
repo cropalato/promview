@@ -48,14 +48,15 @@ type RoleBinding struct {
 	Matchers    []LabelMatcher `json:"matchers,omitempty"`
 }
 
-// AuthorizationDiagnostics contains persisted OIDC identity and binding data for administrators.
-// It deliberately excludes provider tokens and Promview sessions.
+// AuthorizationDiagnostics contains persisted directory identity and binding
+// data for administrators. It deliberately excludes provider tokens and
+// Promview sessions.
 type AuthorizationDiagnostics struct {
-	Identities []OIDCIdentityDiagnostic `json:"identities"`
-	Bindings   []RoleBinding            `json:"bindings"`
+	Identities []DirectoryIdentityDiagnostic `json:"identities"`
+	Bindings   []RoleBinding                 `json:"bindings"`
 }
 
-type OIDCIdentityDiagnostic struct {
+type DirectoryIdentityDiagnostic struct {
 	UserID      int64     `json:"userID"`
 	Issuer      string    `json:"issuer"`
 	Subject     string    `json:"subject"`
