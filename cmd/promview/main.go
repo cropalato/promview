@@ -133,14 +133,32 @@ func run() error {
 				store, store, sessionManager, provider,
 				cfg.SessionCookieSecure, sessionTTL, store,
 			)
-		case "local":
-			directory, err := auth.NewLocalDirectory(store)
-			if err != nil {
-				return err
+		case "local", "ldap":
+			var verifier auth.CredentialVerifier
+			if cfg.AuthMode == "local" {
+				directory, err := auth.NewLocalDirectory(store)
+				if err != nil {
+					return err
+				}
+				verifier = directory
+			} else {
+				directory, err := auth.NewLDAPDirectory(auth.LDAPConfig{
+					URL: cfg.LDAPURL, Issuer: cfg.LDAPIssuer,
+					BindDN: cfg.LDAPBindDN, BindPassword: cfg.LDAPBindPassword,
+					BaseDN: cfg.LDAPBaseDN, UserFilter: cfg.LDAPUserFilter,
+					GroupAttribute: cfg.LDAPGroupAttribute, GroupFormat: cfg.LDAPGroupFormat,
+					UsernameAttr: cfg.LDAPUsernameAttr, EmailAttr: cfg.LDAPEmailAttr,
+					DisplayNameAttr: cfg.LDAPDisplayNameAttr,
+					StartTLS:        cfg.LDAPStartTLS, Timeout: cfg.LDAPTimeout,
+				})
+				if err != nil {
+					return err
+				}
+				verifier = directory
 			}
 			loginLimiter = auth.NewLoginLimiter(auth.LoginLimiterConfig{})
 			routes.Credentials = auth.NewCredentialHandler(auth.CredentialHandlerConfig{
-				Mode: cfg.AuthMode, Verifier: directory, Identities: store,
+				Mode: cfg.AuthMode, Verifier: verifier, Identities: store,
 				Sessions: sessionManager, Limiter: loginLimiter,
 				CookieSecure: cfg.SessionCookieSecure, SessionTTL: sessionTTL,
 				DesktopCodes: store, Observe: instruments.LoginAttempted,
@@ -445,7 +463,15 @@ func runAccessCommand(ctx context.Context, store accessStore, args []string) err
 			binding.SubjectKind = auth.SubjectUser
 			binding.UserID = *userID
 		case *userID == 0 && subjectIssuer != "" && subjectGroup != "":
+			// The scheme names the directory, so the kind follows from the
+			// issuer rather than needing a flag of its own - and a binding whose
+			// kind disagreed with its issuer could never match anything while
+			// looking exactly like access somebody has.
 			binding.SubjectKind = auth.SubjectOIDCGroup
+			if scheme, _, found := strings.Cut(subjectIssuer, "://"); found &&
+				(scheme == "ldap" || scheme == "ldaps") {
+				binding.SubjectKind = auth.SubjectLDAPGroup
+			}
 			binding.SubjectIssuer = subjectIssuer
 			binding.SubjectGroup = subjectGroup
 		default:

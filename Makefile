@@ -26,7 +26,7 @@ load-test:
 	PROMVIEW_LOAD_TEST=1 go test ./internal/postgres -run TestLoadAtCommittedScale -v -timeout 20m
 
 test-postgres:
-	go test ./internal/postgres -run 'TestPendingMigrations|TestStoreIngestAndList|TestStoreExpireStaleAlerts|TestStoreGroupAlerts|TestStorePreferences|TestStoreReconcileSource|TestStoreReviveExpiredAlerts|TestStoreUpdateSource|TestStoreSilenceScope|TestStoreSilenceVisibility|TestStoreSyncSilences|TestStoreDesktopAuthCodes|TestStorePruneStreamEvents|TestStoreAssignAlert|TestStoreAlertNotes|TestStoreCloseAlert|TestStoreBulkActions|TestStoreRoleBindingAdministration|TestStoreCreatesTheFirstAdministrator|TestStoreLocal'
+	go test ./internal/postgres -run 'TestPendingMigrations|TestStoreIngestAndList|TestStoreExpireStaleAlerts|TestStoreGroupAlerts|TestStorePreferences|TestStoreReconcileSource|TestStoreReviveExpiredAlerts|TestStoreUpdateSource|TestStoreSilenceScope|TestStoreSilenceVisibility|TestStoreSyncSilences|TestStoreDesktopAuthCodes|TestStorePruneStreamEvents|TestStoreAssignAlert|TestStoreAlertNotes|TestStoreCloseAlert|TestStoreBulkActions|TestStoreRoleBindingAdministration|TestStoreCreatesTheFirstAdministrator|TestStoreLocal|TestStoreLDAP'
 
 build:
 	mkdir -p build
@@ -74,11 +74,13 @@ helm-lint:
 	helm lint --strict charts/promview
 	helm lint --strict charts/promview --values charts/promview/ci/oidc-values.yaml
 	helm lint --strict charts/promview --values charts/promview/ci/local-values.yaml
+	helm lint --strict charts/promview --values charts/promview/ci/ldap-values.yaml
 
 helm-template:
 	helm template promview charts/promview --namespace promview --kube-version 1.30.0 >/dev/null
 	helm template promview charts/promview --namespace promview --kube-version 1.30.0 --values charts/promview/ci/oidc-values.yaml >/dev/null
 	helm template promview charts/promview --namespace promview --kube-version 1.30.0 --values charts/promview/ci/local-values.yaml >/dev/null
+	helm template promview charts/promview --namespace promview --kube-version 1.30.0 --values charts/promview/ci/ldap-values.yaml >/dev/null
 
 helm-package:
 	mkdir -p build

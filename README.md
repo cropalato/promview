@@ -532,7 +532,8 @@ Three things are worth knowing from here, with the rest in
 | --- | --- | --- |
 | `open` (default) | Nobody — every reader is an anonymous viewer | A demo, or a deployment behind a proxy that has already authenticated the request |
 | `oidc` | Anyone your identity provider says, with groups mapped to roles | You have an IdP |
-| `local` | Accounts created with `promview user`, held in Promview's own database | You have no IdP and a handful of operators |
+| `ldap` | Anyone your directory says, with directory groups mapped to roles | You have Active Directory, OpenLDAP or FreeIPA and no OIDC |
+| `local` | Accounts created with `promview user`, held in Promview's own database | You have neither, and a handful of operators |
 
 Open mode can read alerts but cannot acknowledge, assign, close, note or silence
 anything: those record who did them, and an anonymous reader has no name to
@@ -573,6 +574,57 @@ are the two reasons somebody cannot sign in.
 listening on loopback. On a published listener an insecure session cookie is a
 sign-in that appears to work and then does not stick, which reads as a broken
 console rather than as a misconfiguration.
+
+## LDAP Authentication
+
+Search-then-bind: a service account searches for the user, then the connection
+binds again as that user with the password they typed. The directory performs
+the password check, so Promview never sees or stores a password hash.
+
+```sh
+export PROMVIEW_AUTH_MODE=ldap
+export PROMVIEW_LDAP_URL='ldaps://dc.corp.example.com:636'
+export PROMVIEW_LDAP_BIND_DN='cn=promview,ou=service,dc=corp,dc=example,dc=com'
+export PROMVIEW_LDAP_BIND_PASSWORD='replace-with-service-password'
+export PROMVIEW_LDAP_BASE_DN='dc=corp,dc=example,dc=com'
+export PROMVIEW_LDAP_USER_FILTER='(sAMAccountName=%s)'   # (uid=%s) for OpenLDAP
+docker compose up --build
+```
+
+`ldaps://` is required unless you set `PROMVIEW_LDAP_START_TLS=true` or point at
+a loopback host. Search-then-bind puts the user's own password on the wire, and
+cleartext to a remote directory is the one outcome the whole flow exists to
+avoid.
+
+**Group names must be written the way Promview stores them.** By default a
+group's common name, lowercased — `promview-administrators`, not
+`CN=Promview-Administrators,OU=Groups,DC=corp,DC=example,DC=com`. Set
+`PROMVIEW_LDAP_GROUP_FORMAT=dn` to store full distinguished names instead, which
+is for directories whose CNs collide across OUs. Either way, sign in once and
+run `promview access inspect` to see exactly what the directory reported:
+
+```sh
+docker compose run --rm app access inspect
+
+docker compose run --rm app access set \
+  --name promview-administrators \
+  --role administrator \
+  --issuer 'ldaps://dc.corp.example.com:636' \
+  --group 'promview-administrators'
+```
+
+The issuer's scheme decides whether a binding is an LDAP or an OIDC group
+binding, so there is no separate flag to forget. A binding written against the
+wrong scheme is refused rather than stored, because one that can never match
+looks exactly like access somebody has.
+
+Failed sign-ins are throttled per username **before** the bind is forwarded.
+Without that, this login form would be a way to drive every directory account
+into its own lockout policy.
+
+`PROMVIEW_LDAP_ISSUER` overrides what bindings are written against, defaulting
+to `PROMVIEW_LDAP_URL`. Set it if you may move or rename the server later:
+otherwise every binding stops matching the day the hostname changes.
 
 ## OIDC Authentication
 

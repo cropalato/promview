@@ -100,13 +100,90 @@ func TestLoadRejectsUnknownAuthMode(t *testing.T) {
 	}
 }
 
-// Deleted when LDAP ships. Until then it is what keeps the mode from being
-// accepted by a binary that cannot serve it.
-func TestLoadRejectsLDAPMode(t *testing.T) {
+func ldapEnvironment(t *testing.T) {
+	t.Helper()
 	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
 	t.Setenv("PROMVIEW_AUTH_MODE", "ldap")
-	if _, err := Load(); err == nil {
-		t.Fatal("Load() error = nil, want error")
+	t.Setenv("PROMVIEW_LDAP_URL", "ldaps://dc.example.com:636")
+	t.Setenv("PROMVIEW_LDAP_BASE_DN", "dc=example,dc=com")
+	t.Setenv("PROMVIEW_LDAP_BIND_DN", "cn=svc,dc=example,dc=com")
+	t.Setenv("PROMVIEW_LDAP_BIND_PASSWORD", "service-secret")
+}
+
+func TestLoadLDAPConfiguration(t *testing.T) {
+	ldapEnvironment(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LDAPUserFilter != "(uid=%s)" || cfg.LDAPGroupAttribute != "memberOf" || cfg.LDAPGroupFormat != "cn" {
+		t.Fatalf("LDAP config = %#v", cfg)
+	}
+}
+
+func TestLoadRequiresLDAPSettings(t *testing.T) {
+	for _, missing := range []string{
+		"PROMVIEW_LDAP_URL",
+		"PROMVIEW_LDAP_BASE_DN",
+		"PROMVIEW_LDAP_BIND_DN",
+		// A blank service password is far more likely to be an unset variable
+		// than a directory that allows an anonymous search.
+		"PROMVIEW_LDAP_BIND_PASSWORD",
+	} {
+		t.Run(missing, func(t *testing.T) {
+			ldapEnvironment(t)
+			t.Setenv(missing, "")
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() accepted a configuration with %s unset", missing)
+			}
+		})
+	}
+}
+
+// Search-then-bind sends the user's own password to the directory. Over
+// cleartext that password is on the wire, which is the one outcome the whole
+// flow exists to avoid.
+func TestLoadRejectsCleartextLDAPToARemoteHost(t *testing.T) {
+	for name, test := range map[string]struct {
+		url      string
+		startTLS bool
+		wantErr  bool
+	}{
+		"ldaps":                   {url: "ldaps://dc.example.com:636"},
+		"cleartext remote":        {url: "ldap://dc.example.com:389", wantErr: true},
+		"cleartext with StartTLS": {url: "ldap://dc.example.com:389", startTLS: true},
+		"cleartext loopback":      {url: "ldap://127.0.0.1:389"},
+		"not a URL":               {url: "dc.example.com", wantErr: true},
+		"wrong scheme":            {url: "https://dc.example.com", wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ldapEnvironment(t)
+			t.Setenv("PROMVIEW_LDAP_URL", test.url)
+			if test.startTLS {
+				t.Setenv("PROMVIEW_LDAP_START_TLS", "true")
+			}
+			_, err := Load()
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Load() error = %v, wantErr = %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsUnusableLDAPSettings(t *testing.T) {
+	for name, setting := range map[string][2]string{
+		"filter without a placeholder": {"PROMVIEW_LDAP_USER_FILTER", "(uid=fixed)"},
+		"unknown group format":         {"PROMVIEW_LDAP_GROUP_FORMAT", "uuid"},
+		"issuer that is not a URL":     {"PROMVIEW_LDAP_ISSUER", "dc.example.com"},
+		"issuer with an HTTP scheme":   {"PROMVIEW_LDAP_ISSUER", "https://identity.example.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ldapEnvironment(t)
+			t.Setenv(setting[0], setting[1])
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() accepted %s=%q", setting[0], setting[1])
+			}
+		})
 	}
 }
 

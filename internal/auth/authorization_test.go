@@ -71,3 +71,33 @@ func TestParseLabelMatcherRejectsInvalidValues(t *testing.T) {
 		}
 	}
 }
+
+// The scheme is what keeps the two group kinds from being written against each
+// other's directories. A binding whose issuer scheme contradicts its kind can
+// never match anything, and would sit in the list looking like access somebody
+// has.
+func TestValidateRoleBindingMatchesTheIssuerSchemeToTheSubjectKind(t *testing.T) {
+	for name, test := range map[string]struct {
+		kind, issuer string
+		wantErr      bool
+	}{
+		"oidc over https":  {kind: SubjectOIDCGroup, issuer: "https://identity.example.com"},
+		"oidc over http":   {kind: SubjectOIDCGroup, issuer: "http://localhost:9000"},
+		"oidc over ldaps":  {kind: SubjectOIDCGroup, issuer: "ldaps://dc.example.com", wantErr: true},
+		"ldap over ldaps":  {kind: SubjectLDAPGroup, issuer: "ldaps://dc.example.com:636"},
+		"ldap over ldap":   {kind: SubjectLDAPGroup, issuer: "ldap://127.0.0.1:389"},
+		"ldap over https":  {kind: SubjectLDAPGroup, issuer: "https://identity.example.com", wantErr: true},
+		"not a URL at all": {kind: SubjectLDAPGroup, issuer: "dc.example.com", wantErr: true},
+		"unknown subject":  {kind: "kerberos_realm", issuer: "https://identity.example.com", wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := ValidateRoleBinding(RoleBinding{
+				Name: "platform", SubjectKind: test.kind,
+				SubjectIssuer: test.issuer, SubjectGroup: "platform", Role: RoleOperator,
+			})
+			if (err != nil) != test.wantErr {
+				t.Fatalf("error = %v, wantErr = %v", err, test.wantErr)
+			}
+		})
+	}
+}

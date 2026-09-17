@@ -78,6 +78,13 @@ spec:
                   name: {{ .Values.oidc.existingSecret }}
                   key: {{ .Values.oidc.clientSecretKey }}
             {{- end }}
+            {{- if eq .Values.auth.mode "ldap" }}
+            - name: PROMVIEW_LDAP_BIND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ldap.existingSecret }}
+                  key: {{ .Values.ldap.bindPasswordKey }}
+            {{- end }}
             {{- if .Values.bootstrapSource.enabled }}
             - name: PROMVIEW_BOOTSTRAP_SOURCE_TOKEN
               valueFrom:

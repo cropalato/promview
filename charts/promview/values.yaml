@@ -45,6 +45,32 @@ oidc:
   # Deprecated: use auth.sessionCookieSecure. Removed in 0.2.0.
   cookieSecure: true
 
+ldap:
+  # ldaps://, or ldap:// with startTLS, or a loopback host. Search-then-bind
+  # sends the user's own password to the directory, so cleartext to a remote
+  # host is refused.
+  url: ""
+  # What group bindings are written against. Defaults to url; set it separately
+  # so moving or renaming a server does not stop every binding matching.
+  issuer: ""
+  bindDN: ""
+  existingSecret: ""
+  bindPasswordKey: bind-password
+  baseDN: ""
+  # One %s, replaced by the escaped username. (sAMAccountName=%s) for Active
+  # Directory.
+  userFilter: "(uid=%s)"
+  groupAttribute: memberOf
+  # cn stores a group's common name, dn its full distinguished name. Bindings
+  # must be written in whichever form is stored; `promview access inspect`
+  # shows what a directory actually reported.
+  groupFormat: cn
+  usernameAttribute: uid
+  emailAttribute: mail
+  displayNameAttribute: cn
+  startTLS: false
+  timeout: 10s
+
 bootstrapSource:
   enabled: false
   slug: ""

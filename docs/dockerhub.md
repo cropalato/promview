@@ -142,7 +142,7 @@ All configuration is environment variables. The container runs as UID/GID
 | `PROMVIEW_METRICS_ADDRESS` | `:9090` | Metrics and health listener. |
 | `PROMVIEW_WEB_DIRECTORY` | `/app/web` | Built console assets. |
 | `PROMVIEW_MIGRATIONS_DIRECTORY` | `/app/migrations` | Migration files. |
-| `PROMVIEW_AUTH_MODE` | `open` | `open`, `oidc`, or `local`. One at a time. |
+| `PROMVIEW_AUTH_MODE` | `open` | `open`, `oidc`, `ldap`, or `local`. One at a time. |
 
 ### Source bootstrap
 
@@ -186,6 +186,15 @@ server-owned bindings.
 | `PROMVIEW_OIDC_EMAIL_CLAIM` | `email` | |
 | `PROMVIEW_OIDC_DISPLAY_NAME_CLAIM` | `name` | |
 | `PROMVIEW_OIDC_GROUPS_CLAIM` | `groups` | |
+| `PROMVIEW_LDAP_URL` | _(unset)_ | Required in LDAP mode. `ldaps://` unless StartTLS is on or the host is loopback. |
+| `PROMVIEW_LDAP_BIND_DN` / `PROMVIEW_LDAP_BIND_PASSWORD` | _(unset)_ | Service account that performs the user search. Required in LDAP mode. |
+| `PROMVIEW_LDAP_BASE_DN` | _(unset)_ | Search base. Required in LDAP mode. |
+| `PROMVIEW_LDAP_USER_FILTER` | `(uid=%s)` | One `%s`, replaced by the escaped username. `(sAMAccountName=%s)` for Active Directory. |
+| `PROMVIEW_LDAP_GROUP_ATTRIBUTE` | `memberOf` | Attribute listing the user's groups. |
+| `PROMVIEW_LDAP_GROUP_FORMAT` | `cn` | `cn` or `dn`. Bindings must be written in the same form. |
+| `PROMVIEW_LDAP_ISSUER` | _(the URL)_ | What group bindings are written against. |
+| `PROMVIEW_LDAP_START_TLS` | `false` | Upgrade a plain `ldap://` connection. Never falls back to cleartext. |
+| `PROMVIEW_LDAP_TIMEOUT` | `10s` | Bounds one directory request. |
 | `PROMVIEW_LOCAL_PASSWORD` | _(unset)_ | Password for `promview user create` / `set-password` when `--password-stdin` is not used. |
 | `PROMVIEW_SESSION_COOKIE_SECURE` | `true` | May be `false` only on loopback hosts. Accepts the former `PROMVIEW_OIDC_COOKIE_SECURE` as a deprecated alias. |
 
