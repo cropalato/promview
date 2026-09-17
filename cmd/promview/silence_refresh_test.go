@@ -322,3 +322,31 @@ func (silencer stubSilencer) CreateSilence(
 func (silencer stubSilencer) DeleteSilence(context.Context, string, string, string) error {
 	return silencer.err
 }
+
+// Removing a silence has more at stake than creating one: it puts alerts back
+// on screen, and the operator who lifted it is watching for exactly that. The
+// refresh must happen when the removal landed, and must not when it did not.
+func TestRefreshingSilencerRefreshesAfterARemovalThatLanded(t *testing.T) {
+	withFastDelays(t, 1)
+	store := &refreshStore{sources: map[string]string{"demo": "http://am-a:9093"}}
+	client := &refreshClient{}
+	refresher := newSilenceRefresher(store, client, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go refresher.run(ctx)
+
+	failing := refreshingSilencer{inner: stubSilencer{err: errors.New("HTTP 404")}, refresher: refresher, ctx: ctx}
+	if err := failing.DeleteSilence(ctx, "http://am-a:9093", "", "sil-1"); err == nil {
+		t.Fatal("DeleteSilence() succeeded, want the inner failure surfaced")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if client.count() != 0 {
+		t.Errorf("refreshed %d times after a removal that never landed", client.count())
+	}
+
+	ok := refreshingSilencer{inner: stubSilencer{}, refresher: refresher, ctx: ctx}
+	if err := ok.DeleteSilence(ctx, "http://am-a:9093", "", "sil-1"); err != nil {
+		t.Fatalf("DeleteSilence() error = %v", err)
+	}
+	waitFor(t, "the refresh a successful removal triggers", func() bool { return client.count() == 1 })
+}
