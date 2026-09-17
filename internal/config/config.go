@@ -180,11 +180,6 @@ func Load() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("PROMVIEW_DATABASE_URL is required")
 	}
-	switch cfg.AuthMode {
-	case "open", "oidc":
-	default:
-		return Config{}, errors.New("PROMVIEW_AUTH_MODE must be open or oidc")
-	}
 	bootstrapValues := 0
 	for _, value := range []string{cfg.BootstrapSourceSlug, cfg.BootstrapSourceToken} {
 		if value != "" {
@@ -197,14 +192,26 @@ func Load() (Config, error) {
 	if cfg.BootstrapSourceSlug != "" && cfg.BootstrapSourceName == "" {
 		cfg.BootstrapSourceName = cfg.BootstrapSourceSlug
 	}
-	if cfg.AuthMode == "oidc" {
+	// One case per mode, each validating its own settings. A mode is listed
+	// here only once the binary can actually serve it: admitting one early
+	// starts a server that authenticates nobody and explains nothing, which is
+	// a worse answer than refusing to boot.
+	switch cfg.AuthMode {
+	case "open":
+	case "oidc":
 		if err := validateOIDC(cfg); err != nil {
 			return Config{}, err
 		}
+	default:
+		return Config{}, fmt.Errorf("PROMVIEW_AUTH_MODE must be one of %s", strings.Join(SupportedAuthModes, ", "))
 	}
 
 	return cfg, nil
 }
+
+// SupportedAuthModes is what PROMVIEW_AUTH_MODE accepts, in the order the error
+// message lists them.
+var SupportedAuthModes = []string{"open", "oidc"}
 
 func validateOIDC(cfg Config) error {
 	required := map[string]string{
