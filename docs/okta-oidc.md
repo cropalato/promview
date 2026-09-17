@@ -161,12 +161,12 @@ export PROMVIEW_OIDC_ISSUER_URL='https://your-org.okta.com/oauth2/default'
 export PROMVIEW_OIDC_CLIENT_ID='your-test-client-id'
 export PROMVIEW_OIDC_CLIENT_SECRET='your-test-client-secret'
 export PROMVIEW_OIDC_REDIRECT_URL='http://localhost:8080/api/v1/auth/oidc/callback'
-export PROMVIEW_OIDC_COOKIE_SECURE=false
+export PROMVIEW_SESSION_COOKIE_SECURE=false
 
 docker compose up --detach --build
 ```
 
-Never set `PROMVIEW_OIDC_COOKIE_SECURE=false` for a non-loopback deployment. Promview rejects that configuration.
+Never set `PROMVIEW_SESSION_COOKIE_SECURE=false` for a non-loopback deployment. Promview rejects that configuration.
 
 ## Verify The Integration
 

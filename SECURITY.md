@@ -80,7 +80,7 @@ them are welcome as issues, but they are not vulnerabilities:
 ## Operator notes
 
 - Serve Promview over TLS. OIDC issuer and redirect URLs must be HTTPS, and
-  `PROMVIEW_OIDC_COOKIE_SECURE=false` is accepted only for loopback testing.
+  `PROMVIEW_SESSION_COOKIE_SECURE=false` is accepted only for loopback testing.
 - Rotate a source token with `promview source set`; bootstrap configuration will
   not overwrite a rotated credential.
 - Create at least one administrator binding before the first OIDC login.

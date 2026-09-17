@@ -212,7 +212,7 @@ func (handler *OIDCHandler) callback(response http.ResponseWriter, request *http
 	transaction, err := handler.repository.ConsumeOIDCTransaction(
 		request.Context(), HashSessionToken(state), time.Now().UTC(),
 	)
-	handler.clearCookie(response, oidcStateCookieName, "/api/v1/auth/oidc/callback")
+	clearCookie(response, oidcStateCookieName, "/api/v1/auth/oidc/callback", handler.cookieSecure)
 	if err != nil {
 		http.Error(response, "invalid sign-in response", http.StatusBadRequest)
 		return
@@ -249,12 +249,7 @@ func (handler *OIDCHandler) callback(response http.ResponseWriter, request *http
 		http.Error(response, "could not create session", http.StatusInternalServerError)
 		return
 	}
-	expiresAt := time.Now().UTC().Add(handler.sessionTTL)
-	http.SetCookie(response, &http.Cookie{
-		Name: SessionCookieName, Value: token, Path: "/", HttpOnly: true,
-		Secure: handler.cookieSecure, SameSite: http.SameSiteLaxMode,
-		MaxAge: int(handler.sessionTTL.Seconds()), Expires: expiresAt,
-	})
+	writeSessionCookie(response, token, handler.sessionTTL, handler.cookieSecure)
 	http.Redirect(response, request, "/", http.StatusSeeOther)
 }
 
@@ -333,15 +328,8 @@ func (handler *OIDCHandler) logout(response http.ResponseWriter, request *http.R
 		http.Error(response, "could not end session", http.StatusInternalServerError)
 		return
 	}
-	handler.clearCookie(response, SessionCookieName, "/")
+	clearCookie(response, SessionCookieName, "/", handler.cookieSecure)
 	response.WriteHeader(http.StatusNoContent)
-}
-
-func (handler *OIDCHandler) clearCookie(response http.ResponseWriter, name, path string) {
-	http.SetCookie(response, &http.Cookie{
-		Name: name, Value: "", Path: path, HttpOnly: true, Secure: handler.cookieSecure,
-		SameSite: http.SameSiteLaxMode, MaxAge: -1, Expires: time.Unix(1, 0),
-	})
 }
 
 func randomToken() (string, error) {

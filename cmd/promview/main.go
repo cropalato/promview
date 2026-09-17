@@ -119,7 +119,7 @@ func run() error {
 			}
 			authenticationHandler = auth.NewOIDCHandler(
 				store, store, sessionManager, provider,
-				cfg.OIDCCookieSecure, sessionTTL, store,
+				cfg.SessionCookieSecure, sessionTTL, store,
 			)
 		}
 	}

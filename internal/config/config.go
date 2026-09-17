@@ -33,7 +33,11 @@ type Config struct {
 	OIDCEmailClaim       string
 	OIDCDisplayNameClaim string
 	OIDCGroupsClaim      string
-	OIDCCookieSecure     bool
+	// SessionCookieSecure marks the session cookie Secure. It is not an OIDC
+	// setting: every mode that issues a session writes the same cookie, and a
+	// deployment that had to set one flag per mode would eventually set one and
+	// not the other.
+	SessionCookieSecure bool
 	// AlertStaleAfter is the default window an alert may go unreported before it
 	// expires, used for sources that do not set their own. Zero disables expiry.
 	AlertStaleAfter time.Duration
@@ -79,7 +83,7 @@ func Load() (Config, error) {
 		OIDCEmailClaim:       envOrDefault("PROMVIEW_OIDC_EMAIL_CLAIM", "email"),
 		OIDCDisplayNameClaim: envOrDefault("PROMVIEW_OIDC_DISPLAY_NAME_CLAIM", "name"),
 		OIDCGroupsClaim:      envOrDefault("PROMVIEW_OIDC_GROUPS_CLAIM", "groups"),
-		OIDCCookieSecure:     true,
+		SessionCookieSecure:  true,
 		// Three times Alertmanager's default repeat_interval of 4h: long enough
 		// that a live alert is always re-reported before its window closes, so
 		// expiry never fights a repeat notification.
@@ -99,12 +103,21 @@ func Load() (Config, error) {
 		// served by a fresh snapshot than by replaying a day of history.
 		StreamRetention: 24 * time.Hour,
 	}
-	if raw := os.Getenv("PROMVIEW_OIDC_COOKIE_SECURE"); raw != "" {
+	// PROMVIEW_OIDC_COOKIE_SECURE is the name this setting shipped under while
+	// OIDC was the only mode that issued a session. Honoured so an upgrade does
+	// not silently re-enable Secure on a deployment that had turned it off.
+	cookieSecureName := "PROMVIEW_SESSION_COOKIE_SECURE"
+	raw := os.Getenv(cookieSecureName)
+	if raw == "" {
+		cookieSecureName = "PROMVIEW_OIDC_COOKIE_SECURE"
+		raw = os.Getenv(cookieSecureName)
+	}
+	if raw != "" {
 		secure, err := strconv.ParseBool(raw)
 		if err != nil {
-			return Config{}, errors.New("PROMVIEW_OIDC_COOKIE_SECURE must be true or false")
+			return Config{}, fmt.Errorf("%s must be true or false", cookieSecureName)
 		}
-		cfg.OIDCCookieSecure = secure
+		cfg.SessionCookieSecure = secure
 	}
 
 	if raw := os.Getenv("PROMVIEW_ALERT_STALE_AFTER"); raw != "" {
@@ -222,8 +235,8 @@ func validateOIDC(cfg Config) error {
 	if redirect.Path != "/api/v1/auth/oidc/callback" || redirect.RawQuery != "" || redirect.Fragment != "" {
 		return errors.New("PROMVIEW_OIDC_REDIRECT_URL must end at /api/v1/auth/oidc/callback without a query or fragment")
 	}
-	if !cfg.OIDCCookieSecure && !isLoopbackHost(redirect.Hostname()) {
-		return errors.New("PROMVIEW_OIDC_COOKIE_SECURE may be false only on loopback hosts")
+	if !cfg.SessionCookieSecure && !isLoopbackHost(redirect.Hostname()) {
+		return errors.New("PROMVIEW_SESSION_COOKIE_SECURE may be false only on loopback hosts")
 	}
 	if !contains(cfg.OIDCScopes, "openid") {
 		return errors.New("PROMVIEW_OIDC_SCOPES must include openid")

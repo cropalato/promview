@@ -22,6 +22,10 @@ database:
 
 auth:
   mode: open
+  # Marks the session cookie Secure. Unset falls back to oidc.cookieSecure,
+  # which is the name it shipped under while OIDC was the only mode issuing a
+  # session. May be false only on loopback hosts.
+  sessionCookieSecure: null
 
 oidc:
   issuerURL: ""
@@ -38,6 +42,7 @@ oidc:
   emailClaim: email
   displayNameClaim: name
   groupsClaim: groups
+  # Deprecated: use auth.sessionCookieSecure. Removed in 0.2.0.
   cookieSecure: true
 
 bootstrapSource:
