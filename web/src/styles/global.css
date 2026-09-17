@@ -2219,6 +2219,65 @@ kbd {
 /* Assignment is a field rather than a picker: an alert is routinely handed to
    somebody who has never signed in here, so the input takes whatever the
    operator types. */
+/* The selection column is a checkbox, not data: narrow, centred, and it must
+   not take width from the columns an operator has sized. */
+.col-select {
+  width: 34px;
+  text-align: center;
+}
+
+/* Only with a selection, above the table it acts on. */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-raise);
+}
+
+.bulk-bar-count {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.bulk-bar-note {
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+.bulk-bar-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.bulk-bar-input {
+  flex: 1;
+  min-width: 160px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel-raise);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  resize: vertical;
+}
+
+.bulk-bar-input::placeholder {
+  color: var(--text-faint);
+}
+
+.bulk-bar-error {
+  font-size: 12.5px;
+  color: var(--down);
+}
+
 .detail-assignee {
   display: flex;
   align-items: center;

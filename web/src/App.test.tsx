@@ -574,7 +574,12 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
-    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent?.trim());
+    const headers = screen
+      .getAllByRole('columnheader')
+      // The leading selection checkbox is not a data column; it carries an
+      // aria-label rather than text, so it reads as empty here.
+      .map((header) => header.textContent?.trim())
+      .filter((label) => label !== '');
     expect(headers).toEqual(['Severity', 'Alert', 'prometheus_cluster']);
     // The label column renders the alert's own label value.
     expect(screen.getByText('yul')).toBeInTheDocument();
@@ -743,7 +748,12 @@ describe('App', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
-    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent?.trim());
+    const headers = screen
+      .getAllByRole('columnheader')
+      // The leading selection checkbox is not a data column; it carries an
+      // aria-label rather than text, so it reads as empty here.
+      .map((header) => header.textContent?.trim())
+      .filter((label) => label !== '');
     expect(headers).toEqual(['Severity', 'Alert', 'prometheus_cluster']);
     expect(screen.getByText('yul')).toBeInTheDocument();
   });

@@ -23,6 +23,21 @@ export interface AlertPagination {
   onLoadMore: () => void;
 }
 
+/**
+ * Checkbox selection across the loaded page.
+ *
+ * `allSelected` is computed by the owner rather than derived here, because what
+ * "all" means belongs to whoever holds the selection: the loaded page, not
+ * everything the query would match. A header box that claimed to select four
+ * thousand alerts while selecting a hundred would be a lie with consequences.
+ */
+export interface AlertSelection {
+  selectedIds: ReadonlySet<string>;
+  allSelected: boolean;
+  onToggle: (id: string) => void;
+  onToggleAll: () => void;
+}
+
 interface AlertTableProps {
   alerts: readonly AlertSummary[];
   filterActive?: boolean;
@@ -33,6 +48,12 @@ interface AlertTableProps {
   selectedId?: string | null;
   /** Row activation (click or Enter) opens the alert detail view. */
   onSelect?: (alert: AlertSummary) => void;
+  /**
+   * Multi-select for bulk actions. Absent leaves the table exactly as it was:
+   * no checkbox column, no extra header cell, no change to the widths an
+   * operator has dragged.
+   */
+  selection?: AlertSelection;
   /** Active server-side sort; the matching header exposes it via aria-sort. */
   sort?: AlertSort | null;
   /** Header activation requests a server-side sort for that column. */
@@ -62,6 +83,7 @@ export function AlertTable({
   pagination,
   selectedId = null,
   onSelect,
+  selection,
   sort = null,
   onSortChange,
   columns = FIXED_COLUMNS,
@@ -76,6 +98,7 @@ export function AlertTable({
         <table className="alert-table">
           <caption>Active alerts ({alerts.length})</caption>
           <colgroup>
+            {selection !== undefined ? <col className="col-select" /> : null}
             {columns.map((column) => {
               const width = columnWidth(column, columnWidths[column.id]);
               return (
@@ -89,6 +112,17 @@ export function AlertTable({
           </colgroup>
           <thead>
             <tr>
+              {selection !== undefined ? (
+                <th className="col-select" scope="col">
+                  <input
+                    type="checkbox"
+                    aria-label="Select every loaded alert"
+                    checked={selection.allSelected}
+                    disabled={alerts.length === 0}
+                    onChange={selection.onToggleAll}
+                  />
+                </th>
+              ) : null}
               {columns.map((column) => (
                 <ColumnHeader
                   key={column.id}
@@ -105,7 +139,7 @@ export function AlertTable({
           <tbody>
             {alerts.length === 0 ? (
               <tr className="empty-row">
-                <td colSpan={columns.length}>
+                <td colSpan={columns.length + (selection !== undefined ? 1 : 0)}>
                   <EmptyState
                     filterActive={filterActive}
                     query={filterQuery}
@@ -121,6 +155,7 @@ export function AlertTable({
                   columns={columns}
                   selected={alert.id === selectedId}
                   onSelect={onSelect}
+                  selection={selection}
                 />
               ))
             )}
@@ -220,11 +255,13 @@ function AlertRow({
   columns,
   selected = false,
   onSelect,
+  selection,
 }: {
   alert: AlertSummary;
   columns: readonly ColumnDefinition[];
   selected?: boolean;
   onSelect?: (alert: AlertSummary) => void;
+  selection?: AlertSelection;
 }) {
   const selectable = onSelect !== undefined;
   // Dimmed rather than hidden. A silenced alert is still firing, and an
@@ -254,6 +291,20 @@ function AlertRow({
       onClick={() => onSelect?.(alert)}
       onKeyDown={handleKeyDown}
     >
+      {selection !== undefined ? (
+        <td className="col-select">
+          <input
+            type="checkbox"
+            aria-label={`Select ${alert.name}`}
+            checked={selection.selectedIds.has(alert.id)}
+            onChange={() => selection.onToggle(alert.id)}
+            // The row opens the drawer on click; ticking a box must not also
+            // open it, or selecting several alerts would leave the last one's
+            // detail covering the list.
+            onClick={(event) => event.stopPropagation()}
+          />
+        </td>
+      ) : null}
       {columns.map((column) => (
         <AlertCell key={column.id} alert={alert} column={column} />
       ))}
