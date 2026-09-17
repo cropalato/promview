@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  LOGIN_URL,
   LOGOUT_URL,
   OIDC_LOGIN_URL,
   SESSION_URL,
@@ -8,6 +9,7 @@ import {
   highestRole,
   loadSession,
   parseSession,
+  signIn,
   canOperate,
 } from './session';
 import type { SessionInfo } from './session';
@@ -137,6 +139,115 @@ describe('highestRole', () => {
   it('returns undefined when no known role is present', () => {
     expect(highestRole([])).toBeUndefined();
     expect(highestRole(['superuser'])).toBeUndefined();
+  });
+});
+
+describe('signIn', () => {
+  const credentials = { username: 'ada', password: 'correct horse battery staple' };
+
+  it('posts the credentials in the body of the login endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+
+    await expect(signIn(credentials, fetchImpl)).resolves.toBeUndefined();
+
+    expect(LOGIN_URL).toBe('/api/v1/auth/login');
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/v1/auth/login');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(String(init.body))).toEqual(credentials);
+  });
+
+  it('never puts the password anywhere but the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+
+    await signIn(credentials, fetchImpl);
+
+    // A password in a URL survives in access logs, Referer headers and
+    // browser history; in web storage it survives the tab.
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).not.toContain(credentials.password);
+    expect(JSON.stringify(init.headers)).not.toContain(credentials.password);
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
+  it('reports a 401 without saying which part was wrong', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('invalid credentials', { status: 401 }));
+
+    try {
+      await signIn(credentials, fetchImpl);
+      expect.unreachable('signIn should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(SessionError);
+      expect((error as SessionError).status).toBe(401);
+      // The server answers the same way for an unknown username, a wrong
+      // password, a disabled account and a locked one, so nothing here may
+      // name which of them it was.
+      expect((error as SessionError).message).not.toMatch(/no such|unknown|disabled|locked/i);
+    }
+  });
+
+  it('maps a 403 to the no-read-access failure', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('read access denied', { status: 403 }));
+
+    try {
+      await signIn(credentials, fetchImpl);
+      expect.unreachable('signIn should have thrown');
+    } catch (error) {
+      expect((error as SessionError).status).toBe(403);
+      expect((error as SessionError).message).toMatch(/read access/i);
+    }
+  });
+
+  it('carries the wait the server asked for on a 429', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response('too many sign-in attempts', {
+        status: 429,
+        headers: { 'Retry-After': '45' },
+      }),
+    );
+
+    try {
+      await signIn(credentials, fetchImpl);
+      expect.unreachable('signIn should have thrown');
+    } catch (error) {
+      expect((error as SessionError).status).toBe(429);
+      expect((error as SessionError).retryAfterSeconds).toBe(45);
+    }
+  });
+
+  it('leaves the wait unset when the server did not say', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 429 }));
+
+    try {
+      await signIn(credentials, fetchImpl);
+      expect.unreachable('signIn should have thrown');
+    } catch (error) {
+      expect((error as SessionError).retryAfterSeconds).toBeUndefined();
+    }
+  });
+
+  it('fails with the HTTP status for anything else', async () => {
+    // A broken directory is not a wrong password, and must not read as one.
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('upstream', { status: 502 }));
+
+    try {
+      await signIn(credentials, fetchImpl);
+      expect.unreachable('signIn should have thrown');
+    } catch (error) {
+      expect((error as SessionError).status).toBe(502);
+      expect((error as SessionError).message).toMatch(/HTTP 502/);
+    }
+  });
+
+  it('wraps network failures', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+
+    await expect(signIn(credentials, fetchImpl)).rejects.toThrowError(/unable to reach/i);
   });
 });
 

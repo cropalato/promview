@@ -7,10 +7,16 @@
  */
 import { apiUrl } from './apiBase';
 import { apiFetch } from './transport';
-export type AuthMode = 'open' | 'oidc';
+export type AuthMode = 'open' | 'oidc' | 'local';
 
 export interface RuntimeConfig {
   authMode: AuthMode;
+  /**
+   * Whether this deployment gates the console behind a sign-in. The console
+   * asks this rather than testing for a particular mode, so a mode it has
+   * never heard of still gates correctly instead of falling open.
+   */
+  requiresSignIn: boolean;
   productName: string;
   /**
    * Whether this deployment can write silences to an Alertmanager at all, and
@@ -41,7 +47,12 @@ export interface RuntimeConfig {
 
 export const RUNTIME_CONFIG_URL = '/api/v1/config';
 
-const AUTH_MODES: readonly AuthMode[] = ['open', 'oidc'];
+// An unrecognised mode is refused rather than tolerated. The console is served
+// by the same binary that reports the mode, so version skew is bounded and a
+// value from outside this list means the deployment is broken, not that the
+// console is old — and guessing would gate, or fail to gate, on an auth model
+// nobody here has seen.
+const AUTH_MODES: readonly AuthMode[] = ['open', 'oidc', 'local'];
 const DEFAULT_PRODUCT_NAME = 'Promview';
 // Mirrors the server's own defaults, used only when an older backend does not
 // report them. Two hours, capped at thirty days.
@@ -102,6 +113,7 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
 
   const {
     authMode,
+    requiresSignIn,
     productName,
     silenceEnabled,
     silenceDefaultSeconds,
@@ -113,9 +125,14 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
     throw new RuntimeConfigError(`Unsupported auth mode: ${String(authMode)}`);
   }
 
+  const mode = authMode as AuthMode;
   const max = positiveSeconds(silenceMaxSeconds, DEFAULT_SILENCE_MAX_SECONDS);
   return {
-    authMode: authMode as AuthMode,
+    authMode: mode,
+    // A server too old to report the flag still has a mode, and every mode but
+    // open issues sessions. Reading absent as false would leave the console
+    // firing unauthenticated requests forever against a deployment that gates.
+    requiresSignIn: typeof requiresSignIn === 'boolean' ? requiresSignIn : mode !== 'open',
     productName:
       typeof productName === 'string' && productName.trim() !== ''
         ? productName

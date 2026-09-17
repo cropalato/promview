@@ -2316,6 +2316,17 @@ kbd {
   background: var(--panel-raise);
 }
 
+/* The sign-in gate is a boot panel, so the form sits narrow and centred in it
+   rather than spanning the console the way the binding form does. */
+.signin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+  text-align: left;
+}
+
 .access-field {
   display: flex;
   flex-direction: column;
