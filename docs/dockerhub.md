@@ -12,16 +12,18 @@ grouping, inhibition and notification.
 
 ## Status
 
-Promview is **alpha**. The API, the schema and the configuration surface may
-change between releases. Pin an exact tag; do not track a moving one in
-production.
+Promview is **beta**. Every feature on its first-release list is implemented and
+the committed scale is measured, but it has not been run in anger by anyone but
+its author. The API and schema are settled enough to build on; pin an exact tag
+rather than tracking a moving one in production.
 
 ## Tags and architecture
 
 | Tag | Meaning |
 | --- | --- |
-| `0.1.0-alpha.N` | An exact release. Pin this. |
-| `alpha` | Moves to the newest pre-release. |
+| `0.1.0-beta.N` | An exact release. Pin this. |
+| `beta` | Moves to the newest beta. |
+| `alpha` | Frozen at the last alpha, `0.1.0-alpha.40`. |
 | `latest` | Moves to the newest stable release. None exists yet. |
 
 Images are built for **linux/amd64 only**. There is no arm64 image: the project
@@ -52,7 +54,7 @@ services:
       - postgres-data:/var/lib/postgresql/data
 
   migrate:
-    image: cropalato/promview:alpha
+    image: cropalato/promview:beta
     command: ["migrate"]
     depends_on:
       postgres:
@@ -64,7 +66,7 @@ services:
       PROMVIEW_BOOTSTRAP_SOURCE_TOKEN: development-token
 
   app:
-    image: cropalato/promview:alpha
+    image: cropalato/promview:beta
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -199,7 +201,7 @@ serialized pre-install and pre-upgrade migration hook:
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
   --create-namespace \
-  --version 0.1.0-alpha.40
+  --version 0.1.0-beta.1
 ```
 
 The chart version is the application version. Create the PostgreSQL Secret
@@ -209,7 +211,7 @@ before installing. See
 ## Also published at
 
 ```sh
-docker pull ghcr.io/cropalato/promview:alpha
+docker pull ghcr.io/cropalato/promview:beta
 ```
 
 ## Desktop client

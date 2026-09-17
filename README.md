@@ -15,9 +15,10 @@ same UI. Alertmanager keeps routing, grouping, inhibition and notification.
 
 ![The Promview console showing fifteen firing alerts from two Alertmanager sources, sorted by severity with four criticals at the top, above columns for state, summary, team, instance, age and source](docs/images/console.png)
 
-> [!WARNING]
-> Promview is **alpha**. The API, the schema and the configuration surface may
-> change between releases. Pin an exact version; do not track a moving tag in
+> [!IMPORTANT]
+> Promview is **beta**. Every feature on the first-release list is implemented
+> and the committed scale is measured, but it has not been run in anger by
+> anyone but its author. Pin an exact version; do not track a moving tag in
 > production. See [Project Status](#project-status).
 
 ## Contents
@@ -88,8 +89,8 @@ stack in [`docs/dockerhub.md`](docs/dockerhub.md). Images are published for
 **linux/amd64** to both registries:
 
 ```sh
-docker pull cropalato/promview:alpha
-docker pull ghcr.io/cropalato/promview:alpha
+docker pull cropalato/promview:beta
+docker pull ghcr.io/cropalato/promview:beta
 ```
 
 Send an Alertmanager-compatible webhook to the bootstrapped `demo` source:
@@ -139,7 +140,7 @@ Promview ships a Helm chart for an external PostgreSQL database:
 ```sh
 helm upgrade --install promview oci://ghcr.io/cropalato/charts/promview \
   --namespace promview \
-  --version 0.1.0-alpha.40
+  --version 0.1.0-beta.1
 ```
 
 Create the required database Secret before installation. The pinned chart version is
@@ -602,7 +603,13 @@ Production issuer and redirect URLs must use HTTPS. Loopback HTTP is supported f
 
 ## Project Status
 
-Alpha, and honest about it. What works today:
+Beta. Every item on the project's own first-release list is implemented, and
+the scale the plan commits to is measured rather than assumed — 50,000 alerts
+ingested at 1,236/s against PostgreSQL 18.6, with the first page and its counts
+answered in 100ms.
+
+Beta means the feature set is settled and the known gaps are written down, not
+that it has been proven in production. What works today:
 
 | Area | State |
 | --- | --- |
@@ -620,7 +627,7 @@ Alpha, and honest about it. What works today:
 | Close (local) | Working |
 | Bulk actions | Working |
 | Authorization administration API | Working |
-| Stream event retention | Planned |
+| Stream event retention | Working |
 
 A source being reconciled no longer has its alerts retired by expiry behind its
 back: reconciliation records that the Alertmanager still holds an alert, and
@@ -629,8 +636,20 @@ expiry retired before this is returned to firing on the next pass, keeping its
 occurrence and its acknowledgement. Expiry is unchanged where it is still the
 only signal — a source with no Alertmanager URL, or one that cannot be reached.
 
-Issues and discussion are welcome — this is a young project and real deployment
-feedback is the most useful thing it can get.
+### Known limits
+
+- **Concurrent load is unmeasured.** The load test drives the store directly,
+  with one client and no readers. A deployment ingesting while consoles poll the
+  stream and reconciliation sweeps is a different question, and it is the one
+  most likely to find a problem first.
+- **Binding administration has no console UI.** The API exists and the CLI
+  exists; the console does not offer either, so granting access is a `curl`.
+- **`cmd/promview` is the thinnest-tested package**, at 58% statement coverage —
+  the expiry, reconcile and pruning loops.
+
+Issues and discussion are welcome. Beta means the feature set is settled and the
+gaps above are written down, not that this has been proven in production; real
+deployment feedback is the most useful thing it can get.
 
 ## Documentation
 

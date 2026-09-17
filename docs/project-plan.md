@@ -71,7 +71,11 @@ The current implementation provides:
 - bulk acknowledge, assign, close and note over an explicit selection, reported per alert
 - stream event retention with a watermark, and a `stream.gap` signal for clients resuming past it
 
-Every item on the first-release list is implemented. The console can now assign, close and note from the alert drawer, reach closed alerts through an Open/Closed filter, and re-snapshot when the stream reports a retention gap. Row selection and a bulk action bar cover the flat list and the members of expanded groups. A collapsed group is deliberately not selectable: its members are not loaded, and the bulk API takes explicit ids rather than a filter, so the checkbox could only act on a subset it had not shown. Acting on a whole group would need the confirm-what-it-matches step group silence already uses, and is not built.
+Every item on the first-release list is implemented, which is what moved the
+project from alpha to beta. What beta does not claim: concurrent load is
+unmeasured (the load test drives the store with one client and no readers),
+binding administration has no console UI, and `cmd/promview` is the
+thinnest-tested package at 58% statement coverage. The console can now assign, close and note from the alert drawer, reach closed alerts through an Open/Closed filter, and re-snapshot when the stream reports a retention gap. Row selection and a bulk action bar cover the flat list and the members of expanded groups. A collapsed group is deliberately not selectable: its members are not loaded, and the bulk API takes explicit ids rather than a filter, so the checkbox could only act on a subset it had not shown. Acting on a whole group would need the confirm-what-it-matches step group silence already uses, and is not built.
 
 ## Goals
 
