@@ -6,6 +6,7 @@ import { formatAge } from '../alerts/format';
 import { SEVERITY_LABELS } from '../alerts/severity';
 import type { AlertSummary } from '../alerts/types';
 import type { GroupChildren } from '../hooks/useGroupChildren';
+import type { AlertSelection } from './AlertTable';
 import { groupId } from '../hooks/useGroupChildren';
 import { EmptyState } from './EmptyState';
 import { ChevronIcon, MoonIcon, SeverityIcon } from './icons';
@@ -37,6 +38,13 @@ import type { AlertPagination } from './AlertTable';
 export interface AlertGroupTableProps {
   groups: readonly AlertGroupSummary[];
   children: Record<string, GroupChildren>;
+  /**
+   * Multi-select over expanded members. Group rows are never selectable: a
+   * collapsed group's members are not loaded, and the bulk API takes explicit
+   * ids rather than a filter, so a group checkbox could only ever act on a
+   * subset it had not shown. You can select what you can see.
+   */
+  selection?: AlertSelection;
   columns?: readonly ColumnDefinition[];
   /** Resized widths keyed by column id; shared with the flat table. */
   columnWidths?: Readonly<Record<string, number>>;
@@ -103,6 +111,7 @@ export function AlertGroupTable({
   onSelect,
   onOpenAlert,
   onSilenceGroup,
+  selection,
 }: AlertGroupTableProps) {
   // The group-control cell precedes every operator column, preserving their
   // saved order and their one-to-one position across every grouped row type.
@@ -157,6 +166,7 @@ export function AlertGroupTable({
             ) : (
               groups.map((group) => (
                 <GroupRows
+                  selection={selection}
                   key={groupId(group.key)}
                   group={group}
                   columns={columns}
@@ -192,6 +202,7 @@ function GroupRows({
   onSelect,
   onOpenAlert,
   onSilenceGroup,
+  selection,
 }: {
   group: AlertGroupSummary;
   columns: readonly ColumnDefinition[];
@@ -204,6 +215,7 @@ function GroupRows({
   onSelect?: (alert: AlertSummary) => void;
   onOpenAlert?: (alertId: string) => void;
   onSilenceGroup?: (group: AlertGroupSummary) => void;
+  selection?: AlertSelection;
 }) {
   const expandable = group.total > 1;
   // A one-member group has nothing to expand into; activating the row opens
@@ -323,6 +335,7 @@ function GroupRows({
       </tr>
       {expanded ? (
         <ChildRows
+          selection={selection}
           group={group}
           columns={columns}
           loaded={loaded}
@@ -342,6 +355,7 @@ function ChildRows({
   selectedId,
   onLoadMoreChildren,
   onSelect,
+  selection,
 }: {
   group: AlertGroupSummary;
   columns: readonly ColumnDefinition[];
@@ -349,6 +363,7 @@ function ChildRows({
   selectedId: string | null;
   onLoadMoreChildren: (key: Record<string, string>) => void;
   onSelect?: (alert: AlertSummary) => void;
+  selection?: AlertSelection;
 }) {
   const remaining = loaded.total - loaded.alerts.length;
   return (
@@ -368,7 +383,18 @@ function ChildRows({
             }
           }}
         >
-          <td className="child-group-cell" />
+          <td className="child-group-cell">
+            {selection !== undefined ? (
+              <input
+                type="checkbox"
+                aria-label={`Select ${alert.name}`}
+                checked={selection.selectedIds.has(alert.id)}
+                onChange={() => selection.onToggle(alert.id)}
+                // The row opens the drawer; ticking must not also open it.
+                onClick={(event) => event.stopPropagation()}
+              />
+            ) : null}
+          </td>
           <AlertCells alert={alert} columns={columns} />
         </tr>
       ))}
