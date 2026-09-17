@@ -42,17 +42,20 @@ type fakeOIDCProvider struct {
 	challenge    string
 	code         string
 	codeVerifier string
-	identity     OIDCIdentity
-	err          error
+	identity     DirectoryIdentity
+	// identityNonce is what Exchange reports the provider echoed. Separate from
+	// the identity, as the real one is.
+	identityNonce string
+	err           error
 }
 
-type fakeOIDCIdentityRepository struct {
-	identity  OIDCIdentity
+type fakeDirectoryIdentityRepository struct {
+	identity  DirectoryIdentity
 	principal Principal
 	err       error
 }
 
-func (repository *fakeOIDCIdentityRepository) ResolveOIDCIdentity(_ context.Context, identity OIDCIdentity) (Principal, error) {
+func (repository *fakeDirectoryIdentityRepository) ResolveDirectoryIdentity(_ context.Context, identity DirectoryIdentity) (Principal, error) {
 	repository.identity = identity
 	if repository.err != nil {
 		return Principal{}, repository.err
@@ -68,17 +71,17 @@ func (provider *fakeOIDCProvider) AuthorizationURL(state, nonce, challenge strin
 	return "https://identity.example.com/authorize?" + query.Encode()
 }
 
-func (provider *fakeOIDCProvider) Exchange(_ context.Context, code, verifier string) (OIDCIdentity, error) {
+func (provider *fakeOIDCProvider) Exchange(_ context.Context, code, verifier string) (DirectoryIdentity, string, error) {
 	provider.code = code
 	provider.codeVerifier = verifier
-	return provider.identity, provider.err
+	return provider.identity, provider.identityNonce, provider.err
 }
 
 func TestOIDCLoginAndCallback(t *testing.T) {
 	transactions := &fakeOIDCTransactionRepository{}
 	sessions := &fakeSessionRepository{}
 	provider := &fakeOIDCProvider{}
-	identities := &fakeOIDCIdentityRepository{principal: Principal{
+	identities := &fakeDirectoryIdentityRepository{principal: Principal{
 		UserID: 1, Subject: "https://identity.example.com|user-1", Roles: []string{"administrator"},
 		Grants: []Grant{{Role: RoleAdministrator}},
 	}}
@@ -96,10 +99,11 @@ func TestOIDCLoginAndCallback(t *testing.T) {
 		t.Fatalf("state cookie = %#v", stateCookie)
 	}
 
-	provider.identity = OIDCIdentity{
+	provider.identity = DirectoryIdentity{
 		Issuer: "https://identity.example.com", Subject: "user-1", Email: "user@example.com",
-		DisplayName: "User One", Groups: []string{"viewers", "admins"}, Nonce: provider.nonce,
+		DisplayName: "User One", Groups: []string{"viewers", "admins"},
 	}
+	provider.identityNonce = provider.nonce
 	callback := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/callback?state="+url.QueryEscape(provider.state)+"&code=authorization-code", nil)
 	callback.AddCookie(stateCookie)
 	callbackResponse := httptest.NewRecorder()
@@ -127,29 +131,31 @@ func TestOIDCLoginAndCallback(t *testing.T) {
 
 func TestOIDCCallbackRejectsNonceAndUnmappedGroups(t *testing.T) {
 	for _, test := range []struct {
-		name     string
-		identity func(string) OIDCIdentity
-		want     int
+		name  string
+		reply func(provider *fakeOIDCProvider)
+		want  int
 	}{
-		{name: "nonce", identity: func(string) OIDCIdentity {
-			return OIDCIdentity{Issuer: "https://identity.example.com", Subject: "user", Groups: []string{"viewers"}, Nonce: "wrong"}
+		{name: "nonce", reply: func(provider *fakeOIDCProvider) {
+			provider.identity = DirectoryIdentity{Issuer: "https://identity.example.com", Subject: "user", Groups: []string{"viewers"}}
+			provider.identityNonce = "wrong"
 		}, want: http.StatusBadGateway},
-		{name: "groups", identity: func(nonce string) OIDCIdentity {
-			return OIDCIdentity{Issuer: "https://identity.example.com", Subject: "user", Groups: []string{"other"}, Nonce: nonce}
+		{name: "groups", reply: func(provider *fakeOIDCProvider) {
+			provider.identity = DirectoryIdentity{Issuer: "https://identity.example.com", Subject: "user", Groups: []string{"other"}}
+			provider.identityNonce = provider.nonce
 		}, want: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			transactions := &fakeOIDCTransactionRepository{}
 			sessions := &fakeSessionRepository{}
 			provider := &fakeOIDCProvider{}
-			identities := &fakeOIDCIdentityRepository{principal: Principal{UserID: 1, Grants: []Grant{{Role: RoleViewer}}}}
+			identities := &fakeDirectoryIdentityRepository{principal: Principal{UserID: 1, Grants: []Grant{{Role: RoleViewer}}}}
 			if test.name == "groups" {
 				identities.err = ErrAccessDenied
 			}
 			handler := NewOIDCHandler(transactions, identities, NewSessionManager(sessions, time.Hour), provider, false, time.Hour, nil)
 			loginResponse := httptest.NewRecorder()
 			handler.ServeHTTP(loginResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/login", nil))
-			provider.identity = test.identity(provider.nonce)
+			test.reply(provider)
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/callback?state="+url.QueryEscape(provider.state)+"&code=code", nil)
 			request.AddCookie(responseCookie(t, loginResponse, oidcStateCookieName))
 			response := httptest.NewRecorder()
@@ -164,7 +170,7 @@ func TestOIDCCallbackRejectsNonceAndUnmappedGroups(t *testing.T) {
 func TestOIDCCallbackRejectsProviderFailure(t *testing.T) {
 	transactions := &fakeOIDCTransactionRepository{}
 	provider := &fakeOIDCProvider{err: errors.New("provider failed")}
-	handler := NewOIDCHandler(transactions, &fakeOIDCIdentityRepository{}, NewSessionManager(&fakeSessionRepository{}, time.Hour), provider, false, time.Hour, nil)
+	handler := NewOIDCHandler(transactions, &fakeDirectoryIdentityRepository{}, NewSessionManager(&fakeSessionRepository{}, time.Hour), provider, false, time.Hour, nil)
 	loginResponse := httptest.NewRecorder()
 	handler.ServeHTTP(loginResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/login", nil))
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/callback?state="+url.QueryEscape(provider.state)+"&code=secret-code", nil)
@@ -246,12 +252,12 @@ func TestDiscoveredOIDCProviderValidatesAndMapsIDToken(t *testing.T) {
 	if parsed.Query().Get("state") != "state" || parsed.Query().Get("code_challenge") != "challenge" || parsed.Query().Get("code_challenge_method") != "S256" {
 		t.Fatalf("authorization query = %v", parsed.Query())
 	}
-	identity, err := provider.Exchange(context.Background(), "authorization-code", "verifier")
+	identity, nonce, err := provider.Exchange(context.Background(), "authorization-code", "verifier")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.Issuer != issuer || identity.Subject != "user-1" || identity.Nonce != "nonce" || identity.Username != "user" || len(identity.Groups) != 1 {
-		t.Fatalf("identity = %#v", identity)
+	if identity.Issuer != issuer || identity.Subject != "user-1" || nonce != "nonce" || identity.Username != "user" || len(identity.Groups) != 1 {
+		t.Fatalf("identity = %#v, nonce = %q", identity, nonce)
 	}
 }
 
