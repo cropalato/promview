@@ -615,3 +615,30 @@ func TestConfigAdvertisesThatTheServerCanResolveASilenceScope(t *testing.T) {
 		t.Errorf("silencePreviewSupported = %v, want true", payload["silencePreviewSupported"])
 	}
 }
+
+// The console asks one question - does this deployment require a sign-in -
+// rather than testing for a particular mode, so a mode it has never heard of
+// still gates it correctly.
+func TestConfigReportsWhetherSignInIsRequired(t *testing.T) {
+	for mode, want := range map[string]bool{"open": false, "oidc": true, "local": true} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := silenceConfig()
+			cfg.AuthMode = mode
+			handler := New(cfg, &fakeStore{}, operator(), newFakeSilencer())
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/config", nil))
+
+			var payload struct {
+				AuthMode       string `json:"authMode"`
+				RequiresSignIn bool   `json:"requiresSignIn"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.AuthMode != mode || payload.RequiresSignIn != want {
+				t.Fatalf("authMode = %q, requiresSignIn = %v, want %q and %v",
+					payload.AuthMode, payload.RequiresSignIn, mode, want)
+			}
+		})
+	}
+}

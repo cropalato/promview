@@ -142,7 +142,7 @@ All configuration is environment variables. The container runs as UID/GID
 | `PROMVIEW_METRICS_ADDRESS` | `:9090` | Metrics and health listener. |
 | `PROMVIEW_WEB_DIRECTORY` | `/app/web` | Built console assets. |
 | `PROMVIEW_MIGRATIONS_DIRECTORY` | `/app/migrations` | Migration files. |
-| `PROMVIEW_AUTH_MODE` | `open` | `open` or `oidc`. |
+| `PROMVIEW_AUTH_MODE` | `open` | `open`, `oidc`, or `local`. One at a time. |
 
 ### Source bootstrap
 
@@ -186,6 +186,7 @@ server-owned bindings.
 | `PROMVIEW_OIDC_EMAIL_CLAIM` | `email` | |
 | `PROMVIEW_OIDC_DISPLAY_NAME_CLAIM` | `name` | |
 | `PROMVIEW_OIDC_GROUPS_CLAIM` | `groups` | |
+| `PROMVIEW_LOCAL_PASSWORD` | _(unset)_ | Password for `promview user create` / `set-password` when `--password-stdin` is not used. |
 | `PROMVIEW_SESSION_COOKIE_SECURE` | `true` | May be `false` only on loopback hosts. Accepts the former `PROMVIEW_OIDC_COOKIE_SECURE` as a deprecated alias. |
 
 See

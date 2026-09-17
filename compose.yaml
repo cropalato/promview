@@ -35,6 +35,9 @@ services:
       PROMVIEW_OIDC_DISPLAY_NAME_CLAIM: ${PROMVIEW_OIDC_DISPLAY_NAME_CLAIM:-name}
       PROMVIEW_OIDC_GROUPS_CLAIM: ${PROMVIEW_OIDC_GROUPS_CLAIM:-groups}
       PROMVIEW_SESSION_COOKIE_SECURE: ${PROMVIEW_SESSION_COOKIE_SECURE:-true}
+      # Local accounts need nothing declared here: they are created with
+      # `docker compose run --rm app user create` once the stack is up.
+      PROMVIEW_LOCAL_PASSWORD: ${PROMVIEW_LOCAL_PASSWORD:-}
 
   app:
     build: .

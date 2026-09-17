@@ -766,8 +766,13 @@ func requestPrincipal(r *http.Request) (auth.Principal, bool) {
 
 func (api *API) getConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authMode":    api.config.AuthMode,
-		"productName": "Promview",
+		"authMode": api.config.AuthMode,
+		// Derivable from authMode, and reported anyway: it turns every
+		// "is this OIDC?" check in the console into one question about what the
+		// deployment requires, so the next authentication mode does not need
+		// the console edited to know it exists.
+		"requiresSignIn": api.config.AuthMode != "open",
+		"productName":    "Promview",
 		// The console needs the deployment's window to default and bound its own
 		// duration control rather than hardcoding one the server would reject.
 		"silenceDefaultSeconds": int64(api.config.SilenceDefaultDuration / time.Second),

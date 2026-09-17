@@ -73,10 +73,12 @@ docker-build:
 helm-lint:
 	helm lint --strict charts/promview
 	helm lint --strict charts/promview --values charts/promview/ci/oidc-values.yaml
+	helm lint --strict charts/promview --values charts/promview/ci/local-values.yaml
 
 helm-template:
 	helm template promview charts/promview --namespace promview --kube-version 1.30.0 >/dev/null
 	helm template promview charts/promview --namespace promview --kube-version 1.30.0 --values charts/promview/ci/oidc-values.yaml >/dev/null
+	helm template promview charts/promview --namespace promview --kube-version 1.30.0 --values charts/promview/ci/local-values.yaml >/dev/null
 
 helm-package:
 	mkdir -p build

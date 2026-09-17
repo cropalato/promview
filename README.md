@@ -524,6 +524,56 @@ Three things are worth knowing from here, with the rest in
   startup and switches the renderer off. `"on"` says the guess is wrong about a
   machine.
 
+## Authentication
+
+`PROMVIEW_AUTH_MODE` picks one method, and one deployment runs one at a time:
+
+| Mode | Who can sign in | When to use it |
+| --- | --- | --- |
+| `open` (default) | Nobody — every reader is an anonymous viewer | A demo, or a deployment behind a proxy that has already authenticated the request |
+| `oidc` | Anyone your identity provider says, with groups mapped to roles | You have an IdP |
+| `local` | Accounts created with `promview user`, held in Promview's own database | You have no IdP and a handful of operators |
+
+Open mode can read alerts but cannot acknowledge, assign, close, note or silence
+anything: those record who did them, and an anonymous reader has no name to
+record.
+
+## Local Accounts
+
+For a small team with no identity provider. Accounts live in Promview's
+database, and roles are granted by user ID rather than by group.
+
+```sh
+export PROMVIEW_AUTH_MODE=local
+docker compose up --build
+```
+
+Create an account and grant it a role. The password is read from standard input
+rather than a flag, because a flag would put it in `argv` — world-readable
+through `/proc` — and in your shell history:
+
+```sh
+printf 'a long passphrase' | docker compose run --rm -T app user create \
+  --username 'ada' --email 'ada@example.com' --password-stdin
+
+docker compose run --rm app access set \
+  --name promview-administrators --role administrator --user-id 1
+```
+
+An account that exists but is bound to nothing can read nothing, so `user
+create` prints the binding command with the new ID in it.
+
+Passwords are hashed with PBKDF2-HMAC-SHA-256 at 600,000 iterations. Repeated
+failures back off, doubling from the fifth attempt and capping at fifteen
+minutes; the lock always expires on its own, and `promview user unlock` ends one
+early. `promview user list` shows which accounts are disabled or locked, which
+are the two reasons somebody cannot sign in.
+
+`PROMVIEW_SESSION_COOKIE_SECURE=false` is accepted only when Promview is
+listening on loopback. On a published listener an insecure session cookie is a
+sign-in that appears to work and then does not stick, which reads as a broken
+console rather than as a misconfiguration.
+
 ## OIDC Authentication
 
 For an Okta-specific walkthrough, see [`docs/okta-oidc.md`](docs/okta-oidc.md).
