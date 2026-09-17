@@ -84,7 +84,11 @@ func TestStoreIngestAndList(t *testing.T) {
 	if migrationCount != len(upMigrations) {
 		t.Fatalf("migration count = %d, want %d", migrationCount, len(upMigrations))
 	}
-	if _, err := pool.Exec(ctx, "TRUNCATE user_preferences, oidc_login_transactions, desktop_auth_codes, sessions, role_binding_matchers, role_bindings, auth_identity_groups, auth_identities, users, stream_events, alert_history, alert_notes, alerts RESTART IDENTITY"); err != nil {
+	// CASCADE rather than naming every dependent table. The list was written by
+	// hand and a new table referencing `users` failed the truncate rather than
+	// being added to it, which is a test breaking on a schema change that has
+	// nothing to do with what it tests.
+	if _, err := pool.Exec(ctx, "TRUNCATE user_preferences, oidc_login_transactions, desktop_auth_codes, sessions, role_binding_matchers, role_bindings, auth_identity_groups, auth_identities, users, stream_events, alert_history, alert_notes, alerts RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 
