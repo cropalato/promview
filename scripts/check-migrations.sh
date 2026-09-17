@@ -3,49 +3,37 @@ set -eu
 
 : "${PROMVIEW_TEST_DATABASE_URL:?PROMVIEW_TEST_DATABASE_URL must point to a disposable PostgreSQL database}"
 
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000001_initial.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000002_stream_events.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000003_alert_history.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000004_auth_sources.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000005_oidc_transactions.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000006_stream_notification_metadata.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000007_oidc_authorization.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000008_alert_acknowledgements.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000009_alert_expiry.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000010_alert_group_index.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000011_user_preferences.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000012_alert_reconciliation.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000013_alertmanager_silences.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000014_desktop_auth.up.sql
+# Enumerated from the directory rather than listed here. The list used to be
+# written out by hand and stopped being updated at 000014, so eight migrations -
+# and every down migration among them - were skipped by the check whose whole
+# job is to run them. A list that has to be edited to stay correct is a list
+# that silently stops being correct.
+apply() {
+	psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$1"
+}
 
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000014_desktop_auth.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000013_alertmanager_silences.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000012_alert_reconciliation.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000011_user_preferences.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000010_alert_group_index.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000009_alert_expiry.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000008_alert_acknowledgements.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000007_oidc_authorization.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000006_stream_notification_metadata.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000005_oidc_transactions.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000004_auth_sources.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000003_alert_history.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000002_stream_events.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000001_initial.down.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000001_initial.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000002_stream_events.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000003_alert_history.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000004_auth_sources.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000005_oidc_transactions.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000006_stream_notification_metadata.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000007_oidc_authorization.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000008_alert_acknowledgements.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000009_alert_expiry.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000010_alert_group_index.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000011_user_preferences.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000012_alert_reconciliation.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000013_alertmanager_silences.up.sql
-psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/000014_desktop_auth.up.sql
+ups=""
+downs=""
+for up in migrations/*.up.sql; do
+	down="${up%.up.sql}.down.sql"
+	# A migration with no down cannot be rolled back, and an operator finds
+	# that out during the rollback rather than here.
+	if [ ! -f "$down" ]; then
+		echo "check-migrations: $up has no matching $down" >&2
+		exit 1
+	fi
+	ups="$ups $up"
+	downs="$down $downs"
+done
+
+for migration in $ups; do apply "$migration"; done
+# Down in reverse order, then up again: a down migration that leaves the schema
+# subtly different fails the second pass rather than a future deployment.
+for migration in $downs; do apply "$migration"; done
+for migration in $ups; do apply "$migration"; done
+
+count=$(echo "$ups" | wc -w)
+echo "check-migrations: $count migrations applied, rolled back, and reapplied"
 
 # Leave the disposable database in the same ledger-backed state used in production.
 psql "$PROMVIEW_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'

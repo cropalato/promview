@@ -153,9 +153,21 @@
         "type": "object",
         "required": [
           "name",
-          "role",
-          "oidcIssuer",
-          "oidcGroup"
+          "role"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "issuer",
+              "group"
+            ]
+          },
+          {
+            "required": [
+              "oidcIssuer",
+              "oidcGroup"
+            ]
+          }
         ],
         "properties": {
           "name": {
@@ -169,6 +181,14 @@
               "operator",
               "administrator"
             ]
+          },
+          "issuer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "group": {
+            "type": "string",
+            "minLength": 1
           },
           "oidcIssuer": {
             "type": "string",

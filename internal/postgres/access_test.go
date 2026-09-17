@@ -32,7 +32,7 @@ func TestStoreRoleBindingAdministration(t *testing.T) {
 
 	admins := auth.RoleBinding{
 		Name: "admins", SubjectKind: auth.SubjectOIDCGroup,
-		OIDCIssuer: "https://idp.example", OIDCGroup: "promview-admins",
+		SubjectIssuer: "https://idp.example", SubjectGroup: "promview-admins",
 		Role: auth.RoleAdministrator,
 	}
 	if err := store.SetRoleBinding(ctx, admins); err != nil {
@@ -41,7 +41,7 @@ func TestStoreRoleBindingAdministration(t *testing.T) {
 
 	scoped := auth.RoleBinding{
 		Name: "platform", SubjectKind: auth.SubjectOIDCGroup,
-		OIDCIssuer: "https://idp.example", OIDCGroup: "platform",
+		SubjectIssuer: "https://idp.example", SubjectGroup: "platform",
 		Role: auth.RoleOperator,
 		Matchers: []auth.LabelMatcher{
 			{Name: "team", Operator: "=", Value: "platform"},
@@ -99,7 +99,7 @@ func TestStoreRoleBindingAdministration(t *testing.T) {
 	// last one, not about any one.
 	second := admins
 	second.Name = "admins-backup"
-	second.OIDCGroup = "promview-admins-backup"
+	second.SubjectGroup = "promview-admins-backup"
 	if err := store.SetRoleBinding(ctx, second); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestStoreCreatesTheFirstAdministrator(t *testing.T) {
 	store := New(pool)
 	if err := store.SetRoleBinding(ctx, auth.RoleBinding{
 		Name: "first", SubjectKind: auth.SubjectOIDCGroup,
-		OIDCIssuer: "https://idp.example", OIDCGroup: "admins",
+		SubjectIssuer: "https://idp.example", SubjectGroup: "admins",
 		Role: auth.RoleAdministrator,
 	}); err != nil {
 		t.Fatalf("first administrator error = %v", err)

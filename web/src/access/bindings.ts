@@ -25,8 +25,13 @@ export interface RoleBinding {
   name: string;
   subjectKind: SubjectKind;
   userID?: number;
-  oidcIssuer?: string;
-  oidcGroup?: string;
+  /**
+   * The directory the group comes from, and the group inside it. Named for
+   * neither: LDAP group bindings land in these same two fields, and a field
+   * called `oidcGroup` holding an Active Directory group would be a lie.
+   */
+  subjectIssuer?: string;
+  subjectGroup?: string;
   role: BindingRole;
   /**
    * The label scope, and half of what a binding means: a viewer bound with
@@ -76,8 +81,8 @@ function parseBinding(value: unknown): RoleBinding | null {
     name: raw.name,
     subjectKind: raw.subjectKind === 'user' ? 'user' : 'oidc_group',
     userID: typeof raw.userID === 'number' ? raw.userID : undefined,
-    oidcIssuer: typeof raw.oidcIssuer === 'string' ? raw.oidcIssuer : undefined,
-    oidcGroup: typeof raw.oidcGroup === 'string' ? raw.oidcGroup : undefined,
+    subjectIssuer: typeof raw.subjectIssuer === 'string' ? raw.subjectIssuer : undefined,
+    subjectGroup: typeof raw.subjectGroup === 'string' ? raw.subjectGroup : undefined,
     role,
     matchers: parseMatchers(raw.matchers),
   };

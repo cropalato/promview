@@ -10,8 +10,8 @@ oidc:
 roleBindings:
   - name: promview-administrators
     role: administrator
-    oidcIssuer: https://identity.example.com/oauth2/default
-    oidcGroup: promview-administrators
+    issuer: https://identity.example.com/oauth2/default
+    group: promview-administrators
 
 ingress:
   enabled: true

@@ -322,17 +322,17 @@ func (store *Store) SetRoleBinding(ctx context.Context, binding auth.RoleBinding
 		}
 		var bindingID int64
 		err := tx.QueryRow(ctx, `
-			INSERT INTO role_bindings (name, subject_kind, user_id, oidc_issuer, oidc_group, role)
+			INSERT INTO role_bindings (name, subject_kind, user_id, subject_issuer, subject_group, role)
 			VALUES ($1, $2, NULLIF($3, 0), NULLIF($4, ''), NULLIF($5, ''), $6)
 			ON CONFLICT (name) DO UPDATE SET
 				subject_kind = EXCLUDED.subject_kind,
 				user_id = EXCLUDED.user_id,
-				oidc_issuer = EXCLUDED.oidc_issuer,
-				oidc_group = EXCLUDED.oidc_group,
+				subject_issuer = EXCLUDED.subject_issuer,
+				subject_group = EXCLUDED.subject_group,
 				role = EXCLUDED.role,
 				updated_at = now()
 			RETURNING id
-		`, binding.Name, binding.SubjectKind, binding.UserID, binding.OIDCIssuer, binding.OIDCGroup, binding.Role).Scan(&bindingID)
+		`, binding.Name, binding.SubjectKind, binding.UserID, binding.SubjectIssuer, binding.SubjectGroup, binding.Role).Scan(&bindingID)
 		if err != nil {
 			return fmt.Errorf("set role binding %s: %w", binding.Name, err)
 		}
@@ -398,7 +398,7 @@ func (store *Store) AuthorizationDiagnostics(ctx context.Context) (auth.Authoriz
 	}
 
 	rows, err = store.pool.Query(ctx, `
-		SELECT name, subject_kind, COALESCE(user_id, 0), COALESCE(oidc_issuer, ''), COALESCE(oidc_group, ''), role
+		SELECT name, subject_kind, COALESCE(user_id, 0), COALESCE(subject_issuer, ''), COALESCE(subject_group, ''), role
 		FROM role_bindings
 		ORDER BY name
 	`)
@@ -408,7 +408,7 @@ func (store *Store) AuthorizationDiagnostics(ctx context.Context) (auth.Authoriz
 	defer rows.Close()
 	for rows.Next() {
 		var binding auth.RoleBinding
-		if err := rows.Scan(&binding.Name, &binding.SubjectKind, &binding.UserID, &binding.OIDCIssuer, &binding.OIDCGroup, &binding.Role); err != nil {
+		if err := rows.Scan(&binding.Name, &binding.SubjectKind, &binding.UserID, &binding.SubjectIssuer, &binding.SubjectGroup, &binding.Role); err != nil {
 			return diagnostics, fmt.Errorf("scan role binding: %w", err)
 		}
 		diagnostics.Bindings = append(diagnostics.Bindings, binding)
@@ -450,14 +450,21 @@ func resolvePrincipal(ctx context.Context, database principalQuerier, userID int
 		SELECT binding.id, binding.role, matcher.label_name, matcher.operator, matcher.value
 		FROM role_bindings AS binding
 		LEFT JOIN role_binding_matchers AS matcher ON matcher.role_binding_id = binding.id
-		WHERE binding.user_id = $1
-			OR EXISTS (
-				SELECT 1
-				FROM auth_identities AS identity
-				JOIN auth_identity_groups AS membership ON membership.identity_id = identity.id
-				WHERE identity.user_id = $1
-					AND identity.issuer = binding.oidc_issuer
-					AND membership.group_name = binding.oidc_group
+		-- Keyed on subject_kind rather than on which columns happen to be set.
+		-- The columns alone would work today, because no two directories can
+		-- produce the same issuer string, but the query would not say what it
+		-- means and a third kind of subject would have to hope that stayed true.
+		WHERE (binding.subject_kind = 'user' AND binding.user_id = $1)
+			OR (
+				binding.subject_kind = 'oidc_group'
+				AND EXISTS (
+					SELECT 1
+					FROM auth_identities AS identity
+					JOIN auth_identity_groups AS membership ON membership.identity_id = identity.id
+					WHERE identity.user_id = $1
+						AND identity.issuer = binding.subject_issuer
+						AND membership.group_name = binding.subject_group
+				)
 			)
 		ORDER BY binding.id, matcher.ordinal
 	`, userID)

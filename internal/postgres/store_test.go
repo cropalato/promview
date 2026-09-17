@@ -282,7 +282,7 @@ func TestStoreIngestAndList(t *testing.T) {
 
 	binding := auth.RoleBinding{
 		Name: "platform-viewers", SubjectKind: auth.SubjectOIDCGroup,
-		OIDCIssuer: "https://identity.example.com", OIDCGroup: "platform-viewers", Role: auth.RoleViewer,
+		SubjectIssuer: "https://identity.example.com", SubjectGroup: "platform-viewers", Role: auth.RoleViewer,
 		Matchers: []auth.LabelMatcher{{Name: "team", Operator: "=", Value: "platform"}},
 	}
 	if err := store.SetRoleBinding(ctx, binding); err != nil {
@@ -297,7 +297,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	}
 	paymentsBinding := auth.RoleBinding{
 		Name: "payments-viewers", SubjectKind: auth.SubjectOIDCGroup,
-		OIDCIssuer: "https://identity.example.com", OIDCGroup: "payments-viewers", Role: auth.RoleViewer,
+		SubjectIssuer: "https://identity.example.com", SubjectGroup: "payments-viewers", Role: auth.RoleViewer,
 		Matchers: []auth.LabelMatcher{
 			{Name: "team", Operator: "=~", Value: "pay.*"},
 			{Name: "severity", Operator: "!=", Value: "critical"},

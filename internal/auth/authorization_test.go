@@ -52,7 +52,7 @@ func TestCanOperateLabelsExcludesViewersAndHonorsOperatorScope(t *testing.T) {
 func TestValidateRoleBinding(t *testing.T) {
 	valid := RoleBinding{
 		Name: "platform-operators", SubjectKind: SubjectOIDCGroup,
-		OIDCIssuer: "https://identity.example.com", OIDCGroup: "platform", Role: RoleOperator,
+		SubjectIssuer: "https://identity.example.com", SubjectGroup: "platform", Role: RoleOperator,
 		Matchers: []LabelMatcher{{Name: "team", Operator: "=", Value: "platform"}},
 	}
 	if err := ValidateRoleBinding(valid); err != nil {
