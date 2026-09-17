@@ -367,24 +367,38 @@ func runAccessCommand(ctx context.Context, store accessStore, args []string) err
 		name := flags.String("name", "", "binding name")
 		role := flags.String("role", "", "viewer, operator, or administrator")
 		userID := flags.Int64("user-id", 0, "Promview user ID")
-		issuer := flags.String("oidc-issuer", "", "OIDC issuer URL")
-		group := flags.String("oidc-group", "", "OIDC group name")
+		issuer := flags.String("issuer", "", "directory issuer URL")
+		group := flags.String("group", "", "group name within the issuer")
+		// Deprecated aliases, removed in 0.2.0. The chart invokes this command
+		// from a post-install Job built out of a user-held values file, so
+		// dropping the old spellings outright would break an upgrade at the
+		// point where the only symptom is a failed Job.
+		deprecatedIssuer := flags.String("oidc-issuer", "", "deprecated alias for --issuer")
+		deprecatedGroup := flags.String("oidc-group", "", "deprecated alias for --group")
 		var selectors repeatedStrings
 		flags.Var(&selectors, "selector", "label selector; repeat for AND semantics")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
+		if *issuer != "" && *deprecatedIssuer != "" && *issuer != *deprecatedIssuer {
+			return errors.New("--issuer and --oidc-issuer disagree; set one")
+		}
+		if *group != "" && *deprecatedGroup != "" && *group != *deprecatedGroup {
+			return errors.New("--group and --oidc-group disagree; set one")
+		}
+		subjectIssuer := firstNonEmptyFlag(*issuer, *deprecatedIssuer)
+		subjectGroup := firstNonEmptyFlag(*group, *deprecatedGroup)
 		binding := auth.RoleBinding{Name: *name, Role: auth.Role(*role)}
 		switch {
-		case *userID > 0 && *issuer == "" && *group == "":
+		case *userID > 0 && subjectIssuer == "" && subjectGroup == "":
 			binding.SubjectKind = auth.SubjectUser
 			binding.UserID = *userID
-		case *userID == 0 && *issuer != "" && *group != "":
+		case *userID == 0 && subjectIssuer != "" && subjectGroup != "":
 			binding.SubjectKind = auth.SubjectOIDCGroup
-			binding.OIDCIssuer = *issuer
-			binding.OIDCGroup = *group
+			binding.SubjectIssuer = subjectIssuer
+			binding.SubjectGroup = subjectGroup
 		default:
-			return errors.New("set exactly one subject with --user-id or --oidc-issuer and --oidc-group")
+			return errors.New("set exactly one subject with --user-id or --issuer and --group")
 		}
 		for _, raw := range selectors {
 			matcher, err := auth.ParseLabelMatcher(raw)
@@ -492,4 +506,13 @@ func runSourceCommand(ctx context.Context, store sourceSetter, args []string) er
 		source.StaleAfter = &window
 	}
 	return store.SetSource(ctx, source, *token)
+}
+
+func firstNonEmptyFlag(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

@@ -69,12 +69,12 @@ sources: []
 roleBindings: []
 # - name: promview-administrators
 #   role: administrator
-#   oidcIssuer: https://identity.example.com
-#   oidcGroup: promview-administrators
+#   issuer: https://identity.example.com
+#   group: promview-administrators
 # - name: platform-operators
 #   role: operator
-#   oidcIssuer: https://identity.example.com
-#   oidcGroup: promview-operators
+#   issuer: https://identity.example.com
+#   group: promview-operators
 #   selectors:
 #     - team=platform
 

@@ -26,7 +26,7 @@ raced for is the ability to administer the deployment at all.
 func (store *Store) RoleBindings(ctx context.Context) ([]auth.RoleBinding, error) {
 	rows, err := store.pool.Query(ctx, `
 		SELECT binding.name, binding.subject_kind, COALESCE(binding.user_id, 0),
-		       COALESCE(binding.oidc_issuer, ''), COALESCE(binding.oidc_group, ''), binding.role,
+		       COALESCE(binding.subject_issuer, ''), COALESCE(binding.subject_group, ''), binding.role,
 		       COALESCE(matcher.label_name, ''), COALESCE(matcher.operator, ''), COALESCE(matcher.value, '')
 		FROM role_bindings AS binding
 		LEFT JOIN role_binding_matchers AS matcher ON matcher.role_binding_id = binding.id
@@ -42,7 +42,7 @@ func (store *Store) RoleBindings(ctx context.Context) ([]auth.RoleBinding, error
 		var name, operator, value string
 		if err := rows.Scan(
 			&binding.Name, &binding.SubjectKind, &binding.UserID,
-			&binding.OIDCIssuer, &binding.OIDCGroup, &binding.Role,
+			&binding.SubjectIssuer, &binding.SubjectGroup, &binding.Role,
 			&name, &operator, &value,
 		); err != nil {
 			return nil, fmt.Errorf("scan role binding: %w", err)

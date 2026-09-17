@@ -18,8 +18,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 const binding: RoleBinding = {
   name: 'platform',
   subjectKind: 'oidc_group',
-  oidcIssuer: 'https://idp.example',
-  oidcGroup: 'platform',
+  subjectIssuer: 'https://idp.example',
+  subjectGroup: 'platform',
   role: 'operator',
   matchers: [{ name: 'team', operator: '=', value: 'platform' }],
 };
@@ -44,6 +44,32 @@ describe('role bindings', () => {
     );
     const bindings = await fetchRoleBindings(fetchImpl);
     expect(bindings.map((entry) => entry.name)).toEqual(['platform']);
+  });
+
+  it('ignores the pre-rename subject keys instead of half-reading them', async () => {
+    // A server still sending `oidcIssuer`/`oidcGroup` is older than the binary
+    // that serves this console, so it is not one we are paired with. Reading
+    // those keys anyway would draw a binding with a blank subject and
+    // misdescribe who actually has access.
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({
+          bindings: [
+            {
+              name: 'platform',
+              subjectKind: 'oidc_group',
+              oidcIssuer: 'https://idp.example',
+              oidcGroup: 'platform',
+              role: 'operator',
+              matchers: [],
+            },
+          ],
+        }),
+      ),
+    );
+    const bindings = await fetchRoleBindings(fetchImpl);
+    expect(bindings[0]?.subjectIssuer).toBeUndefined();
+    expect(bindings[0]?.subjectGroup).toBeUndefined();
   });
 
   it('sends the name in the path only, because the server refuses a mismatch', async () => {

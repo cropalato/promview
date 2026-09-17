@@ -41,10 +41,16 @@ spec:
             - {{ $binding.name | quote }}
             - --role
             - {{ $binding.role | quote }}
-            - --oidc-issuer
-            - {{ $binding.oidcIssuer | quote }}
-            - --oidc-group
-            - {{ $binding.oidcGroup | quote }}
+            {{- /*
+              issuer/group is the current spelling; oidcIssuer/oidcGroup is what
+              the values file said before the fields stopped being OIDC-only.
+              Both are accepted for one release so an upgrade does not fail on a
+              values file nobody had reason to touch.
+            */}}
+            - --issuer
+            - {{ coalesce $binding.issuer $binding.oidcIssuer | quote }}
+            - --group
+            - {{ coalesce $binding.group $binding.oidcGroup | quote }}
             {{- range $binding.selectors }}
             - --selector
             - {{ . | quote }}

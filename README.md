@@ -551,8 +551,8 @@ Create at least one server-owned binding before the first OIDC login:
 docker compose run --rm app access set \
   --name promview-administrators \
   --role administrator \
-  --oidc-issuer 'https://identity.example.com' \
-  --oidc-group 'promview-administrators'
+  --issuer 'https://identity.example.com' \
+  --group 'promview-administrators'
 ```
 
 Create a scoped operator binding by repeating `--selector` for AND semantics:
@@ -561,8 +561,8 @@ Create a scoped operator binding by repeating `--selector` for AND semantics:
 docker compose run --rm app access set \
   --name platform-operators \
   --role operator \
-  --oidc-issuer 'https://identity.example.com' \
-  --oidc-group 'promview-platform' \
+  --issuer 'https://identity.example.com' \
+  --group 'promview-platform' \
   --selector 'team=platform' \
   --selector 'environment!=development'
 ```
@@ -581,8 +581,8 @@ curl 'http://localhost:8080/api/v1/access/bindings'
 
 curl -X PUT 'http://localhost:8080/api/v1/access/bindings/platform-operators' \
   -H 'Content-Type: application/json' \
-  -d '{"subjectKind":"oidc_group","oidcIssuer":"https://identity.example.com",
-       "oidcGroup":"promview-platform","role":"operator",
+  -d '{"subjectKind":"oidc_group","subjectIssuer":"https://identity.example.com",
+       "subjectGroup":"promview-platform","role":"operator",
        "matchers":[{"name":"team","operator":"=","value":"platform"}]}'
 
 curl -X DELETE 'http://localhost:8080/api/v1/access/bindings/platform-operators'

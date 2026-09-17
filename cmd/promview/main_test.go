@@ -52,7 +52,7 @@ func TestRunAccessSetCommand(t *testing.T) {
 	store := &fakeAccessStore{}
 	err := runAccessCommand(context.Background(), store, []string{
 		"set", "--name", "platform-operators", "--role", "operator",
-		"--oidc-issuer", "https://identity.example.com", "--oidc-group", "platform",
+		"--issuer", "https://identity.example.com", "--group", "platform",
 		"--selector", "team=platform", "--selector", "environment!=development",
 	})
 	if err != nil {
@@ -60,6 +60,38 @@ func TestRunAccessSetCommand(t *testing.T) {
 	}
 	if store.binding.Role != auth.RoleOperator || store.binding.SubjectKind != auth.SubjectOIDCGroup || len(store.binding.Matchers) != 2 {
 		t.Fatalf("binding = %#v", store.binding)
+	}
+	if store.binding.SubjectIssuer != "https://identity.example.com" || store.binding.SubjectGroup != "platform" {
+		t.Fatalf("subject = %#v", store.binding)
+	}
+}
+
+// The chart invokes this command from a Job built out of a values file the
+// operator holds, so an upgrade that stopped accepting the old flags would
+// fail where the only symptom is a failed Job.
+func TestRunAccessSetAcceptsTheDeprecatedSubjectFlags(t *testing.T) {
+	store := &fakeAccessStore{}
+	err := runAccessCommand(context.Background(), store, []string{
+		"set", "--name", "platform-operators", "--role", "operator",
+		"--oidc-issuer", "https://identity.example.com", "--oidc-group", "platform",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.binding.SubjectIssuer != "https://identity.example.com" || store.binding.SubjectGroup != "platform" {
+		t.Fatalf("subject = %#v", store.binding)
+	}
+}
+
+func TestRunAccessSetRefusesDisagreeingSubjectFlags(t *testing.T) {
+	store := &fakeAccessStore{}
+	err := runAccessCommand(context.Background(), store, []string{
+		"set", "--name", "platform-operators", "--role", "operator",
+		"--issuer", "https://identity.example.com", "--oidc-issuer", "https://other.example.com",
+		"--group", "platform",
+	})
+	if err == nil {
+		t.Fatalf("error = nil, want a refusal; binding = %#v", store.binding)
 	}
 }
 

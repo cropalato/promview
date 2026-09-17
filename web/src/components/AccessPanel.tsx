@@ -153,7 +153,7 @@ function describeSubject(binding: RoleBinding): string {
   if (binding.subjectKind === 'user') {
     return `user ${binding.userID ?? 0}`;
   }
-  return `${binding.oidcGroup ?? ''} @ ${binding.oidcIssuer ?? ''}`;
+  return `${binding.subjectGroup ?? ''} @ ${binding.subjectIssuer ?? ''}`;
 }
 
 function BindingForm({
@@ -169,8 +169,8 @@ function BindingForm({
 }) {
   const [name, setName] = useState(binding.name);
   const [subjectKind, setSubjectKind] = useState<SubjectKind>(binding.subjectKind);
-  const [issuer, setIssuer] = useState(binding.oidcIssuer ?? '');
-  const [group, setGroup] = useState(binding.oidcGroup ?? '');
+  const [issuer, setIssuer] = useState(binding.subjectIssuer ?? '');
+  const [group, setGroup] = useState(binding.subjectGroup ?? '');
   const [userID, setUserID] = useState(String(binding.userID ?? ''));
   const [role, setRole] = useState<BindingRole>(binding.role);
   const [scope, setScope] = useState(formatScope(binding.matchers));
@@ -190,7 +190,7 @@ function BindingForm({
       matchers,
       ...(subjectKind === 'user'
         ? { userID: Number(userID) }
-        : { oidcIssuer: issuer.trim(), oidcGroup: group.trim() }),
+        : { subjectIssuer: issuer.trim(), subjectGroup: group.trim() }),
     })
       .then(() => {
         setPending(false);

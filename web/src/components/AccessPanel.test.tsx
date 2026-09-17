@@ -7,8 +7,8 @@ import type { RoleBinding } from '../access/bindings';
 const scoped: RoleBinding = {
   name: 'platform',
   subjectKind: 'oidc_group',
-  oidcIssuer: 'https://idp.example',
-  oidcGroup: 'platform',
+  subjectIssuer: 'https://idp.example',
+  subjectGroup: 'platform',
   role: 'operator',
   matchers: [{ name: 'team', operator: '=', value: 'platform' }],
 };
@@ -16,8 +16,8 @@ const scoped: RoleBinding = {
 const unscoped: RoleBinding = {
   name: 'admins',
   subjectKind: 'oidc_group',
-  oidcIssuer: 'https://idp.example',
-  oidcGroup: 'admins',
+  subjectIssuer: 'https://idp.example',
+  subjectGroup: 'admins',
   role: 'administrator',
   matchers: [],
 };

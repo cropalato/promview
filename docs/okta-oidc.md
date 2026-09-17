@@ -108,14 +108,14 @@ Create server-owned bindings for the Okta groups before users sign in:
 docker compose run --rm app access set \
   --name promview-viewers \
   --role viewer \
-  --oidc-issuer 'https://your-org.okta.com/oauth2/default' \
-  --oidc-group 'promview-viewers'
+  --issuer 'https://your-org.okta.com/oauth2/default' \
+  --group 'promview-viewers'
 
 docker compose run --rm app access set \
   --name promview-administrators \
   --role administrator \
-  --oidc-issuer 'https://your-org.okta.com/oauth2/default' \
-  --oidc-group 'promview-administrators'
+  --issuer 'https://your-org.okta.com/oauth2/default' \
+  --group 'promview-administrators'
 ```
 
 Users without a matching binding are denied. Multiple bindings are unioned. Viewer and operator bindings can restrict access with label selectors:
@@ -124,8 +124,8 @@ Users without a matching binding are denied. Multiple bindings are unioned. View
 docker compose run --rm app access set \
   --name platform-operators \
   --role operator \
-  --oidc-issuer 'https://your-org.okta.com/oauth2/default' \
-  --oidc-group 'promview-platform' \
+  --issuer 'https://your-org.okta.com/oauth2/default' \
+  --group 'promview-platform' \
   --selector 'team=platform'
 ```
 

@@ -99,8 +99,8 @@ Configure initial role bindings through Helm values before signing in:
 roleBindings:
   - name: promview-administrators
     role: administrator
-    oidcIssuer: https://identity.example.com
-    oidcGroup: promview-administrators
+    issuer: https://identity.example.com
+    group: promview-administrators
 ```
 
 The chart applies each binding after install and upgrade. A binding with the same name is replaced atomically; bindings not declared in chart values are left unchanged. The chart requires `auth.mode: oidc` when `roleBindings` is set.
@@ -112,8 +112,8 @@ kubectl --namespace promview exec deployment/promview -- \
   promview access set \
   --name promview-administrators \
   --role administrator \
-  --oidc-issuer 'https://your-org.okta.com/oauth2/default' \
-  --oidc-group 'promview-administrators'
+  --issuer 'https://your-org.okta.com/oauth2/default' \
+  --group 'promview-administrators'
 ```
 
 The issuer must exactly match `oidc.issuerURL`. Use repeated `--selector` flags for scoped viewer or operator bindings.

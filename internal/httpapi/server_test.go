@@ -1356,13 +1356,16 @@ func TestSetAndDeleteRoleBinding(t *testing.T) {
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, operatorRequest(http.MethodPut, "/api/v1/access/bindings/platform",
-		`{"subjectKind":"oidc_group","oidcIssuer":"https://idp.example","oidcGroup":"platform","role":"operator"}`))
+		`{"subjectKind":"oidc_group","subjectIssuer":"https://idp.example","subjectGroup":"platform","role":"operator"}`))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", response.Code, response.Body.String())
 	}
 	// The path names the binding, so a body that omits the name still gets it.
 	if store.binding.Name != "platform" || store.binding.Role != auth.RoleOperator {
 		t.Errorf("binding reaching the store = %#v", store.binding)
+	}
+	if store.binding.SubjectIssuer != "https://idp.example" || store.binding.SubjectGroup != "platform" {
+		t.Errorf("subject reaching the store = %#v", store.binding)
 	}
 
 	response = httptest.NewRecorder()
@@ -1372,13 +1375,63 @@ func TestSetAndDeleteRoleBinding(t *testing.T) {
 	}
 }
 
+// The decoder rejects unknown fields, so a client still sending the pre-rename
+// spelling would get a 400 rather than a deprecation. The chart is one such
+// client, driven from a values file the operator holds.
+func TestSetRoleBindingAcceptsTheDeprecatedSubjectFields(t *testing.T) {
+	store := &fakeStore{}
+	response := httptest.NewRecorder()
+	adminHandler(store).ServeHTTP(response, operatorRequest(http.MethodPut, "/api/v1/access/bindings/platform",
+		`{"subjectKind":"oidc_group","oidcIssuer":"https://idp.example","oidcGroup":"platform","role":"operator"}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", response.Code, response.Body.String())
+	}
+	if store.binding.SubjectIssuer != "https://idp.example" || store.binding.SubjectGroup != "platform" {
+		t.Fatalf("subject reaching the store = %#v", store.binding)
+	}
+}
+
+// Accepting the deprecated aliases meant giving RoleBinding an UnmarshalJSON,
+// and a Decoder's DisallowUnknownFields does not reach into one. Without care
+// that would have silently turned strict decoding off here, on the endpoint
+// that decides who can do what.
+func TestSetRoleBindingStillRejectsUnknownFields(t *testing.T) {
+	store := &fakeStore{}
+	response := httptest.NewRecorder()
+	adminHandler(store).ServeHTTP(response, operatorRequest(http.MethodPut, "/api/v1/access/bindings/platform",
+		`{"subjectKind":"oidc_group","subjectIssuer":"https://idp.example","subjectGroup":"platform",`+
+			`"role":"operator","scope":"team=platform"}`))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
+	}
+	if store.binding.Name != "" {
+		t.Fatalf("a request with an unknown field reached the store as %#v", store.binding)
+	}
+}
+
+// Both spellings set to different values has no reading that is safely a guess
+// about which the caller meant.
+func TestSetRoleBindingRefusesDisagreeingSubjectFields(t *testing.T) {
+	store := &fakeStore{}
+	response := httptest.NewRecorder()
+	adminHandler(store).ServeHTTP(response, operatorRequest(http.MethodPut, "/api/v1/access/bindings/platform",
+		`{"subjectKind":"oidc_group","subjectIssuer":"https://idp.example","oidcIssuer":"https://other.example",`+
+			`"subjectGroup":"platform","role":"operator"}`))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
+	}
+	if store.binding.Name != "" {
+		t.Fatalf("a conflicting request reached the store as %#v", store.binding)
+	}
+}
+
 // A PUT whose body names a different binding could rewrite one the caller did
 // not address, so it is refused rather than resolved in either direction.
 func TestSetRoleBindingRefusesAMismatchedName(t *testing.T) {
 	store := &fakeStore{}
 	response := httptest.NewRecorder()
 	adminHandler(store).ServeHTTP(response, operatorRequest(http.MethodPut, "/api/v1/access/bindings/platform",
-		`{"name":"admins","subjectKind":"oidc_group","oidcIssuer":"https://idp.example","oidcGroup":"x","role":"viewer"}`))
+		`{"name":"admins","subjectKind":"oidc_group","subjectIssuer":"https://idp.example","subjectGroup":"x","role":"viewer"}`))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", response.Code)
 	}

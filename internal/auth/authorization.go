@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -39,13 +41,77 @@ type Grant struct {
 }
 
 type RoleBinding struct {
-	Name        string         `json:"name"`
-	SubjectKind string         `json:"subjectKind"`
-	UserID      int64          `json:"userID,omitempty"`
-	OIDCIssuer  string         `json:"oidcIssuer,omitempty"`
-	OIDCGroup   string         `json:"oidcGroup,omitempty"`
-	Role        Role           `json:"role"`
-	Matchers    []LabelMatcher `json:"matchers,omitempty"`
+	Name        string `json:"name"`
+	SubjectKind string `json:"subjectKind"`
+	UserID      int64  `json:"userID,omitempty"`
+	// SubjectIssuer and SubjectGroup name a directory and a group within it.
+	// Not OIDC-specific: an LDAP directory is named the same way, by the URL it
+	// is reached at, and its groups live in the same two fields.
+	SubjectIssuer string         `json:"subjectIssuer,omitempty"`
+	SubjectGroup  string         `json:"subjectGroup,omitempty"`
+	Role          Role           `json:"role"`
+	Matchers      []LabelMatcher `json:"matchers,omitempty"`
+}
+
+// UnmarshalJSON accepts the pre-rename field names.
+//
+// Deprecated aliases, removed in 0.2.0. The chart ships role bindings in
+// user-held values files that a post-install Job feeds to the API, and the
+// binding decoder rejects unknown fields - so without this, upgrading the
+// server would fail that Job on a values file nobody had reason to touch.
+//
+// A request that sets both spellings of a field to different values is
+// refused rather than resolved: there is no reading of it that is safely a
+// guess about which one the caller meant.
+func (binding *RoleBinding) UnmarshalJSON(data []byte) error {
+	type wire struct {
+		Name          string         `json:"name"`
+		SubjectKind   string         `json:"subjectKind"`
+		UserID        int64          `json:"userID,omitempty"`
+		SubjectIssuer string         `json:"subjectIssuer,omitempty"`
+		SubjectGroup  string         `json:"subjectGroup,omitempty"`
+		OIDCIssuer    string         `json:"oidcIssuer,omitempty"`
+		OIDCGroup     string         `json:"oidcGroup,omitempty"`
+		Role          Role           `json:"role"`
+		Matchers      []LabelMatcher `json:"matchers,omitempty"`
+	}
+	var decoded wire
+	// Decoded strictly, because a Decoder's DisallowUnknownFields does not
+	// reach into a custom UnmarshalJSON. Without this, adding the deprecated
+	// aliases would have quietly turned strict decoding off for the endpoint
+	// that decides who can do what, and a mistyped field name would be accepted
+	// and ignored rather than refused.
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	for _, conflict := range []struct {
+		current, deprecated, name string
+	}{
+		{decoded.SubjectIssuer, decoded.OIDCIssuer, "issuer"},
+		{decoded.SubjectGroup, decoded.OIDCGroup, "group"},
+	} {
+		if conflict.current != "" && conflict.deprecated != "" && conflict.current != conflict.deprecated {
+			return fmt.Errorf("subject %s given twice with different values", conflict.name)
+		}
+	}
+	*binding = RoleBinding{
+		Name: decoded.Name, SubjectKind: decoded.SubjectKind, UserID: decoded.UserID,
+		SubjectIssuer: firstNonEmpty(decoded.SubjectIssuer, decoded.OIDCIssuer),
+		SubjectGroup:  firstNonEmpty(decoded.SubjectGroup, decoded.OIDCGroup),
+		Role:          decoded.Role, Matchers: decoded.Matchers,
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // AuthorizationDiagnostics contains persisted directory identity and binding
@@ -260,19 +326,19 @@ func validateRoleBinding(binding RoleBinding) error {
 	}
 	switch binding.SubjectKind {
 	case SubjectUser:
-		if binding.UserID < 1 || binding.OIDCIssuer != "" || binding.OIDCGroup != "" {
+		if binding.UserID < 1 || binding.SubjectIssuer != "" || binding.SubjectGroup != "" {
 			return errors.New("user binding requires only a positive user ID")
 		}
 	case SubjectOIDCGroup:
-		if binding.UserID != 0 || binding.OIDCIssuer == "" || binding.OIDCGroup == "" {
-			return errors.New("OIDC group binding requires only issuer and group")
+		if binding.UserID != 0 || binding.SubjectIssuer == "" || binding.SubjectGroup == "" {
+			return errors.New("group binding requires only issuer and group")
 		}
-		issuer, err := url.Parse(binding.OIDCIssuer)
+		issuer, err := url.Parse(binding.SubjectIssuer)
 		if err != nil || issuer.Scheme == "" || issuer.Host == "" {
-			return errors.New("OIDC group binding issuer must be an absolute URL")
+			return errors.New("group binding issuer must be an absolute URL")
 		}
-		if len(binding.OIDCGroup) > 256 {
-			return errors.New("OIDC group name must not exceed 256 characters")
+		if len(binding.SubjectGroup) > 256 {
+			return errors.New("group name must not exceed 256 characters")
 		}
 	default:
 		return errors.New("binding subject must be user or OIDC group")

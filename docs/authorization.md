@@ -20,8 +20,8 @@ Create a global administrator binding:
 promview access set \
   --name promview-administrators \
   --role administrator \
-  --oidc-issuer 'https://identity.example.com' \
-  --oidc-group 'promview-administrators'
+  --issuer 'https://identity.example.com' \
+  --group 'promview-administrators'
 ```
 
 Create an operator restricted to production platform alerts:
@@ -30,8 +30,8 @@ Create an operator restricted to production platform alerts:
 promview access set \
   --name platform-production-operators \
   --role operator \
-  --oidc-issuer 'https://identity.example.com' \
-  --oidc-group 'promview-platform' \
+  --issuer 'https://identity.example.com' \
+  --group 'promview-platform' \
   --selector 'team=platform' \
   --selector 'environment=production'
 ```
@@ -85,8 +85,8 @@ Running `access set` with an existing name replaces its subject, role, and compl
 promview access set \
   --name platform-production-operators \
   --role viewer \
-  --oidc-issuer 'https://identity.example.com' \
-  --oidc-group 'promview-platform' \
+  --issuer 'https://identity.example.com' \
+  --group 'promview-platform' \
   --selector 'team=platform'
 ```
 
@@ -120,8 +120,8 @@ Run administration commands with the application service configuration:
 docker compose run --rm app access set \
   --name platform-viewers \
   --role viewer \
-  --oidc-issuer 'https://identity.example.com' \
-  --oidc-group 'promview-platform' \
+  --issuer 'https://identity.example.com' \
+  --group 'promview-platform' \
   --selector 'team=platform'
 ```
 
@@ -134,8 +134,8 @@ kubectl --namespace promview exec deployment/promview -- \
   promview access set \
   --name platform-viewers \
   --role viewer \
-  --oidc-issuer 'https://identity.example.com' \
-  --oidc-group 'promview-platform' \
+  --issuer 'https://identity.example.com' \
+  --group 'promview-platform' \
   --selector 'team=platform'
 ```
 
