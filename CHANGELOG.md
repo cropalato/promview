@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **packaging:** releases are published as pre-releases. `gh release create` was never told, so every release since the first was marked stable and took GitHub's Latest badge — including `0.1.0-beta.1`, which was presented as a stable release while its own notes, the README and the Docker Hub listing all said otherwise. The workflow now passes `--prerelease` for any tag carrying a semver pre-release suffix, and the seventeen existing releases were corrected. With none of them stable there is no Latest badge until the first release without a suffix, which is the honest state of a pre-1.0 project.
+
 ## [0.1.0-beta.1] - 2026-09-17
 
 The first beta. Every item on the project's own first-release list is
