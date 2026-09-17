@@ -23,11 +23,23 @@ function detail(overrides: Partial<AlertDetail> = {}): AlertDetail {
     repeatCount: 3,
     occurrence: 2,
     suppressed: false,
+    assignee: '',
+    assignedBy: '',
+    assignedAt: null,
+    closed: false,
+    closedBy: '',
+    closedAt: null,
     silencedBy: [],
     acknowledged: false,
     acknowledgedBy: '',
     acknowledgedAt: null,
-    actions: { canAcknowledge: false, canSilence: false },
+    actions: {
+      canAcknowledge: false,
+      canSilence: false,
+      canAssign: false,
+      canClose: false,
+      canNote: false,
+    },
     rawData: {},
     ...overrides,
   };
@@ -200,7 +212,15 @@ describe('AlertDetailOverview', () => {
     const onAcknowledge = vi.fn().mockResolvedValue(undefined);
     const { rerender } = render(
       <AlertDetailOverview
-        detail={detail({ actions: { canAcknowledge: true, canSilence: true } })}
+        detail={detail({
+          actions: {
+            canAcknowledge: true,
+            canSilence: true,
+            canAssign: true,
+            canClose: true,
+            canNote: true,
+          },
+        })}
         onAcknowledge={onAcknowledge}
       />,
     );
@@ -209,7 +229,15 @@ describe('AlertDetailOverview', () => {
     // Permission without a handler: no control.
     rerender(
       <AlertDetailOverview
-        detail={detail({ actions: { canAcknowledge: true, canSilence: true } })}
+        detail={detail({
+          actions: {
+            canAcknowledge: true,
+            canSilence: true,
+            canAssign: true,
+            canClose: true,
+            canNote: true,
+          },
+        })}
       />,
     );
     expect(screen.queryByRole('button', { name: /acknowledge/i })).not.toBeInTheDocument();
@@ -226,7 +254,13 @@ describe('AlertDetailOverview', () => {
         detail={detail({
           acknowledged: true,
           acknowledgedBy: 'operator@example.com',
-          actions: { canAcknowledge: true, canSilence: true },
+          actions: {
+            canAcknowledge: true,
+            canSilence: true,
+            canAssign: true,
+            canClose: true,
+            canNote: true,
+          },
         })}
         onAcknowledge={onAcknowledge}
       />,
@@ -362,5 +396,127 @@ describe('removing a silence', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+  });
+});
+
+describe('assign, close and notes', () => {
+  it('offers nothing the server did not permit', () => {
+    render(
+      <AlertDetailOverview
+        detail={detail({
+          actions: {
+            canAcknowledge: false,
+            canSilence: false,
+            canAssign: false,
+            canClose: false,
+            canNote: false,
+          },
+        })}
+        onAssign={async () => {}}
+        onClose={async () => {}}
+        onAddNote={async () => {}}
+      />,
+    );
+    // Handlers are present, so only the server's own flags are withholding
+    // these — which is the gate that matters.
+    expect(screen.queryByLabelText('Assignee')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Close alert' })).toBeNull();
+    expect(screen.queryByLabelText('Add a note')).toBeNull();
+  });
+
+  it('offers the controls the server permitted', () => {
+    render(
+      <AlertDetailOverview
+        detail={detail({
+          actions: {
+            canAcknowledge: false,
+            canSilence: false,
+            canAssign: true,
+            canClose: true,
+            canNote: true,
+          },
+        })}
+        onAssign={async () => {}}
+        onClose={async () => {}}
+        onAddNote={async () => {}}
+      />,
+    );
+    expect(screen.getByLabelText('Assignee')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Close alert' })).toBeTruthy();
+  });
+
+  it('says reopen once the alert is closed', () => {
+    render(
+      <AlertDetailOverview
+        detail={detail({
+          closed: true,
+          actions: {
+            canAcknowledge: false,
+            canSilence: false,
+            canAssign: false,
+            canClose: true,
+            canNote: true,
+          },
+        })}
+        onClose={async () => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Reopen alert' })).toBeTruthy();
+  });
+
+  it('sends the assignment and clears it with an empty value', async () => {
+    const onAssign = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AlertDetailOverview
+        detail={detail({
+          assignee: 'platform-rota',
+          actions: {
+            canAcknowledge: false,
+            canSilence: false,
+            canAssign: true,
+            canClose: false,
+            canNote: false,
+          },
+        })}
+        onAssign={onAssign}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    await waitFor(() => expect(onAssign).toHaveBeenCalledWith(''));
+  });
+
+  it('renders notes oldest first and marks ones from an earlier occurrence', () => {
+    render(
+      <AlertDetailOverview
+        detail={detail({ occurrence: 2 })}
+        notes={[
+          {
+            id: 1,
+            occurrence: 1,
+            author: 'oncall',
+            body: 'first incident',
+            createdAt: '2026-09-16T12:00:00Z',
+          },
+          {
+            id: 2,
+            occurrence: 2,
+            author: 'oncall',
+            body: 'this incident',
+            createdAt: '2026-09-16T13:00:00Z',
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('first incident')).toBeTruthy();
+    expect(screen.getByText('this incident')).toBeTruthy();
+    // Only the note from the previous incident is flagged; the current one is
+    // not, or the marker would be noise on every note.
+    expect(screen.getAllByText('earlier occurrence')).toHaveLength(1);
+  });
+
+  it('offers no composer without a handler, because notes cannot be edited later', () => {
+    render(<AlertDetailOverview detail={detail()} notes={[]} />);
+    expect(screen.getByText('No notes yet.')).toBeTruthy();
+    expect(screen.queryByLabelText('Add a note')).toBeNull();
   });
 });

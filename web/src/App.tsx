@@ -316,6 +316,9 @@ export default function App({ navigate }: AppProps = {}) {
     retry: retryDetail,
     refreshIfSelected: refreshDetailIfSelected,
     acknowledge: acknowledgeDetail,
+    assign: assignDetail,
+    close: closeDetail,
+    addNote: addDetailNote,
   } = useAlertDetail(effectiveSelectedAlertId, { onUnauthorized: expireSession });
   // Browser notifications for new critical alerts while the tab is hidden;
   // a click focuses the window and deep-links to the alert.
@@ -717,6 +720,9 @@ export default function App({ navigate }: AppProps = {}) {
           onClose={closeAlert}
           onRetry={retryDetail}
           onAcknowledge={acknowledgeDetail}
+          onAssign={assignDetail}
+          onCloseAlert={closeDetail}
+          onAddNote={addDetailNote}
           onFilterLabel={applyLabelMatcher}
           onSilence={
             detailState.status === 'ready'

@@ -6,6 +6,16 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **web:** the console can reach closed alerts. Closing removed an alert from the list with no way back, which from an operator's seat is indistinguishable from losing it; an Open/Closed control beside the silence filter is the route back. It is a pair rather than a trio because the server answers with open alerts or with closed ones and cannot return both, and an "All" that quietly showed half of what it promised would be worse than not offering one.
+- **web:** the alert drawer can assign, close and note. Three actions had shipped in the API with no way to use them: an assignee field (free text, because an alert is routinely handed to somebody who has never signed in here), a close/reopen button worded as filing rather than resolving since Alertmanager is never told, and a notes panel that reads oldest first — the order a handover is read in. Notes offer no edit or delete because the API offers neither, deliberately, and a control that cannot work is worse than its absence. A note written during an earlier occurrence is marked as such, so it does not read as describing the current incident.
+- **httpapi:** the per-alert actions envelope carries `canNote`. It resolves to the same operator check as the others today, but a console that inferred the right to write a note from the right to acknowledge would silently follow that flag the day one of them stops meaning the same thing.
+
+### Fixed
+
+- **web:** a console resuming from a cursor that stream retention has deleted now takes a fresh snapshot instead of carrying on. It did not subscribe to `stream.gap`, so a console left disconnected past the retention window reconnected, reported no error, and showed state that was quietly wrong about what was firing. It retries rather than scheduling a live refresh: a live refresh merges into what is already held, and what is already held is exactly what is no longer trustworthy. The client advances its own cursor past the deleted range before announcing it, so a reconnect in that window does not resume from the same dead position and get told about the same gap again.
+
 ## [0.1.0-alpha.40] - 2026-09-16
 
 ### Added

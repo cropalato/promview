@@ -8,7 +8,10 @@ import {
   isAlertNotFound,
   parseAlertDetailResponse,
   safeExternalUrl,
+  addAlertNote,
   setAlertAcknowledgement,
+  setAlertAssignee,
+  setAlertClosed,
 } from './detail';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -139,14 +142,27 @@ describe('fetchAlertDetail', () => {
         repeatCount: 3,
         occurrence: 2,
         suppressed: false,
+        assignee: '',
+        assignedBy: '',
+        assignedAt: null,
+        closed: false,
+        closedBy: '',
+        closedAt: null,
         silencedBy: [],
         acknowledged: false,
         acknowledgedBy: '',
         acknowledgedAt: null,
-        actions: { canAcknowledge: false, canSilence: false },
+        actions: {
+          canAcknowledge: false,
+          canSilence: false,
+          canAssign: false,
+          canClose: false,
+          canNote: false,
+        },
         rawData: { status: 'firing', labels: { alertname: 'HighErrorRate' } },
       },
       silences: [],
+      notes: [],
       history: [
         {
           id: 11,
@@ -201,7 +217,13 @@ describe('setAlertAcknowledgement', () => {
             acknowledged: true,
             acknowledgedBy: 'operator@example.com',
             acknowledgedAt: '2026-08-14T11:05:00Z',
-            actions: { canAcknowledge: true, canSilence: true },
+            actions: {
+              canAcknowledge: true,
+              canSilence: true,
+              canAssign: true,
+              canClose: true,
+              canNote: true,
+            },
           }),
           history: [apiHistoryEvent({ id: 12, type: 'acknowledged' }), apiHistoryEvent()],
         }),
@@ -219,7 +241,13 @@ describe('setAlertAcknowledgement', () => {
     expect(updated.alert.acknowledged).toBe(true);
     expect(updated.alert.acknowledgedBy).toBe('operator@example.com');
     expect(updated.alert.acknowledgedAt).toBe('2026-08-14T11:05:00Z');
-    expect(updated.alert.actions).toEqual({ canAcknowledge: true, canSilence: true });
+    expect(updated.alert.actions).toEqual({
+      canAcknowledge: true,
+      canSilence: true,
+      canAssign: true,
+      canClose: true,
+      canNote: true,
+    });
     expect(updated.history.map((event) => event.type)).toEqual(['acknowledged', 'updated']);
   });
 
@@ -302,7 +330,13 @@ describe('parseAlertDetailResponse', () => {
     expect(result.alert.acknowledged).toBe(false);
     expect(result.alert.acknowledgedBy).toBe('');
     expect(result.alert.acknowledgedAt).toBeNull();
-    expect(result.alert.actions).toEqual({ canAcknowledge: false, canSilence: false });
+    expect(result.alert.actions).toEqual({
+      canAcknowledge: false,
+      canSilence: false,
+      canAssign: false,
+      canClose: false,
+      canNote: false,
+    });
   });
 
   it('maps acknowledgement state and per-alert actions', () => {
@@ -312,7 +346,13 @@ describe('parseAlertDetailResponse', () => {
           acknowledged: true,
           acknowledgedBy: 'operator@example.com',
           acknowledgedAt: '2026-08-14T11:05:00Z',
-          actions: { canAcknowledge: true, canSilence: true },
+          actions: {
+            canAcknowledge: true,
+            canSilence: true,
+            canAssign: true,
+            canClose: true,
+            canNote: true,
+          },
         }),
       }),
     );
@@ -320,7 +360,13 @@ describe('parseAlertDetailResponse', () => {
     expect(result.alert.acknowledged).toBe(true);
     expect(result.alert.acknowledgedBy).toBe('operator@example.com');
     expect(result.alert.acknowledgedAt).toBe('2026-08-14T11:05:00Z');
-    expect(result.alert.actions).toEqual({ canAcknowledge: true, canSilence: true });
+    expect(result.alert.actions).toEqual({
+      canAcknowledge: true,
+      canSilence: true,
+      canAssign: true,
+      canClose: true,
+      canNote: true,
+    });
   });
 
   it('treats malformed actions envelopes as "no actions allowed"', () => {
@@ -328,7 +374,13 @@ describe('parseAlertDetailResponse', () => {
       const result = parseAlertDetailResponse(
         apiDetailResponse({ alert: apiAlertDetail({ actions }) }),
       );
-      expect(result.alert.actions).toEqual({ canAcknowledge: false, canSilence: false });
+      expect(result.alert.actions).toEqual({
+        canAcknowledge: false,
+        canSilence: false,
+        canAssign: false,
+        canClose: false,
+        canNote: false,
+      });
     }
   });
 
@@ -429,5 +481,91 @@ describe('parseAlertDetailResponse', () => {
         apiDetailResponse({ history: [apiHistoryEvent({ occurredAt: 11 })] }),
       ),
     ).toThrowError(/occurredAt must be a string/i);
+  });
+});
+
+describe('assign, close and notes', () => {
+  it('puts the assignment in full, so clearing is the empty string', async () => {
+    // A fresh Response per call: a body can only be read once, and this test
+    // deliberately sends two requests.
+    const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse(apiDetailResponse({}))));
+
+    await setAlertAssignee('42', 'platform-rota', fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/alerts/42/assignee', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignee: 'platform-rota' }),
+    });
+
+    // Unassigning is the same request with nothing in it: there is no second
+    // verb, which is why this is a PUT.
+    await setAlertAssignee('42', '', fetchImpl);
+    expect(fetchImpl).toHaveBeenLastCalledWith(
+      '/api/v1/alerts/42/assignee',
+      expect.objectContaining({ body: JSON.stringify({ assignee: '' }) }),
+    );
+  });
+
+  it('posts the desired close state rather than a verb', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(apiDetailResponse({})));
+    await setAlertClosed('42', true, fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/alerts/42/close', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ closed: true }),
+    });
+  });
+
+  it('appends a note and maps the notes back, oldest first', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(
+        apiDetailResponse({
+          notes: [
+            {
+              id: 1,
+              occurrence: 1,
+              author: 'oncall',
+              body: 'paged the vendor',
+              createdAt: '2026-09-16T12:00:00Z',
+            },
+            {
+              id: 2,
+              occurrence: 2,
+              author: 'oncall',
+              body: 'second incident',
+              createdAt: '2026-09-16T13:00:00Z',
+            },
+          ],
+        }),
+      ),
+    );
+
+    const updated = await addAlertNote('42', 'paged the vendor', fetchImpl);
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/alerts/42/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: 'paged the vendor' }),
+    });
+    expect(updated.notes.map((note) => note.body)).toEqual(['paged the vendor', 'second incident']);
+    // The occurrence travels with the note so one written about a previous
+    // incident does not read as describing this one.
+    expect(updated.notes.map((note) => note.occurrence)).toEqual([1, 2]);
+  });
+
+  it('drops malformed notes rather than breaking the drawer', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(
+        apiDetailResponse({
+          notes: [{ id: 1, body: '' }, 'nonsense', { id: 2, body: 'kept' }],
+        }),
+      ),
+    );
+    const updated = await addAlertNote('42', 'x', fetchImpl);
+    expect(updated.notes.map((note) => note.body)).toEqual(['kept']);
+  });
+
+  it('surfaces a refused action rather than hiding it', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, 403));
+    await expect(setAlertClosed('42', true, fetchImpl)).rejects.toThrow(/HTTP 403/);
   });
 });

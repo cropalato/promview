@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isAlertsUnauthorized } from '../alerts/api';
-import { fetchAlertDetail, isAlertNotFound, setAlertAcknowledgement } from '../alerts/detail';
+import {
+  addAlertNote,
+  fetchAlertDetail,
+  isAlertNotFound,
+  setAlertAcknowledgement,
+  setAlertAssignee,
+  setAlertClosed,
+} from '../alerts/detail';
 import type { AlertDetailResult } from '../alerts/detail';
 
 export type AlertDetailState =
@@ -48,6 +55,12 @@ export function useAlertDetail(
   retry: () => void;
   refreshIfSelected: (id: string) => void;
   acknowledge: (acknowledged: boolean) => Promise<void>;
+  /** Records who owns the alert; an empty string clears it. */
+  assign: (assignee: string) => Promise<void>;
+  /** Files the alert as handled, or reopens it. */
+  close: (closed: boolean) => Promise<void>;
+  /** Appends one operator note. */
+  addNote: (body: string) => Promise<void>;
 } {
   const { onUnauthorized } = options;
   const [state, setState] = useState<AlertDetailState>({ status: 'idle' });
@@ -192,5 +205,47 @@ export function useAlertDetail(
     [reportIfUnauthorized],
   );
 
-  return { state, retry, refreshIfSelected, acknowledge };
+  // assign, close and note differ from acknowledge only in which request they
+  // make, so they share one runner rather than three copies of the same
+  // replace-if-still-showing and expire-on-401 handling.
+  const runMutation = useCallback(
+    async (mutate: (id: string) => Promise<AlertDetailResult>): Promise<void> => {
+      const id = alertIdRef.current;
+      if (id === null || !readyRef.current) {
+        throw new Error('Alert detail is not loaded');
+      }
+      try {
+        const updated = await mutate(id);
+        if (disposedRef.current) {
+          return;
+        }
+        setState((current) =>
+          current.status === 'ready' && alertIdRef.current === id
+            ? { status: 'ready', detail: updated }
+            : current,
+        );
+      } catch (error) {
+        reportIfUnauthorized(error);
+        throw error;
+      }
+    },
+    [reportIfUnauthorized],
+  );
+
+  const assign = useCallback(
+    (assignee: string): Promise<void> => runMutation((id) => setAlertAssignee(id, assignee)),
+    [runMutation],
+  );
+
+  const close = useCallback(
+    (closed: boolean): Promise<void> => runMutation((id) => setAlertClosed(id, closed)),
+    [runMutation],
+  );
+
+  const addNote = useCallback(
+    (body: string): Promise<void> => runMutation((id) => addAlertNote(id, body)),
+    [runMutation],
+  );
+
+  return { state, retry, refreshIfSelected, acknowledge, assign, close, addNote };
 }
