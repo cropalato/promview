@@ -456,7 +456,7 @@ func resolvePrincipal(ctx context.Context, database principalQuerier, userID int
 		-- means and a third kind of subject would have to hope that stayed true.
 		WHERE (binding.subject_kind = 'user' AND binding.user_id = $1)
 			OR (
-				binding.subject_kind = 'oidc_group'
+				binding.subject_kind IN ('oidc_group', 'ldap_group')
 				AND EXISTS (
 					SELECT 1
 					FROM auth_identities AS identity

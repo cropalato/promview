@@ -263,3 +263,42 @@ func TestStoreLocalAccountAdministration(t *testing.T) {
 		}
 	}
 }
+
+// An LDAP identity flows through the same upsert OIDC uses and binds through
+// the same two columns. This is the check that the grants query actually
+// matches on the new subject kind rather than only appearing to.
+func TestStoreLDAPGroupBindings(t *testing.T) {
+	store, ctx := newLocalTestStore(t)
+
+	const directory = "ldaps://dc.example.com:636"
+	if err := store.SetRoleBinding(ctx, auth.RoleBinding{
+		Name: "directory-operators", SubjectKind: auth.SubjectLDAPGroup,
+		SubjectIssuer: directory, SubjectGroup: "promview-operators",
+		Role: auth.RoleOperator,
+	}); err != nil {
+		t.Fatalf("SetRoleBinding() error = %v", err)
+	}
+
+	principal, err := store.ResolveDirectoryIdentity(ctx, auth.DirectoryIdentity{
+		Issuer: directory, Subject: "0f8fad5b-d9cb-469f-a165-70867728950e",
+		Username: "ada", Email: "ada@example.com", DisplayName: "Ada Lovelace",
+		Groups: []string{"promview-operators"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveDirectoryIdentity() error = %v", err)
+	}
+	if !principal.CanOperate() {
+		t.Fatalf("an LDAP group binding did not grant its role: %#v", principal)
+	}
+
+	// An OIDC issuer string and an LDAP one cannot collide, but the query keys
+	// on the subject kind rather than relying on that, so a member of an
+	// identically named group at a different directory gets nothing.
+	other, err := store.ResolveDirectoryIdentity(ctx, auth.DirectoryIdentity{
+		Issuer: "ldaps://other.example.com:636", Subject: "someone-else",
+		Username: "bob", Groups: []string{"promview-operators"},
+	})
+	if !errors.Is(err, auth.ErrAccessDenied) {
+		t.Fatalf("a group at another directory resolved to %#v (error %v)", other, err)
+	}
+}

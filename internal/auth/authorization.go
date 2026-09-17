@@ -20,6 +20,7 @@ const (
 
 	SubjectUser      = "user"
 	SubjectOIDCGroup = "oidc_group"
+	SubjectLDAPGroup = "ldap_group"
 )
 
 var (
@@ -329,7 +330,7 @@ func validateRoleBinding(binding RoleBinding) error {
 		if binding.UserID < 1 || binding.SubjectIssuer != "" || binding.SubjectGroup != "" {
 			return errors.New("user binding requires only a positive user ID")
 		}
-	case SubjectOIDCGroup:
+	case SubjectOIDCGroup, SubjectLDAPGroup:
 		if binding.UserID != 0 || binding.SubjectIssuer == "" || binding.SubjectGroup == "" {
 			return errors.New("group binding requires only issuer and group")
 		}
@@ -337,11 +338,21 @@ func validateRoleBinding(binding RoleBinding) error {
 		if err != nil || issuer.Scheme == "" || issuer.Host == "" {
 			return errors.New("group binding issuer must be an absolute URL")
 		}
+		// The scheme is what keeps the two kinds from being written against
+		// each other's directories. An ldaps:// issuer on an oidc_group binding
+		// can never match anything, and would sit there looking like access
+		// somebody has.
+		if binding.SubjectKind == SubjectLDAPGroup && issuer.Scheme != "ldap" && issuer.Scheme != "ldaps" {
+			return errors.New("LDAP group binding issuer must use the ldap or ldaps scheme")
+		}
+		if binding.SubjectKind == SubjectOIDCGroup && issuer.Scheme != "http" && issuer.Scheme != "https" {
+			return errors.New("OIDC group binding issuer must use the http or https scheme")
+		}
 		if len(binding.SubjectGroup) > 256 {
 			return errors.New("group name must not exceed 256 characters")
 		}
 	default:
-		return errors.New("binding subject must be user or OIDC group")
+		return errors.New("binding subject must be a user, an OIDC group, or an LDAP group")
 	}
 	if len(binding.Matchers) > 16 {
 		return errors.New("binding must not contain more than 16 selectors")

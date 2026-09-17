@@ -34,6 +34,19 @@ type Config struct {
 	OIDCEmailClaim       string
 	OIDCDisplayNameClaim string
 	OIDCGroupsClaim      string
+	LDAPURL              string
+	LDAPIssuer           string
+	LDAPBindDN           string
+	LDAPBindPassword     string
+	LDAPBaseDN           string
+	LDAPUserFilter       string
+	LDAPGroupAttribute   string
+	LDAPGroupFormat      string
+	LDAPUsernameAttr     string
+	LDAPEmailAttr        string
+	LDAPDisplayNameAttr  string
+	LDAPStartTLS         bool
+	LDAPTimeout          time.Duration
 	// SessionCookieSecure marks the session cookie Secure. It is not an OIDC
 	// setting: every mode that issues a session writes the same cookie, and a
 	// deployment that had to set one flag per mode would eventually set one and
@@ -84,6 +97,18 @@ func Load() (Config, error) {
 		OIDCEmailClaim:       envOrDefault("PROMVIEW_OIDC_EMAIL_CLAIM", "email"),
 		OIDCDisplayNameClaim: envOrDefault("PROMVIEW_OIDC_DISPLAY_NAME_CLAIM", "name"),
 		OIDCGroupsClaim:      envOrDefault("PROMVIEW_OIDC_GROUPS_CLAIM", "groups"),
+		LDAPURL:              os.Getenv("PROMVIEW_LDAP_URL"),
+		LDAPIssuer:           os.Getenv("PROMVIEW_LDAP_ISSUER"),
+		LDAPBindDN:           os.Getenv("PROMVIEW_LDAP_BIND_DN"),
+		LDAPBindPassword:     os.Getenv("PROMVIEW_LDAP_BIND_PASSWORD"),
+		LDAPBaseDN:           os.Getenv("PROMVIEW_LDAP_BASE_DN"),
+		LDAPUserFilter:       envOrDefault("PROMVIEW_LDAP_USER_FILTER", "(uid=%s)"),
+		LDAPGroupAttribute:   envOrDefault("PROMVIEW_LDAP_GROUP_ATTRIBUTE", "memberOf"),
+		LDAPGroupFormat:      envOrDefault("PROMVIEW_LDAP_GROUP_FORMAT", "cn"),
+		LDAPUsernameAttr:     envOrDefault("PROMVIEW_LDAP_USERNAME_ATTRIBUTE", "uid"),
+		LDAPEmailAttr:        envOrDefault("PROMVIEW_LDAP_EMAIL_ATTRIBUTE", "mail"),
+		LDAPDisplayNameAttr:  envOrDefault("PROMVIEW_LDAP_DISPLAY_NAME_ATTRIBUTE", "cn"),
+		LDAPTimeout:          10 * time.Second,
 		SessionCookieSecure:  true,
 		// Three times Alertmanager's default repeat_interval of 4h: long enough
 		// that a live alert is always re-reported before its window closes, so
@@ -119,6 +144,21 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("%s must be true or false", cookieSecureName)
 		}
 		cfg.SessionCookieSecure = secure
+	}
+
+	if raw := os.Getenv("PROMVIEW_LDAP_START_TLS"); raw != "" {
+		startTLS, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, errors.New("PROMVIEW_LDAP_START_TLS must be true or false")
+		}
+		cfg.LDAPStartTLS = startTLS
+	}
+	if raw := os.Getenv("PROMVIEW_LDAP_TIMEOUT"); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil || timeout <= 0 {
+			return Config{}, errors.New("PROMVIEW_LDAP_TIMEOUT must be a positive duration such as 10s")
+		}
+		cfg.LDAPTimeout = timeout
 	}
 
 	if raw := os.Getenv("PROMVIEW_ALERT_STALE_AFTER"); raw != "" {
@@ -203,6 +243,10 @@ func Load() (Config, error) {
 		if err := validateLocal(cfg); err != nil {
 			return Config{}, err
 		}
+	case "ldap":
+		if err := validateLDAP(cfg); err != nil {
+			return Config{}, err
+		}
 	case "oidc":
 		if err := validateOIDC(cfg); err != nil {
 			return Config{}, err
@@ -216,7 +260,7 @@ func Load() (Config, error) {
 
 // SupportedAuthModes is what PROMVIEW_AUTH_MODE accepts, in the order the error
 // message lists them.
-var SupportedAuthModes = []string{"open", "oidc", "local"}
+var SupportedAuthModes = []string{"open", "oidc", "local", "ldap"}
 
 // validateLocal checks the settings a password sign-in depends on.
 //
@@ -235,6 +279,60 @@ func validateLocal(cfg Config) error {
 	// An empty host means every interface, which is not loopback-only.
 	if host == "" || !isLoopbackHost(host) {
 		return errors.New("PROMVIEW_SESSION_COOKIE_SECURE may be false only when listening on loopback")
+	}
+	return nil
+}
+
+func validateLDAP(cfg Config) error {
+	required := map[string]string{
+		"PROMVIEW_LDAP_URL":     cfg.LDAPURL,
+		"PROMVIEW_LDAP_BASE_DN": cfg.LDAPBaseDN,
+		"PROMVIEW_LDAP_BIND_DN": cfg.LDAPBindDN,
+	}
+	for name, value := range required {
+		if value == "" {
+			return fmt.Errorf("%s is required in LDAP mode", name)
+		}
+	}
+	// The service account's password may legitimately be empty only if the
+	// directory allows an anonymous search, which is rare enough that a blank
+	// one is far more likely to be an unset environment variable.
+	if cfg.LDAPBindPassword == "" {
+		return errors.New("PROMVIEW_LDAP_BIND_PASSWORD is required in LDAP mode")
+	}
+	directory, err := url.Parse(cfg.LDAPURL)
+	if err != nil || directory.Scheme == "" || directory.Host == "" {
+		return errors.New("PROMVIEW_LDAP_URL must be an absolute URL such as ldaps://directory.example.com:636")
+	}
+	switch directory.Scheme {
+	case "ldaps":
+	case "ldap":
+		// Search-then-bind sends the user's own password to the directory. Over
+		// cleartext that password is on the wire, which is the one outcome the
+		// whole flow exists to avoid, so plain ldap:// needs StartTLS or a
+		// loopback host.
+		if !cfg.LDAPStartTLS && !isLoopbackHost(directory.Hostname()) {
+			return errors.New("PROMVIEW_LDAP_URL must use ldaps://, set PROMVIEW_LDAP_START_TLS=true, or point at a loopback host")
+		}
+	default:
+		return errors.New("PROMVIEW_LDAP_URL must use the ldap or ldaps scheme")
+	}
+	if cfg.LDAPIssuer != "" {
+		issuer, err := url.Parse(cfg.LDAPIssuer)
+		if err != nil || (issuer.Scheme != "ldap" && issuer.Scheme != "ldaps") || issuer.Host == "" {
+			return errors.New("PROMVIEW_LDAP_ISSUER must be an ldap:// or ldaps:// URL")
+		}
+	}
+	if !strings.Contains(cfg.LDAPUserFilter, "%s") {
+		return errors.New("PROMVIEW_LDAP_USER_FILTER must contain %s for the username")
+	}
+	switch cfg.LDAPGroupFormat {
+	case "cn", "dn":
+	default:
+		return errors.New("PROMVIEW_LDAP_GROUP_FORMAT must be cn or dn")
+	}
+	if err := validateLocal(cfg); err != nil {
+		return err
 	}
 	return nil
 }

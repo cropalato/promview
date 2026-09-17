@@ -34,6 +34,20 @@ data:
   PROMVIEW_OIDC_DISPLAY_NAME_CLAIM: {{ .Values.oidc.displayNameClaim | quote }}
   PROMVIEW_OIDC_GROUPS_CLAIM: {{ .Values.oidc.groupsClaim | quote }}
   {{- end }}
+  {{- if eq .Values.auth.mode "ldap" }}
+  PROMVIEW_LDAP_URL: {{ .Values.ldap.url | quote }}
+  PROMVIEW_LDAP_ISSUER: {{ .Values.ldap.issuer | quote }}
+  PROMVIEW_LDAP_BIND_DN: {{ .Values.ldap.bindDN | quote }}
+  PROMVIEW_LDAP_BASE_DN: {{ .Values.ldap.baseDN | quote }}
+  PROMVIEW_LDAP_USER_FILTER: {{ .Values.ldap.userFilter | quote }}
+  PROMVIEW_LDAP_GROUP_ATTRIBUTE: {{ .Values.ldap.groupAttribute | quote }}
+  PROMVIEW_LDAP_GROUP_FORMAT: {{ .Values.ldap.groupFormat | quote }}
+  PROMVIEW_LDAP_USERNAME_ATTRIBUTE: {{ .Values.ldap.usernameAttribute | quote }}
+  PROMVIEW_LDAP_EMAIL_ATTRIBUTE: {{ .Values.ldap.emailAttribute | quote }}
+  PROMVIEW_LDAP_DISPLAY_NAME_ATTRIBUTE: {{ .Values.ldap.displayNameAttribute | quote }}
+  PROMVIEW_LDAP_START_TLS: {{ .Values.ldap.startTLS | quote }}
+  PROMVIEW_LDAP_TIMEOUT: {{ .Values.ldap.timeout | quote }}
+  {{- end }}
   {{- if .Values.bootstrapSource.enabled }}
   PROMVIEW_BOOTSTRAP_SOURCE_SLUG: {{ .Values.bootstrapSource.slug | quote }}
   PROMVIEW_BOOTSTRAP_SOURCE_NAME: {{ default .Values.bootstrapSource.slug .Values.bootstrapSource.name | quote }}

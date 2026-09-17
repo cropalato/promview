@@ -60,6 +60,17 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $clientSecretKey := required "oidc.clientSecretKey is required when auth.mode=oidc" .Values.oidc.clientSecretKey -}}
 {{- $redirectURL := required "oidc.redirectURL is required when auth.mode=oidc" .Values.oidc.redirectURL -}}
 {{- end -}}
+{{- if eq .Values.auth.mode "ldap" -}}
+{{- $ldapURL := required "ldap.url is required when auth.mode=ldap" .Values.ldap.url -}}
+{{- $ldapBaseDN := required "ldap.baseDN is required when auth.mode=ldap" .Values.ldap.baseDN -}}
+{{- $ldapBindDN := required "ldap.bindDN is required when auth.mode=ldap" .Values.ldap.bindDN -}}
+{{- /*
+  The service account's password is a credential, so it comes from a Secret and
+  never from a plain value: a values file is copied, diffed and committed.
+*/ -}}
+{{- $ldapSecret := required "ldap.existingSecret is required when auth.mode=ldap" .Values.ldap.existingSecret -}}
+{{- $ldapPasswordKey := required "ldap.bindPasswordKey is required when auth.mode=ldap" .Values.ldap.bindPasswordKey -}}
+{{- end -}}
 {{- if .Values.bootstrapSource.enabled -}}
 {{- $sourceSlug := required "bootstrapSource.slug is required when bootstrapSource.enabled=true" .Values.bootstrapSource.slug -}}
 {{- $sourceSecret := required "bootstrapSource.existingSecret is required when bootstrapSource.enabled=true" .Values.bootstrapSource.existingSecret -}}
@@ -72,8 +83,8 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
   created - so a values file cannot know one, and `promview access set` is the
   only place that can.
 */ -}}
-{{- if ne .Values.auth.mode "oidc" -}}
-{{- fail "roleBindings name a directory group and require auth.mode=oidc; bind local accounts with `promview access set --user-id`" -}}
+{{- if and (ne .Values.auth.mode "oidc") (ne .Values.auth.mode "ldap") -}}
+{{- fail "roleBindings name a directory group and require auth.mode=oidc or auth.mode=ldap; bind local accounts with `promview access set --user-id`" -}}
 {{- end -}}
 {{- range .Values.roleBindings -}}
 {{- if and (eq .role "administrator") .selectors -}}

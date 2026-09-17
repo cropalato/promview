@@ -70,7 +70,8 @@
           "enum": [
             "open",
             "oidc",
-            "local"
+            "local",
+            "ldap"
           ]
         },
         "sessionCookieSecure": {

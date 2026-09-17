@@ -149,3 +149,28 @@ func TestSourceUpdateRequiresASlug(t *testing.T) {
 		t.Fatal("source update without a slug error = nil, want error")
 	}
 }
+
+// The issuer's scheme names the directory, so the subject kind follows from it
+// rather than needing a flag nobody would remember to set - and a binding whose
+// kind disagreed with its issuer could never match while looking like access
+// somebody has.
+func TestRunAccessSetInfersTheSubjectKindFromTheIssuer(t *testing.T) {
+	for issuer, want := range map[string]string{
+		"https://identity.example.com":    auth.SubjectOIDCGroup,
+		"http://localhost:9000":           auth.SubjectOIDCGroup,
+		"ldaps://dc.corp.example.com:636": auth.SubjectLDAPGroup,
+		"ldap://127.0.0.1:389":            auth.SubjectLDAPGroup,
+	} {
+		store := &fakeAccessStore{}
+		err := runAccessCommand(context.Background(), store, []string{
+			"set", "--name", "platform", "--role", "operator",
+			"--issuer", issuer, "--group", "platform",
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", issuer, err)
+		}
+		if store.binding.SubjectKind != want {
+			t.Fatalf("%s gave subjectKind %q, want %q", issuer, store.binding.SubjectKind, want)
+		}
+	}
+}
