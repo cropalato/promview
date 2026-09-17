@@ -23,6 +23,12 @@ export interface AlertActions {
   canAcknowledge: boolean;
   /** Operator rights on this alert plus an Alertmanager to write the silence to. */
   canSilence: boolean;
+  /** Operator rights to record who owns the alert. */
+  canAssign: boolean;
+  /** Operator rights to file the alert as handled, or reopen it. */
+  canClose: boolean;
+  /** Operator rights to append a note. */
+  canNote: boolean;
 }
 
 /** Fully validated alert detail, mapped for the drawer panels. */
@@ -56,6 +62,19 @@ export interface AlertDetail {
   suppressed: boolean;
   /** Ids of the silences currently matching; empty means inhibited instead. */
   silencedBy: string[];
+  /** Who owns the alert, as free text. Empty means unassigned. */
+  assignee: string;
+  /** The operator who decided the assignment, which is not who owns it. */
+  assignedBy: string;
+  assignedAt: string | null;
+  /**
+   * An operator filed this alert as handled. Separate from `status`, which is
+   * what the source reports: closing writes nothing to Alertmanager, so a
+   * closed alert can still be firing.
+   */
+  closed: boolean;
+  closedBy: string;
+  closedAt: string | null;
   /** Server-provided actions the caller may run against this alert. */
   actions: AlertActions;
   /** Source payload as delivered by Alertmanager; rendered as plain JSON. */
@@ -99,6 +118,25 @@ export interface AlertDetailResult {
   history: AlertHistoryEvent[];
   /** Provenance for the silences named in `alert.silencedBy`, where known. */
   silences: AlertSilenceRecord[];
+  /** Operator notes, oldest first — the order a handover is read in. */
+  notes: AlertNote[];
+}
+
+/**
+ * One operator's written judgement about the alert. Append-only: the API has
+ * no endpoint that edits or removes one, so the drawer offers neither.
+ */
+export interface AlertNote {
+  id: number;
+  /**
+   * The occurrence the note was written against. An alert that resolved and
+   * fired again is a different incident, and a note about the previous one must
+   * not read as though it describes this one.
+   */
+  occurrence: number;
+  author: string;
+  body: string;
+  createdAt: string;
 }
 
 /** Human labels for the lifecycle event types the API emits today. */
@@ -129,6 +167,18 @@ export function buildAlertDetailUrl(id: string): string {
 
 export function buildAcknowledgeUrl(id: string): string {
   return `${buildAlertDetailUrl(id)}/acknowledge`;
+}
+
+export function buildAssigneeUrl(id: string): string {
+  return `${buildAlertDetailUrl(id)}/assignee`;
+}
+
+export function buildCloseUrl(id: string): string {
+  return `${buildAlertDetailUrl(id)}/close`;
+}
+
+export function buildNotesUrl(id: string): string {
+  return `${buildAlertDetailUrl(id)}/notes`;
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -237,7 +287,34 @@ export function parseAlertDetailResponse(body: unknown): AlertDetailResult {
     alert: parseAlertDetail(record.alert),
     history: historyValue === null || historyValue === undefined ? [] : parseHistory(historyValue),
     silences: parseSilences(record.silences),
+    notes: parseNotes(record.notes),
   };
+}
+
+/** An absent or malformed notes array means no notes, never a broken drawer. */
+function parseNotes(value: unknown): AlertNote[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const notes: AlertNote[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const raw = entry as Record<string, unknown>;
+    const body = typeof raw.body === 'string' ? raw.body : '';
+    if (body === '') {
+      continue;
+    }
+    notes.push({
+      id: typeof raw.id === 'number' ? raw.id : 0,
+      occurrence: typeof raw.occurrence === 'number' ? raw.occurrence : 0,
+      author: typeof raw.author === 'string' ? raw.author : '',
+      body,
+      createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '',
+    });
+  }
+  return notes;
 }
 
 /**
@@ -316,6 +393,16 @@ function parseAlertDetail(value: unknown): AlertDetail {
     silencedBy: Array.isArray(raw.silencedBy)
       ? raw.silencedBy.filter((entry): entry is string => typeof entry === 'string')
       : [],
+    assignee: optionalString(raw.assignee),
+    assignedBy: optionalString(raw.assignedBy),
+    assignedAt:
+      raw.assignedAt === null || raw.assignedAt === undefined
+        ? null
+        : optionalString(raw.assignedAt),
+    closed: raw.closed === true,
+    closedBy: optionalString(raw.closedBy),
+    closedAt:
+      raw.closedAt === null || raw.closedAt === undefined ? null : optionalString(raw.closedAt),
     acknowledged: raw.acknowledged === true,
     acknowledgedBy: optionalString(raw.acknowledgedBy),
     acknowledgedAt:
@@ -330,10 +417,22 @@ function parseAlertDetail(value: unknown): AlertDetail {
 /** An absent or malformed actions envelope means "no actions allowed". */
 function parseActions(value: unknown): AlertActions {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { canAcknowledge: false, canSilence: false };
+    return {
+      canAcknowledge: false,
+      canSilence: false,
+      canAssign: false,
+      canClose: false,
+      canNote: false,
+    };
   }
   const record = value as Record<string, unknown>;
-  return { canAcknowledge: record.canAcknowledge === true, canSilence: record.canSilence === true };
+  return {
+    canAcknowledge: record.canAcknowledge === true,
+    canSilence: record.canSilence === true,
+    canAssign: record.canAssign === true,
+    canClose: record.canClose === true,
+    canNote: record.canNote === true,
+  };
 }
 
 function parseHistory(value: unknown): AlertHistoryEvent[] {
@@ -405,4 +504,88 @@ function stringRecord(value: unknown, field: string): Record<string, string> {
     result[key] = entry;
   }
   return result;
+}
+
+/**
+ * Shared shape of the three mutating detail clients. Each sends a JSON body to
+ * one endpoint and gets the full detail envelope back, so a caller replaces its
+ * cached detail wholesale rather than patching fields it did not fetch.
+ *
+ * A 403 is surfaced like any other failure: it means the server withheld a
+ * permission the UI gated on, which happens legitimately when a binding changes
+ * between the page load and the click, and hiding it would leave the operator
+ * wondering why nothing happened.
+ */
+async function mutateAlertDetail(
+  url: string,
+  method: string,
+  body: unknown,
+  what: string,
+  fetchImpl: FetchLike,
+): Promise<AlertDetailResult> {
+  let response: Response;
+  try {
+    response = await fetchImpl(apiUrl(url), {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (cause) {
+    throw new AlertsApiError('Unable to reach the Promview API', { cause });
+  }
+  if (!response.ok) {
+    throw new AlertsApiError(`${what} request failed (HTTP ${response.status})`, {
+      status: response.status,
+    });
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (cause) {
+    throw new AlertsApiError(`${what} response was not valid JSON`, { cause });
+  }
+  return parseAlertDetailResponse(payload);
+}
+
+/**
+ * Records who owns an alert, or clears it with an empty string. A PUT because
+ * the request states the assignment in full: sending it twice leaves the same
+ * owner, and there is no separate unassign verb.
+ *
+ * The assignee is free text, not a Promview user. An alert is routinely handed
+ * to somebody who has never signed in — a vendor, a rota address, the name in a
+ * runbook — so the field must not be constrained to known accounts.
+ */
+export async function setAlertAssignee(
+  id: string,
+  assignee: string,
+  fetchImpl: FetchLike = apiFetch,
+): Promise<AlertDetailResult> {
+  return mutateAlertDetail(buildAssigneeUrl(id), 'PUT', { assignee }, 'Assign', fetchImpl);
+}
+
+/**
+ * Files an alert as handled, or reopens it. Promview-local: nothing is written
+ * to Alertmanager and the alert keeps reporting whatever the source says, so a
+ * closed alert can still be firing.
+ */
+export async function setAlertClosed(
+  id: string,
+  closed: boolean,
+  fetchImpl: FetchLike = apiFetch,
+): Promise<AlertDetailResult> {
+  return mutateAlertDetail(buildCloseUrl(id), 'POST', { closed }, 'Close', fetchImpl);
+}
+
+/**
+ * Appends one operator note. POST rather than PUT because each call adds a note
+ * rather than restating the set; notes are append-only and there is no endpoint
+ * that edits or removes one.
+ */
+export async function addAlertNote(
+  id: string,
+  body: string,
+  fetchImpl: FetchLike = apiFetch,
+): Promise<AlertDetailResult> {
+  return mutateAlertDetail(buildNotesUrl(id), 'POST', { body }, 'Note', fetchImpl);
 }

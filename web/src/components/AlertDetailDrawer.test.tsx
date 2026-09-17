@@ -7,6 +7,7 @@ import { AlertDetailDrawer } from './AlertDetailDrawer';
 function detailResult(overrides: Record<string, unknown> = {}): AlertDetailResult {
   return {
     silences: [],
+    notes: [],
     alert: {
       id: '42',
       fingerprint: 'fp-42',
@@ -25,12 +26,24 @@ function detailResult(overrides: Record<string, unknown> = {}): AlertDetailResul
       lastSeen: '2026-08-14T11:00:00Z',
       repeatCount: 3,
       suppressed: false,
+      assignee: '',
+      assignedBy: '',
+      assignedAt: null,
+      closed: false,
+      closedBy: '',
+      closedAt: null,
       silencedBy: [],
       occurrence: 2,
       acknowledged: false,
       acknowledgedBy: '',
       acknowledgedAt: null,
-      actions: { canAcknowledge: false, canSilence: false },
+      actions: {
+        canAcknowledge: false,
+        canSilence: false,
+        canAssign: false,
+        canClose: false,
+        canNote: false,
+      },
       rawData: { status: 'firing' },
       ...overrides,
     },
@@ -196,7 +209,15 @@ describe('AlertDetailDrawer', () => {
         alertId="42"
         state={{
           status: 'ready',
-          detail: detailResult({ actions: { canAcknowledge: true, canSilence: true } }),
+          detail: detailResult({
+            actions: {
+              canAcknowledge: true,
+              canSilence: true,
+              canAssign: true,
+              canClose: true,
+              canNote: true,
+            },
+          }),
         }}
         onClose={vi.fn()}
         onRetry={vi.fn()}

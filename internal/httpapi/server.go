@@ -878,6 +878,11 @@ type alertActions struct {
 	// inferring one right from another.
 	CanAssign bool `json:"canAssign"`
 	CanClose  bool `json:"canClose"`
+	// CanNote is its own flag rather than something a client infers from one of
+	// the others. They all resolve to the same per-alert operator check today,
+	// and a console that borrowed a neighbour's flag would silently follow it
+	// the day one of them stops meaning the same thing.
+	CanNote bool `json:"canNote"`
 }
 
 // alertGroupResponse is one collapsed row. SampleAlertID is a string like every
@@ -938,7 +943,7 @@ func newAlertDetailResponse(alert alerts.Alert, canOperate bool, canSilence bool
 		Closed:         alert.Closed,
 		ClosedAt:       alert.ClosedAt,
 		ClosedBy:       alert.ClosedBy,
-		Actions:        alertActions{CanAcknowledge: canOperate, CanSilence: canOperate && canSilence, CanAssign: canOperate, CanClose: canOperate},
+		Actions:        alertActions{CanAcknowledge: canOperate, CanSilence: canOperate && canSilence, CanAssign: canOperate, CanClose: canOperate, CanNote: canOperate},
 		RawData:        alert.RawData,
 	}
 }

@@ -28,6 +28,12 @@ interface AlertDetailDrawerProps {
   onSilence?: () => void;
   /** Lifts one silence holding this alert back; forwarded to the gated action. */
   onRemoveSilence?: (silenceId: string) => Promise<void>;
+  /** Records who owns the alert; an empty string clears it. */
+  onAssign?: (assignee: string) => Promise<void>;
+  /** Files the alert as handled, or reopens it. */
+  onCloseAlert?: (closed: boolean) => Promise<void>;
+  /** Appends one operator note. */
+  onAddNote?: (body: string) => Promise<void>;
 }
 
 /**
@@ -47,6 +53,9 @@ export function AlertDetailDrawer({
   onFilterLabel,
   onSilence,
   onRemoveSilence,
+  onAssign,
+  onCloseAlert,
+  onAddNote,
 }: AlertDetailDrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -179,6 +188,10 @@ export function AlertDetailDrawer({
                   onFilterLabel={onFilterLabel}
                   onSilence={onSilence}
                   onRemoveSilence={onRemoveSilence}
+                  onAssign={onAssign}
+                  onClose={onCloseAlert}
+                  onAddNote={onAddNote}
+                  notes={ready.notes}
                 />
               ) : null}
               {activeTab === 'timeline' ? <AlertTimeline history={ready.history} /> : null}

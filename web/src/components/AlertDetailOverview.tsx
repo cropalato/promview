@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { safeExternalUrl } from '../alerts/detail';
-import type { AlertDetail, AlertSilenceRecord } from '../alerts/detail';
+import type { AlertNote, AlertDetail, AlertSilenceRecord } from '../alerts/detail';
 import type { LabelMatcher } from '../alerts/filter';
 import { formatTimestamp } from '../alerts/format';
 import { AcknowledgeButton } from './AcknowledgeButton';
+import { AssigneeField } from './AssigneeField';
+import { CloseButton } from './CloseButton';
+import { NotesPanel } from './NotesPanel';
 import { CopyButton } from './CopyButton';
 import { ExternalLinkIcon, SeverityIcon } from './icons';
 
@@ -22,6 +25,14 @@ interface AlertDetailOverviewProps {
   onAcknowledge?: (acknowledged: boolean) => Promise<void>;
   /** Opens the silence dialog for this alert; enables the gated action. */
   onSilence?: () => void;
+  /** Records who owns the alert; an empty string clears it. */
+  onAssign?: (assignee: string) => Promise<void>;
+  /** Files the alert as handled, or reopens it. Promview-local either way. */
+  onClose?: (closed: boolean) => Promise<void>;
+  /** Appends one operator note. Absent where this operator may not write. */
+  onAddNote?: (body: string) => Promise<void>;
+  /** Notes already written about this alert, oldest first. */
+  notes?: readonly AlertNote[];
   /**
    * Lifts one silence holding this alert back. Absent where the deployment
    * cannot remove silences, where the server is too old to offer the endpoint,
@@ -54,6 +65,10 @@ export function AlertDetailOverview({
   silences = [],
   onAcknowledge,
   onSilence,
+  onAssign,
+  onClose,
+  onAddNote,
+  notes,
   onRemoveSilence,
   onFilterLabel,
 }: AlertDetailOverviewProps) {
@@ -120,11 +135,19 @@ export function AlertDetailOverview({
       </dl>
 
       {(detail.actions.canAcknowledge && onAcknowledge !== undefined) ||
-      (detail.actions.canSilence && onSilence !== undefined) ? (
+      (detail.actions.canSilence && onSilence !== undefined) ||
+      (detail.actions.canAssign && onAssign !== undefined) ||
+      (detail.actions.canClose && onClose !== undefined) ? (
         <section className="detail-section" aria-label="Actions">
           <h3 className="detail-section-title">Actions</h3>
           {detail.actions.canAcknowledge && onAcknowledge !== undefined ? (
             <AcknowledgeButton acknowledged={detail.acknowledged} onAcknowledge={onAcknowledge} />
+          ) : null}
+          {detail.actions.canAssign && onAssign !== undefined ? (
+            <AssigneeField assignee={detail.assignee} onAssign={onAssign} />
+          ) : null}
+          {detail.actions.canClose && onClose !== undefined ? (
+            <CloseButton closed={detail.closed} onClose={onClose} />
           ) : null}
           {detail.actions.canSilence && onSilence !== undefined ? (
             <div className="detail-action">
@@ -138,6 +161,12 @@ export function AlertDetailOverview({
           ) : null}
         </section>
       ) : null}
+
+      <NotesPanel
+        notes={notes ?? []}
+        occurrence={detail.occurrence}
+        onAddNote={detail.actions.canNote ? onAddNote : undefined}
+      />
 
       <section className="detail-section" aria-label="Timestamps">
         <h3 className="detail-section-title">Timestamps</h3>
