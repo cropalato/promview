@@ -40,8 +40,8 @@ import { useAlertRoute } from './hooks/useAlertRoute';
 import { useAlerts } from './hooks/useAlerts';
 import { usePreferences } from './hooks/usePreferences';
 import { useResolvedDensity } from './hooks/useResolvedDensity';
-import { suppressedFilter } from './preferences/store';
-import type { SilencedVisibility } from './preferences/store';
+import { closedFilter, suppressedFilter } from './preferences/store';
+import type { ClosedVisibility, SilencedVisibility } from './preferences/store';
 import { applyTheme } from './preferences/theme';
 import type { Theme } from './preferences/theme';
 import { useAlertGroups } from './hooks/useAlertGroups';
@@ -243,8 +243,9 @@ export default function App({ navigate }: AppProps = {}) {
       // counts, the severity strip and the group aggregates all have to agree
       // with what is on screen, and only the server can make them.
       suppressed: suppressedFilter(preferences.silencedVisibility),
+      closed: closedFilter(preferences.closedVisibility),
     }),
-    [appliedMatchers, sort, preferences.silencedVisibility],
+    [appliedMatchers, sort, preferences.silencedVisibility, preferences.closedVisibility],
   );
 
   const {
@@ -617,6 +618,12 @@ export default function App({ navigate }: AppProps = {}) {
                       updatePreferences({ ...preferences, silencedVisibility: next })
                     }
                   />
+                  <ClosedFilter
+                    value={preferences.closedVisibility}
+                    onChange={(next) =>
+                      updatePreferences({ ...preferences, closedVisibility: next })
+                    }
+                  />
                   <ViewMenu
                     preferences={preferences}
                     onChange={updatePreferences}
@@ -755,6 +762,46 @@ export default function App({ navigate }: AppProps = {}) {
  * being held back. The middle one is the dangerous one, so it is never where
  * the console starts.
  */
+/**
+ * What the list does with alerts an operator has closed.
+ *
+ * A pair rather than a trio, unlike the silence filter beside it: the server
+ * answers either with open alerts or with closed ones and has no way to return
+ * both, so an "All" here would be a control that quietly showed half of what it
+ * promised.
+ *
+ * It exists because closing an alert takes it out of the list, and without this
+ * there is no route back to one. That makes it recovery, not a refinement.
+ */
+function ClosedFilter({
+  value,
+  onChange,
+}: {
+  value: ClosedVisibility;
+  onChange: (next: ClosedVisibility) => void;
+}) {
+  const options: { id: ClosedVisibility; label: string; title: string }[] = [
+    { id: 'open', label: 'Open', title: 'Alerts nobody has filed as handled' },
+    { id: 'closed', label: 'Closed', title: 'Alerts an operator filed as handled' },
+  ];
+  return (
+    <div className="silence-filter" role="group" aria-label="Closed alerts">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          className={`silence-filter-option${value === option.id ? ' is-active' : ''}`}
+          aria-pressed={value === option.id}
+          title={option.title}
+          onClick={() => onChange(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SilenceFilter({
   value,
   onChange,

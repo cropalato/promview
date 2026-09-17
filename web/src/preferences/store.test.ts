@@ -4,6 +4,8 @@ import {
   defaultPreferences,
   loadPreferences,
   parsePreferences,
+  closedFilter,
+  isClosedVisibility,
   readLocalPreferences,
   savePreferences,
 } from './store';
@@ -156,5 +158,32 @@ describe('preferences store', () => {
       },
     };
     expect(readLocalPreferences(throwing)).toEqual(defaultPreferences());
+  });
+});
+
+describe('closed visibility', () => {
+  it('defaults to open, which is what the server does unasked', () => {
+    expect(defaultPreferences().closedVisibility).toBe('open');
+  });
+
+  it('sends nothing for open and true for closed', () => {
+    // Open sends no parameter rather than closed=false: the server already
+    // excludes closed alerts, and stating it would hide that the default exists.
+    expect(closedFilter('open')).toBeUndefined();
+    expect(closedFilter('closed')).toBe(true);
+  });
+
+  it('accepts only the two states the server can answer', () => {
+    expect(isClosedVisibility('open')).toBe(true);
+    expect(isClosedVisibility('closed')).toBe(true);
+    // There is no "all": the server returns open alerts or closed ones, never
+    // both, so a third state would be a control that showed half of what it said.
+    expect(isClosedVisibility('all')).toBe(false);
+    expect(isClosedVisibility(undefined)).toBe(false);
+  });
+
+  it('falls back to open when a stored preference is unusable', () => {
+    expect(parsePreferences({ closedVisibility: 'all' }).closedVisibility).toBe('open');
+    expect(parsePreferences({}).closedVisibility).toBe('open');
   });
 });
