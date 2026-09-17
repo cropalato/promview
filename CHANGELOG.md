@@ -6,6 +6,20 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-beta.1] - 2026-09-17
+
+The first beta. Every item on the project's own first-release list is
+implemented — ingestion, lifecycle, filtering and grouping, resumable SSE,
+acknowledge, assign, close, notes, silences, bulk actions, OIDC with
+label-scoped roles enforced in SQL, and now authorization administration over
+the API — and the scale the plan commits to is measured rather than assumed.
+
+Beta means the feature set is settled and the known gaps are written down, not
+that this has been proven in production. Three are recorded in the README:
+concurrent load is unmeasured, binding administration has no console UI, and
+`cmd/promview` is the thinnest-tested package. The published `alpha` image tag
+freezes at `0.1.0-alpha.40`; `beta` is the moving pointer from here.
+
 ### Added
 
 - **testing:** `make load-test` measures the scale the project plan commits to — up to 50,000 active alerts and 100 received per second — which nothing had ever checked. It seeds the full set in the batches a real Alertmanager delivery arrives as, then times the reads an operator waits on. Against PostgreSQL 18.6 on a developer machine it ingested 50,000 alerts at 1,236 per second, twelve times the committed rate, and answered the first page with its severity counts in 100ms, a label-matched page in 47ms and a grouped page in 355ms. It is gated on `PROMVIEW_LOAD_TEST` and out of `make verify`: it writes tens of thousands of rows and takes minutes. The assertions are deliberately generous — a load test that fails on a slow laptop teaches people to ignore it — so they catch an order-of-magnitude regression and nothing finer, and the printed numbers are the real output. What it does not measure is recorded alongside what it does: it drives the store directly, with one client and no concurrent readers, so the HTTP path, the SSE fanout and contention between ingestion and reads are all excluded.
