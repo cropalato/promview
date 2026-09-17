@@ -143,6 +143,9 @@ func NewObserved(
 		mux.Handle("GET /api/v1/auth/oidc/login", authenticationHandlers[0])
 		mux.Handle("GET /api/v1/auth/oidc/callback", authenticationHandlers[0])
 		mux.Handle("POST /api/v1/auth/logout", authenticationHandlers[0])
+		// Registered whenever any session-issuing mode is configured; the
+		// router answers 404 for the routes its own mode does not implement.
+		mux.Handle("POST /api/v1/auth/login", authenticationHandlers[0])
 		// The desktop client cannot receive the cookie the browser flow ends
 		// in; it redeems a one-time code for the same session instead.
 		//

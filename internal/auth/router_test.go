@@ -72,3 +72,39 @@ func TestRouterDelegatesToTheOIDCHandler(t *testing.T) {
 		t.Fatalf("status = %d, want 302", response.Code)
 	}
 }
+
+// The mux registers the login route whenever any session-issuing mode is
+// configured, so the router is what must refuse it in the modes that have no
+// credentials to check.
+func TestRouterNotFoundForLoginWithoutACredentialHandler(t *testing.T) {
+	router := NewRouter(RouterConfig{Sessions: NewSessionManager(&fakeSessionRepository{}, time.Hour)})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", response.Code)
+	}
+}
+
+func TestRouterRoutesLoginAndLogoutTogether(t *testing.T) {
+	credentials, _ := testCredentialHandler(CredentialHandlerConfig{})
+	repository := &fakeSessionRepository{}
+	router := NewRouter(RouterConfig{
+		Sessions: NewSessionManager(repository, time.Hour), Credentials: credentials,
+	})
+
+	login := httptest.NewRecorder()
+	router.ServeHTTP(login, loginRequest(`{"username":"operator","password":"correct horse battery staple"}`))
+	if login.Code != http.StatusNoContent {
+		t.Fatalf("login status = %d, want 204; body = %s", login.Code, login.Body.String())
+	}
+
+	// A mode that can sign somebody in must be able to sign them out, which is
+	// the whole reason logout is not owned by the OIDC handler any more.
+	logout := httptest.NewRecorder()
+	logoutRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	logoutRequest.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session-token"})
+	router.ServeHTTP(logout, logoutRequest)
+	if logout.Code != http.StatusNoContent {
+		t.Fatalf("logout status = %d, want 204", logout.Code)
+	}
+}
