@@ -354,6 +354,18 @@ function AlertCell({ alert, column }: { alert: AlertSummary; column: ColumnDefin
             {alert.silencedBy.length === 0 ? 'inhibited' : 'silenced'}
           </span>
         ) : null}
+        {/* Closed sits beside the state for the same reason silenced does: it
+            is an operator's judgement, not the source's. An alert reached by
+            deep link, or found through the Closed filter, must not read as an
+            ordinary firing one. */}
+        {alert.closed ? (
+          <span
+            className="state-chip state-closed"
+            title="Filed as handled by an operator. Alertmanager was not told."
+          >
+            closed
+          </span>
+        ) : null}
       </td>
     );
   }

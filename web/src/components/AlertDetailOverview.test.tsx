@@ -520,3 +520,21 @@ describe('assign, close and notes', () => {
     expect(screen.queryByLabelText('Add a note')).toBeNull();
   });
 });
+
+describe('closed state in the drawer', () => {
+  it('marks a closed alert and says who filed it', () => {
+    render(
+      <AlertDetailOverview
+        detail={detail({ closed: true, closedBy: 'oncall', closedAt: '2026-09-17T09:00:00Z' })}
+      />,
+    );
+    expect(screen.getByText('closed')).toBeTruthy();
+    // An alert reached by deep link has to carry the same fact the list does.
+    expect(screen.getByText(/by oncall/)).toBeTruthy();
+  });
+
+  it('says nothing about closing on an open alert', () => {
+    render(<AlertDetailOverview detail={detail()} />);
+    expect(screen.queryByText('closed')).toBeNull();
+  });
+});

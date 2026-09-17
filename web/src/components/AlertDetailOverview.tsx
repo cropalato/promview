@@ -91,11 +91,30 @@ export function AlertDetailOverview({
           <dt>State</dt>
           <dd>
             <span className={`state-chip state-${detail.status}`}>{detail.status}</span>
+            {/* Beside the state, never replacing it: closing is promview-local
+                and the source may still be reporting this alert as firing. An
+                alert opened by deep link must not read as an ordinary one. */}
+            {detail.closed ? (
+              <span
+                className="state-chip state-closed"
+                title="Filed as handled by an operator. Alertmanager was not told."
+              >
+                closed
+              </span>
+            ) : null}
           </dd>
         </div>
         <div className="detail-fact">
           <dt>Acknowledged</dt>
           <dd>
+            {detail.closed ? (
+              <div className="detail-fact">
+                <dt>Closed</dt>
+                <dd>
+                  <span className="detail-mono">{closeNote(detail)}</span>
+                </dd>
+              </div>
+            ) : null}
             {detail.acknowledged ? (
               <>
                 <span className="state-chip state-acknowledged">acknowledged</span>{' '}
@@ -263,6 +282,17 @@ export function AlertDetailOverview({
  * Human note next to the acknowledged chip: actor and/or timestamp, whichever
  * the API provided. Empty when neither is known.
  */
+function closeNote(detail: AlertDetail): string {
+  const parts: string[] = [];
+  if (detail.closedBy !== '') {
+    parts.push(`by ${detail.closedBy}`);
+  }
+  if (detail.closedAt !== null) {
+    parts.push(`at ${formatTimestamp(detail.closedAt)}`);
+  }
+  return parts.join(' ');
+}
+
 function acknowledgementNote(detail: AlertDetail): string {
   const parts: string[] = [];
   if (detail.acknowledgedBy !== '') {

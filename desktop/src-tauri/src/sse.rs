@@ -89,6 +89,20 @@ impl SseParser {
 mod tests {
     use super::*;
 
+    /// The parser must not know which event names matter. The server added
+    /// `stream.gap` after this shell shipped, and a desktop that dropped
+    /// unfamiliar frames would leave the console resuming from a cursor the
+    /// server had already deleted - silently, which is the worst way.
+    #[test]
+    fn an_event_the_shell_has_never_heard_of_still_reaches_the_page() {
+        let mut parser = SseParser::new();
+        let events =
+            parser.push("event: stream.gap\ndata: {\"resumeFrom\":7,\"retainedFrom\":40}\n\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event, "stream.gap");
+        assert_eq!(events[0].data, "{\"resumeFrom\":7,\"retainedFrom\":40}");
+    }
+
     #[test]
     fn parses_a_complete_frame() {
         let mut parser = SseParser::new();

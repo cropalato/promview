@@ -1514,6 +1514,16 @@ kbd {
   border-style: dashed;
 }
 
+/* Closed is an operator's judgement, not the source's, so it reads as settled
+   rather than as an alarm - but it is not the same as resolved, because the
+   source may still be reporting the alert as firing. */
+.state-closed {
+  margin-left: 6px;
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+}
+
 /* Every member held back, not just some: the group needs no fraction. */
 .state-suppressed.is-total {
   background: color-mix(in srgb, var(--warning) 12%, transparent);
