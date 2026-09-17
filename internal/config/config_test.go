@@ -33,14 +33,42 @@ func TestLoadOIDCConfiguration(t *testing.T) {
 	t.Setenv("PROMVIEW_OIDC_CLIENT_ID", "promview")
 	t.Setenv("PROMVIEW_OIDC_CLIENT_SECRET", "secret")
 	t.Setenv("PROMVIEW_OIDC_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oidc/callback")
-	t.Setenv("PROMVIEW_OIDC_COOKIE_SECURE", "false")
+	t.Setenv("PROMVIEW_SESSION_COOKIE_SECURE", "false")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.OIDCCookieSecure || cfg.OIDCGroupsClaim != "groups" {
+	if cfg.SessionCookieSecure || cfg.OIDCGroupsClaim != "groups" {
 		t.Fatalf("OIDC config = %#v", cfg)
+	}
+}
+
+func TestLoadHonoursTheOldCookieSecureName(t *testing.T) {
+	// An upgrade that quietly ignored the old name would turn Secure back on
+	// for a loopback deployment that had deliberately turned it off, and the
+	// only symptom is a sign-in that never sticks.
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_OIDC_COOKIE_SECURE", "false")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SessionCookieSecure {
+		t.Fatal("SessionCookieSecure = true, want the deprecated name to be honoured")
+	}
+}
+
+func TestLoadPrefersTheCurrentCookieSecureName(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_OIDC_COOKIE_SECURE", "false")
+	t.Setenv("PROMVIEW_SESSION_COOKIE_SECURE", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SessionCookieSecure {
+		t.Fatal("SessionCookieSecure = false, want the current name to win")
 	}
 }
 

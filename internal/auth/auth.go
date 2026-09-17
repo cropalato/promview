@@ -50,6 +50,26 @@ func (OpenAuthenticator) Authenticate(context.Context, *http.Request) (Principal
 	}, nil
 }
 
+// writeSessionCookie issues the session cookie every authentication mode ends
+// in. One writer, so promview_session means exactly one thing no matter which
+// mode minted it - a per-mode cookie is a per-mode set of flags to get wrong.
+func writeSessionCookie(response http.ResponseWriter, token string, ttl time.Duration, secure bool) {
+	http.SetCookie(response, &http.Cookie{
+		Name: SessionCookieName, Value: token, Path: "/", HttpOnly: true,
+		Secure: secure, SameSite: http.SameSiteLaxMode,
+		MaxAge: int(ttl.Seconds()), Expires: time.Now().UTC().Add(ttl),
+	})
+}
+
+// clearCookie expires a cookie this package set. The flags have to match the
+// ones it was written with or the browser keeps the original alongside it.
+func clearCookie(response http.ResponseWriter, name, path string, secure bool) {
+	http.SetCookie(response, &http.Cookie{
+		Name: name, Value: "", Path: path, HttpOnly: true, Secure: secure,
+		SameSite: http.SameSiteLaxMode, MaxAge: -1, Expires: time.Unix(1, 0),
+	})
+}
+
 type Session struct {
 	TokenHash []byte
 	UserID    int64

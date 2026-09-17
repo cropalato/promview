@@ -599,7 +599,7 @@ none is always allowed.
 
 See [`docs/authorization.md`](docs/authorization.md) for binding administration, selector semantics, revocation behavior, and deployment-specific commands.
 
-Production issuer and redirect URLs must use HTTPS. Loopback HTTP is supported for provider testing by setting `PROMVIEW_OIDC_COOKIE_SECURE=false`; insecure cookies are rejected for non-loopback redirect hosts.
+Production issuer and redirect URLs must use HTTPS. Loopback HTTP is supported for provider testing by setting `PROMVIEW_SESSION_COOKIE_SECURE=false`; insecure cookies are rejected for non-loopback redirect hosts.
 
 ## Project Status
 

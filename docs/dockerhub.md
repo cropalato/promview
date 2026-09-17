@@ -186,7 +186,7 @@ server-owned bindings.
 | `PROMVIEW_OIDC_EMAIL_CLAIM` | `email` | |
 | `PROMVIEW_OIDC_DISPLAY_NAME_CLAIM` | `name` | |
 | `PROMVIEW_OIDC_GROUPS_CLAIM` | `groups` | |
-| `PROMVIEW_OIDC_COOKIE_SECURE` | `true` | May be `false` only on loopback hosts. |
+| `PROMVIEW_SESSION_COOKIE_SECURE` | `true` | May be `false` only on loopback hosts. Accepts the former `PROMVIEW_OIDC_COOKIE_SECURE` as a deprecated alias. |
 
 See
 [`docs/okta-oidc.md`](https://github.com/cropalato/promview/blob/main/docs/okta-oidc.md)

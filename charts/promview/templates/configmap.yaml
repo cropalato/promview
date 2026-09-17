@@ -17,6 +17,13 @@ data:
   # Empty disables the endpoint, which is how metrics.enabled is honoured: the
   # port would otherwise still be listening whatever the chart said.
   PROMVIEW_METRICS_ADDRESS: {{ if .Values.metrics.enabled }}{{ printf ":%v" .Values.metrics.port | quote }}{{ else }}""{{ end }}
+  {{- /*
+    Every mode that issues a session writes the same cookie, so the flag is not
+    under oidc. oidc.cookieSecure is where it used to live and is still honoured
+    when auth.sessionCookieSecure is unset; `default` would be wrong here,
+    because an explicit false is exactly the value it would discard.
+  */}}
+  PROMVIEW_SESSION_COOKIE_SECURE: {{ if kindIs "invalid" .Values.auth.sessionCookieSecure }}{{ .Values.oidc.cookieSecure | quote }}{{ else }}{{ .Values.auth.sessionCookieSecure | quote }}{{ end }}
   {{- if eq .Values.auth.mode "oidc" }}
   PROMVIEW_OIDC_ISSUER_URL: {{ .Values.oidc.issuerURL | quote }}
   PROMVIEW_OIDC_CLIENT_ID: {{ .Values.oidc.clientID | quote }}
@@ -26,7 +33,6 @@ data:
   PROMVIEW_OIDC_EMAIL_CLAIM: {{ .Values.oidc.emailClaim | quote }}
   PROMVIEW_OIDC_DISPLAY_NAME_CLAIM: {{ .Values.oidc.displayNameClaim | quote }}
   PROMVIEW_OIDC_GROUPS_CLAIM: {{ .Values.oidc.groupsClaim | quote }}
-  PROMVIEW_OIDC_COOKIE_SECURE: {{ .Values.oidc.cookieSecure | quote }}
   {{- end }}
   {{- if .Values.bootstrapSource.enabled }}
   PROMVIEW_BOOTSTRAP_SOURCE_SLUG: {{ .Values.bootstrapSource.slug | quote }}

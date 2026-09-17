@@ -71,6 +71,12 @@
             "open",
             "oidc"
           ]
+        },
+        "sessionCookieSecure": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       }
     },
