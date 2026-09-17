@@ -164,3 +164,25 @@ The CLI (`promview access set`, `access delete`) writes through the same store
 methods and is held to the same rule, so the shell is not a way around it.
 Bindings are evaluated from the database on every request, so a change takes
 effect on existing sessions immediately.
+
+## Administering bindings from the console
+
+An administrator gets an **Access** control in the top bar, which opens a view
+listing every binding with its subject, role and scope, and offers add, edit and
+remove. It is offered to administrators only: the server refuses an operator
+too, so a control shown to one would answer 403 every time.
+
+The scope is edited as comma-separated clauses — `team=platform,
+environment!=development` — and accepts all four selector operators, including
+the regex forms `=~` and `!~` that the console's own filter bar does not use. A
+binding written through the CLI with a regex scope survives an edit in the
+console unchanged; an editor that understood four operators as two would
+silently rewrite it into a narrower binding.
+
+A binding's name is its identity, so an existing one cannot be renamed from the
+view: renaming is creating a different binding and removing this one, and doing
+that silently behind a text field would be the wrong kind of convenience.
+
+The refusal to remove the last administrator surfaces as the server's own
+message rather than a status code, because it is guidance about a rule the
+administrator may not know exists.

@@ -2229,6 +2229,119 @@ kbd {
 /* Assignment is a field rather than a picker: an alert is routinely handed to
    somebody who has never signed in here, so the input takes whatever the
    operator types. */
+/* Binding administration: a table and a form, not an alert view. */
+.access-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  max-width: 1100px;
+}
+
+.access-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.access-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.access-copy {
+  margin: 0;
+  max-width: 70ch;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.access-error {
+  margin: 0;
+  color: var(--down);
+  font-size: 13px;
+}
+
+.access-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.access-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.access-table caption {
+  text-align: left;
+  padding-bottom: 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.access-table th,
+.access-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.access-table th {
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.access-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.access-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 560px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: var(--panel-raise);
+}
+
+.access-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.access-input {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
+.access-input::placeholder {
+  color: var(--text-faint);
+}
+
+.topbar-access {
+  cursor: pointer;
+}
+
 /* The selection column is a checkbox, not data: narrow, centred, and it must
    not take width from the columns an operator has sized. */
 .col-select {

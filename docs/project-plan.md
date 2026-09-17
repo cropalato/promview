@@ -74,7 +74,7 @@ The current implementation provides:
 Every item on the first-release list is implemented, which is what moved the
 project from alpha to beta. What beta does not claim: concurrent load is
 unmeasured (the load test drives the store with one client and no readers),
-and binding administration has no console UI. The console can now assign, close and note from the alert drawer, reach closed alerts through an Open/Closed filter, and re-snapshot when the stream reports a retention gap. Row selection and a bulk action bar cover the flat list and the members of expanded groups. A collapsed group is deliberately not selectable: its members are not loaded, and the bulk API takes explicit ids rather than a filter, so the checkbox could only act on a subset it had not shown. Acting on a whole group would need the confirm-what-it-matches step group silence already uses, and is not built.
+and the console now administers bindings as well as alerts. The console can now assign, close and note from the alert drawer, reach closed alerts through an Open/Closed filter, and re-snapshot when the stream reports a retention gap. Row selection and a bulk action bar cover the flat list and the members of expanded groups. A collapsed group is deliberately not selectable: its members are not loaded, and the bulk API takes explicit ids rather than a filter, so the checkbox could only act on a subset it had not shown. Acting on a whole group would need the confirm-what-it-matches step group silence already uses, and is not built.
 
 ## Goals
 
