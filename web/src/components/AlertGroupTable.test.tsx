@@ -4,6 +4,7 @@ import type { AlertGroupSummary } from '../alerts/api';
 import { resolveColumns } from '../alerts/columns';
 import type { AlertSummary } from '../alerts/types';
 import type { GroupChildren } from '../hooks/useGroupChildren';
+import type { AlertSelection } from './AlertTable';
 import { AlertGroupTable } from './AlertGroupTable';
 
 function group(overrides: Partial<AlertGroupSummary> = {}): AlertGroupSummary {
@@ -819,5 +820,51 @@ describe('silenced groups', () => {
   it('stays out of the way when nothing is silenced', () => {
     renderGroups([group({ silenced: 0 })]);
     expect(screen.queryByText(/silenced/)).not.toBeInTheDocument();
+  });
+});
+
+describe('member selection', () => {
+  const selection: AlertSelection = {
+    selectedIds: new Set<string>(),
+    allSelected: false,
+    onToggle: () => {},
+    onToggleAll: () => {},
+  };
+
+  it('never offers a checkbox on a collapsed group', () => {
+    render(
+      <AlertGroupTable
+        groups={[group()]}
+        children={{}}
+        selection={selection}
+        onExpand={noop}
+        onCollapse={noop}
+        onLoadMoreChildren={noop}
+      />,
+    );
+    // A collapsed group's members are not loaded, and the bulk API takes ids
+    // rather than a filter, so a group checkbox could only act on a subset it
+    // had not shown.
+    expect(screen.queryByLabelText(/^Select /)).toBeNull();
+  });
+
+  it('offers a checkbox on each expanded member', () => {
+    const onToggle = vi.fn();
+    render(
+      <AlertGroupTable
+        groups={[group()]}
+        children={children()}
+        selection={{ ...selection, onToggle }}
+        onExpand={noop}
+        onCollapse={noop}
+        onLoadMoreChildren={noop}
+      />,
+    );
+    const boxes = screen.queryAllByLabelText(/^Select /);
+    // One per loaded member, none for the group row itself.
+    expect(boxes).toHaveLength(2);
+    const box = boxes[0];
+    fireEvent.click(box as HTMLElement);
+    expect(onToggle).toHaveBeenCalledWith('1');
   });
 });

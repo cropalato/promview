@@ -400,7 +400,21 @@ export default function App({ navigate }: AppProps = {}) {
   // Selection is offered on the flat list only. Whether ticking a collapsed
   // group means its members or the group itself is a real question, and
   // answering it badly is worse than not offering it there yet.
-  const { selection, selectedIds, clear: clearSelection } = useAlertSelection(loadedAlerts);
+  // What the operator can actually see and tick right now. In the grouped view
+  // that is the members of expanded groups, which are not always in the flat
+  // page: pruning against the flat list alone would silently drop a selection
+  // made inside a group whose members sit past the first page.
+  const selectableAlerts = useMemo(() => {
+    if (!grouped) {
+      return loadedAlerts;
+    }
+    const members: AlertSummary[] = [];
+    for (const loaded of Object.values(groupChildren)) {
+      members.push(...loaded.alerts);
+    }
+    return members;
+  }, [grouped, loadedAlerts, groupChildren]);
+  const { selection, selectedIds, clear: clearSelection } = useAlertSelection(selectableAlerts);
   // A bulk action changes rows the list is showing, so the page is re-read the
   // way a stream event re-reads it.
   const afterBulk = useCallback(
@@ -655,48 +669,62 @@ export default function App({ navigate }: AppProps = {}) {
                   total={alertsState.data.total}
                 />
                 {grouped && groupsState.status === 'ready' ? (
-                  <AlertGroupTable
-                    groups={groupsState.data.groups}
-                    children={groupChildren}
-                    columns={columns}
-                    columnWidths={columnWidths}
-                    onColumnResize={setColumnWidth}
-                    onColumnResizeReset={resetColumnWidth}
-                    filterActive={filterActive}
-                    filterQuery={appliedFilterText}
-                    selectedId={effectiveSelectedAlertId}
-                    sort={sort}
-                    onSortChange={setSort}
-                    memberFor={loadedAlertById}
-                    onClearFilter={clearFilter}
-                    onExpand={expandGroup}
-                    onCollapse={collapseGroup}
-                    onLoadMoreChildren={loadMoreChildren}
-                    onSelect={(alert) => openAlert(alert.id)}
-                    onOpenAlert={openAlert}
-                    onSilenceGroup={
-                      // Both halves matter: the deployment has to be able to
-                      // write a silence at all, and this operator has to be
-                      // allowed to. In open mode every reader is an anonymous
-                      // viewer, so the control would only ever answer 403.
-                      silenceAvailable
-                        ? (group) =>
-                            openGroupSilence(
-                              group,
-                              preferences.grouping.keys,
-                              config?.silencePreviewSupported === true,
-                            )
-                        : undefined
-                    }
-                    pagination={{
-                      loaded: groupsState.data.groups.length,
-                      total: groupsState.data.totalGroups,
-                      hasMore: groupsState.data.nextCursor !== '',
-                      loadingMore: groupsState.loadingMore,
-                      error: groupsState.moreError,
-                      onLoadMore: loadMoreGroups,
-                    }}
-                  />
+                  <>
+                    <BulkActionBar
+                      count={selectedIds.length}
+                      canOperate={canOperate(
+                        sessionState.status === 'ready' ? sessionState.session : undefined,
+                      )}
+                      onAcknowledge={() => bulkAcknowledge(selectedIds, true).then(afterBulk)}
+                      onClose={() => bulkClose(selectedIds, true).then(afterBulk)}
+                      onAssign={(assignee) => bulkAssign(selectedIds, assignee).then(afterBulk)}
+                      onNote={(body) => bulkNote(selectedIds, body).then(afterBulk)}
+                      onClear={clearSelection}
+                    />
+                    <AlertGroupTable
+                      groups={groupsState.data.groups}
+                      selection={selection}
+                      children={groupChildren}
+                      columns={columns}
+                      columnWidths={columnWidths}
+                      onColumnResize={setColumnWidth}
+                      onColumnResizeReset={resetColumnWidth}
+                      filterActive={filterActive}
+                      filterQuery={appliedFilterText}
+                      selectedId={effectiveSelectedAlertId}
+                      sort={sort}
+                      onSortChange={setSort}
+                      memberFor={loadedAlertById}
+                      onClearFilter={clearFilter}
+                      onExpand={expandGroup}
+                      onCollapse={collapseGroup}
+                      onLoadMoreChildren={loadMoreChildren}
+                      onSelect={(alert) => openAlert(alert.id)}
+                      onOpenAlert={openAlert}
+                      onSilenceGroup={
+                        // Both halves matter: the deployment has to be able to
+                        // write a silence at all, and this operator has to be
+                        // allowed to. In open mode every reader is an anonymous
+                        // viewer, so the control would only ever answer 403.
+                        silenceAvailable
+                          ? (group) =>
+                              openGroupSilence(
+                                group,
+                                preferences.grouping.keys,
+                                config?.silencePreviewSupported === true,
+                              )
+                          : undefined
+                      }
+                      pagination={{
+                        loaded: groupsState.data.groups.length,
+                        total: groupsState.data.totalGroups,
+                        hasMore: groupsState.data.nextCursor !== '',
+                        loadingMore: groupsState.loadingMore,
+                        error: groupsState.moreError,
+                        onLoadMore: loadMoreGroups,
+                      }}
+                    />
+                  </>
                 ) : grouped ? (
                   <p className="alerts-panel-copy">Loading groups…</p>
                 ) : (
