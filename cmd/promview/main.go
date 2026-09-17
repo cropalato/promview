@@ -63,8 +63,10 @@ func run() error {
 			return runSourceCommand(ctx, postgres.New(pool), os.Args[2:])
 		case "access":
 			return runAccessCommand(ctx, postgres.New(pool), os.Args[2:])
+		case "user":
+			return runUserCommand(ctx, postgres.New(pool), os.Stdin, os.Stdout, os.Args[2:])
 		default:
-			return errors.New("usage: promview [migrate|source set|access set|access delete|access inspect]")
+			return errors.New("usage: promview [migrate|source set|access set|access delete|access inspect|user create|user set-password|user unlock|user enable|user disable|user list]")
 		}
 	}
 
