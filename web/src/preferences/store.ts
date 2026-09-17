@@ -73,6 +73,35 @@ export function isSilencedVisibility(value: unknown): value is SilencedVisibilit
   return typeof value === 'string' && SILENCED_VISIBILITIES.includes(value as SilencedVisibility);
 }
 
+/**
+ * What the list does with alerts an operator has closed.
+ *
+ * Two states rather than three, because the server offers two: the `closed`
+ * parameter is absent for open alerts and `true` for closed ones, and there is
+ * no way to ask for both at once. Offering an "All" that quietly returned only
+ * half would be worse than not offering it.
+ *
+ * `open` is the default and matches what the server does unasked. `closed` is
+ * the only route back to an alert somebody filed, which is why it exists at
+ * all: without it, closing an alert removes it from the console for good.
+ */
+export type ClosedVisibility = 'open' | 'closed';
+
+const CLOSED_VISIBILITIES: readonly ClosedVisibility[] = ['open', 'closed'];
+
+export function isClosedVisibility(value: unknown): value is ClosedVisibility {
+  return typeof value === 'string' && CLOSED_VISIBILITIES.includes(value as ClosedVisibility);
+}
+
+/**
+ * The `closed` query parameter a visibility implies, if any. `open` sends
+ * nothing: the server already excludes closed alerts by default, and stating it
+ * would hide that the default exists.
+ */
+export function closedFilter(value: ClosedVisibility): boolean | undefined {
+  return value === 'closed' ? true : undefined;
+}
+
 /** The `suppressed` query parameter a visibility implies, if any. */
 export function suppressedFilter(value: SilencedVisibility): boolean | undefined {
   switch (value) {
@@ -91,6 +120,7 @@ export interface Preferences {
   grouping: GroupingPreference;
   theme: Theme;
   silencedVisibility: SilencedVisibility;
+  closedVisibility: ClosedVisibility;
   notifications: NotificationPreference;
 }
 
@@ -104,6 +134,9 @@ export function defaultPreferences(): Preferences {
     // to see that an alert is firing and being held back; those are different
     // facts from it not being there.
     silencedVisibility: 'show',
+    // Open, which is what the server does unasked. Closed alerts are somebody's
+    // decision that the work is done; the list is for what is not.
+    closedVisibility: 'open',
     // Off, carrying the selector the console hardcoded before this was
     // configurable, so opting in does what it always did.
     notifications: { enabled: false, matchers: [{ name: 'severity', op: '=', value: 'critical' }] },
@@ -187,6 +220,9 @@ export function parsePreferences(value: unknown): Preferences {
     silencedVisibility: isSilencedVisibility(raw.silencedVisibility)
       ? raw.silencedVisibility
       : defaults.silencedVisibility,
+    closedVisibility: isClosedVisibility(raw.closedVisibility)
+      ? raw.closedVisibility
+      : defaults.closedVisibility,
     notifications: parseNotifications(raw.notifications, defaults.notifications),
   };
 }
