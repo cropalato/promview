@@ -41,6 +41,9 @@ data:
   PROMVIEW_LDAP_BASE_DN: {{ .Values.ldap.baseDN | quote }}
   PROMVIEW_LDAP_USER_FILTER: {{ .Values.ldap.userFilter | quote }}
   PROMVIEW_LDAP_GROUP_ATTRIBUTE: {{ .Values.ldap.groupAttribute | quote }}
+  PROMVIEW_LDAP_GROUP_BASE_DN: {{ .Values.ldap.groupBaseDN | quote }}
+  PROMVIEW_LDAP_GROUP_FILTER: {{ .Values.ldap.groupFilter | quote }}
+  PROMVIEW_LDAP_GROUP_NAME_ATTRIBUTE: {{ .Values.ldap.groupNameAttribute | quote }}
   PROMVIEW_LDAP_GROUP_FORMAT: {{ .Values.ldap.groupFormat | quote }}
   PROMVIEW_LDAP_USERNAME_ATTRIBUTE: {{ .Values.ldap.usernameAttribute | quote }}
   PROMVIEW_LDAP_EMAIL_ATTRIBUTE: {{ .Values.ldap.emailAttribute | quote }}

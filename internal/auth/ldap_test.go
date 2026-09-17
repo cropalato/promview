@@ -14,9 +14,15 @@ type fakeLDAPConn struct {
 	bindErr map[string]error
 
 	searchRequest *ldap.SearchRequest
+	searches      []*ldap.SearchRequest
 	entries       []*ldap.Entry
 	searchErr     error
-	closed        bool
+
+	groupBaseDN    string
+	groupEntries   []*ldap.Entry
+	groupSearchErr error
+
+	closed bool
 }
 
 func (fake *fakeLDAPConn) Bind(dn, password string) error {
@@ -29,8 +35,17 @@ func (fake *fakeLDAPConn) Bind(dn, password string) error {
 
 func (fake *fakeLDAPConn) Search(request *ldap.SearchRequest) (*ldap.SearchResult, error) {
 	fake.searchRequest = request
+	fake.searches = append(fake.searches, request)
 	if fake.searchErr != nil {
 		return nil, fake.searchErr
+	}
+	// The group search runs against its own base, so the fake answers it with
+	// group entries rather than with the user again.
+	if fake.groupBaseDN != "" && request.BaseDN == fake.groupBaseDN {
+		if fake.groupSearchErr != nil {
+			return nil, fake.groupSearchErr
+		}
+		return &ldap.SearchResult{Entries: fake.groupEntries}, nil
 	}
 	return &ldap.SearchResult{Entries: fake.entries}, nil
 }
@@ -310,3 +325,160 @@ func TestNewLDAPDirectoryDefaultsTheIssuerToTheURL(t *testing.T) {
 		t.Fatalf("issuer = %q", identity.Issuer)
 	}
 }
+
+func groupEntry(dn, cn string) *ldap.Entry {
+	return &ldap.Entry{DN: dn, Attributes: []*ldap.EntryAttribute{{Name: "cn", Values: []string{cn}}}}
+}
+
+// memberOf is an overlay plenty of OpenLDAP and FreeIPA installations do not
+// enable. Without a reverse search a sign-in there succeeds with no groups,
+// resolves to no roles and answers 403 - telling the operator their account has
+// no access rather than that promview cannot see their groups.
+func TestLDAPFindsGroupsBySearchingForTheUser(t *testing.T) {
+	conn := &fakeLDAPConn{
+		entries:     []*ldap.Entry{userEntry(map[string][]string{"uid": {"ada"}})},
+		groupBaseDN: "ou=groups,dc=example,dc=com",
+		groupEntries: []*ldap.Entry{
+			groupEntry("cn=Promview-Admins,ou=groups,dc=example,dc=com", "Promview-Admins"),
+			groupEntry("cn=oncall,ou=groups,dc=example,dc=com", "oncall"),
+		},
+	}
+	directory := testLDAP(t, conn, func(config *LDAPConfig) {
+		config.GroupBaseDN = "ou=groups,dc=example,dc=com"
+	})
+	identity, err := directory.Verify(context.Background(), "ada", "a password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(identity.Groups, ",") != "promview-admins,oncall" {
+		t.Fatalf("groups = %v", identity.Groups)
+	}
+	// The user's DN goes into the group filter, and it is escaped like any
+	// other value a caller can influence.
+	last := conn.searches[len(conn.searches)-1]
+	if last.Filter != "(member=uid=ada,ou=people,dc=example,dc=com)" {
+		t.Fatalf("group filter = %q", last.Filter)
+	}
+}
+
+func TestLDAPGroupSearchStoresDNsWhenAsked(t *testing.T) {
+	conn := &fakeLDAPConn{
+		entries:      []*ldap.Entry{userEntry(map[string][]string{"uid": {"ada"}})},
+		groupBaseDN:  "ou=groups,dc=example,dc=com",
+		groupEntries: []*ldap.Entry{groupEntry("cn=Promview-Admins,ou=groups,dc=example,dc=com", "Promview-Admins")},
+	}
+	directory := testLDAP(t, conn, func(config *LDAPConfig) {
+		config.GroupBaseDN = "ou=groups,dc=example,dc=com"
+		config.GroupFormat = LDAPGroupFormatDN
+	})
+	identity, err := directory.Verify(context.Background(), "ada", "a password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identity.Groups) != 1 || identity.Groups[0] != "cn=promview-admins,ou=groups,dc=example,dc=com" {
+		t.Fatalf("groups = %v", identity.Groups)
+	}
+}
+
+// A directory answering both ways must not produce a group twice: a binding
+// matching twice is the same binding.
+func TestLDAPMergesMemberOfWithTheGroupSearch(t *testing.T) {
+	conn := &fakeLDAPConn{
+		entries: []*ldap.Entry{userEntry(map[string][]string{
+			"uid": {"ada"}, "memberOf": {"cn=Promview-Admins,ou=groups,dc=example,dc=com"},
+		})},
+		groupBaseDN: "ou=groups,dc=example,dc=com",
+		groupEntries: []*ldap.Entry{
+			groupEntry("cn=Promview-Admins,ou=groups,dc=example,dc=com", "Promview-Admins"),
+			groupEntry("cn=oncall,ou=groups,dc=example,dc=com", "oncall"),
+		},
+	}
+	directory := testLDAP(t, conn, func(config *LDAPConfig) {
+		config.GroupBaseDN = "ou=groups,dc=example,dc=com"
+	})
+	identity, err := directory.Verify(context.Background(), "ada", "a password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(identity.Groups, ",") != "promview-admins,oncall" {
+		t.Fatalf("groups = %v", identity.Groups)
+	}
+}
+
+// Swallowing this would sign somebody in with no roles, and the console would
+// tell them their account has no access - a different problem from the one they
+// have, and one that sends them to the wrong person to fix it.
+func TestLDAPReportsAFailedGroupSearch(t *testing.T) {
+	conn := &fakeLDAPConn{
+		entries:        []*ldap.Entry{userEntry(map[string][]string{"uid": {"ada"}})},
+		groupBaseDN:    "ou=groups,dc=example,dc=com",
+		groupSearchErr: errors.New("size limit exceeded"),
+	}
+	directory := testLDAP(t, conn, func(config *LDAPConfig) {
+		config.GroupBaseDN = "ou=groups,dc=example,dc=com"
+	})
+	_, err := directory.Verify(context.Background(), "ada", "a password")
+	if !errors.Is(err, ErrLDAPUnavailable) {
+		t.Fatalf("error = %v, want ErrLDAPUnavailable", err)
+	}
+}
+
+func TestNewLDAPDirectoryRejectsAGroupFilterWithoutAPlaceholder(t *testing.T) {
+	_, err := NewLDAPDirectory(LDAPConfig{
+		URL: "ldaps://dc.example.com", BaseDN: "dc=example,dc=com", UserFilter: "(uid=%s)",
+		GroupBaseDN: "ou=groups,dc=example,dc=com", GroupFilter: "(objectClass=groupOfNames)",
+	})
+	if err == nil {
+		t.Fatal("a group filter with no placeholder was accepted")
+	}
+}
+
+// The group search must run while still bound as the service account.
+//
+// Rebinding as the user first runs it with whatever rights that user happens to
+// have, which in a default OpenLDAP is not enough to see the groups
+// organisational unit - the search then fails with "no such object", which
+// reads as a missing OU rather than as a permission the service account has and
+// the user does not. Found against a real directory, so it is pinned here.
+func TestLDAPReadsGroupsBeforeBindingAsTheUser(t *testing.T) {
+	conn := &orderedLDAPConn{fakeLDAPConn: fakeLDAPConn{
+		entries:      []*ldap.Entry{userEntry(map[string][]string{"uid": {"ada"}})},
+		groupBaseDN:  "ou=groups,dc=example,dc=com",
+		groupEntries: []*ldap.Entry{groupEntry("cn=oncall,ou=groups,dc=example,dc=com", "oncall")},
+	}}
+	directory := testLDAP(t, &conn.fakeLDAPConn, func(config *LDAPConfig) {
+		config.GroupBaseDN = "ou=groups,dc=example,dc=com"
+		config.dial = func(context.Context) (ldapConn, error) { return conn, nil }
+	})
+	if _, err := directory.Verify(context.Background(), "ada", "a password"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"bind:cn=svc,dc=example,dc=com",
+		"search:dc=example,dc=com",
+		"search:ou=groups,dc=example,dc=com",
+		"bind:uid=ada,ou=people,dc=example,dc=com",
+	}
+	if strings.Join(conn.order, " ") != strings.Join(want, " ") {
+		t.Fatalf("order = %v, want %v", conn.order, want)
+	}
+}
+
+// orderedLDAPConn records the sequence of operations, which is the property
+// under test rather than any single call's result.
+type orderedLDAPConn struct {
+	fakeLDAPConn
+	order []string
+}
+
+func (conn *orderedLDAPConn) Bind(dn, password string) error {
+	conn.order = append(conn.order, "bind:"+dn)
+	return conn.fakeLDAPConn.Bind(dn, password)
+}
+
+func (conn *orderedLDAPConn) Search(request *ldap.SearchRequest) (*ldap.SearchResult, error) {
+	conn.order = append(conn.order, "search:"+request.BaseDN)
+	return conn.fakeLDAPConn.Search(request)
+}
+
+func (conn *orderedLDAPConn) Close() error { return conn.fakeLDAPConn.Close() }

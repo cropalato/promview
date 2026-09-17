@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -311,5 +313,31 @@ func TestCredentialLoginReportsEveryOutcome(t *testing.T) {
 				t.Fatalf("results = %v, want [%s]", results, test.want)
 			}
 		})
+	}
+}
+
+// The response for a broken directory deliberately says nothing useful, because
+// the directory's own error names the search filter and the filter contains the
+// username. That makes the log the only place the cause exists.
+func TestCredentialLoginLogsWhyTheDirectoryFailed(t *testing.T) {
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelError})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	handler, _ := testCredentialHandler(CredentialHandlerConfig{
+		Verifier: &fakeVerifier{err: errors.New("directory is unreachable")},
+	})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, loginRequest(`{"username":"operator","password":"whatever"}`))
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", response.Code)
+	}
+	if !strings.Contains(logged.String(), "directory is unreachable") {
+		t.Fatalf("the cause was not logged: %q", logged.String())
+	}
+	// And it still must not be in the response.
+	if strings.Contains(response.Body.String(), "unreachable") {
+		t.Fatalf("the cause reached the wire: %q", response.Body.String())
 	}
 }

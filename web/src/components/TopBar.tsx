@@ -19,6 +19,7 @@ const MODE_LABEL: Record<AuthMode, string> = {
   open: 'Open access',
   oidc: 'OIDC',
   local: 'Local accounts',
+  ldap: 'LDAP',
 };
 
 interface TopBarProps {

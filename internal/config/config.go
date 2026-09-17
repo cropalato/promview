@@ -41,6 +41,9 @@ type Config struct {
 	LDAPBaseDN           string
 	LDAPUserFilter       string
 	LDAPGroupAttribute   string
+	LDAPGroupBaseDN      string
+	LDAPGroupFilter      string
+	LDAPGroupNameAttr    string
 	LDAPGroupFormat      string
 	LDAPUsernameAttr     string
 	LDAPEmailAttr        string
@@ -104,6 +107,9 @@ func Load() (Config, error) {
 		LDAPBaseDN:           os.Getenv("PROMVIEW_LDAP_BASE_DN"),
 		LDAPUserFilter:       envOrDefault("PROMVIEW_LDAP_USER_FILTER", "(uid=%s)"),
 		LDAPGroupAttribute:   envOrDefault("PROMVIEW_LDAP_GROUP_ATTRIBUTE", "memberOf"),
+		LDAPGroupBaseDN:      os.Getenv("PROMVIEW_LDAP_GROUP_BASE_DN"),
+		LDAPGroupFilter:      envOrDefault("PROMVIEW_LDAP_GROUP_FILTER", "(member=%s)"),
+		LDAPGroupNameAttr:    envOrDefault("PROMVIEW_LDAP_GROUP_NAME_ATTRIBUTE", "cn"),
 		LDAPGroupFormat:      envOrDefault("PROMVIEW_LDAP_GROUP_FORMAT", "cn"),
 		LDAPUsernameAttr:     envOrDefault("PROMVIEW_LDAP_USERNAME_ATTRIBUTE", "uid"),
 		LDAPEmailAttr:        envOrDefault("PROMVIEW_LDAP_EMAIL_ATTRIBUTE", "mail"),
@@ -325,6 +331,9 @@ func validateLDAP(cfg Config) error {
 	}
 	if !strings.Contains(cfg.LDAPUserFilter, "%s") {
 		return errors.New("PROMVIEW_LDAP_USER_FILTER must contain %s for the username")
+	}
+	if cfg.LDAPGroupBaseDN != "" && !strings.Contains(cfg.LDAPGroupFilter, "%s") {
+		return errors.New("PROMVIEW_LDAP_GROUP_FILTER must contain %s for the user DN")
 	}
 	switch cfg.LDAPGroupFormat {
 	case "cn", "dn":

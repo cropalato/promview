@@ -12,6 +12,8 @@ const OIDC_CONFIG = { authMode: 'oidc', productName: 'Promview' };
 
 const LOCAL_CONFIG = { authMode: 'local', requiresSignIn: true, productName: 'Promview' };
 
+const LDAP_CONFIG = { authMode: 'ldap', requiresSignIn: true, productName: 'Promview' };
+
 /** What open mode answers /api/v1/me with: a reader, not a session. */
 const ANONYMOUS_PRINCIPAL = {
   subject: 'anonymous',
@@ -406,6 +408,45 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Alerts' })).toBeInTheDocument();
     expect(await within(screen.getByRole('banner')).findByText('Ada Lovelace')).toBeInTheDocument();
     expect(alertCalls()).toEqual(['/api/v1/alerts?limit=100&status=firing']);
+  });
+
+  it('gates ldap deployments behind the same username and password form', async () => {
+    let signedIn = false;
+    fetchMock().mockImplementation((url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target === '/api/v1/auth/login') {
+        signedIn = true;
+        expect(JSON.parse(String(init?.body))).toEqual({ username: 'ada', password: 'hunter2' });
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (target === '/api/v1/me') {
+        return Promise.resolve(
+          signedIn
+            ? jsonResponse(OIDC_PRINCIPAL)
+            : jsonResponse({ error: 'authentication required' }, 401),
+        );
+      }
+      if (target === '/api/v1/preferences') {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      return Promise.resolve(jsonResponse(LDAP_CONFIG));
+    });
+    render(<App />);
+
+    const gate = await screen.findByRole('region', { name: /sign in required/i });
+    // The directory checks the password, but the console's side of it is the
+    // same form posting to the same endpoint — no browser redirect to offer.
+    expect(gate).not.toHaveTextContent(/identity provider/i);
+    expect(within(gate).queryByRole('link')).toBeNull();
+
+    fireEvent.change(within(gate).getByLabelText('Username'), { target: { value: 'ada' } });
+    fireEvent.change(within(gate).getByLabelText('Password'), { target: { value: 'hunter2' } });
+    fireEvent.click(within(gate).getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Alerts' })).toBeInTheDocument();
   });
 
   it('gates oidc deployments behind a sign-in link when there is no session', async () => {

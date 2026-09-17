@@ -61,6 +61,15 @@ ldap:
   # Directory.
   userFilter: "(uid=%s)"
   groupAttribute: memberOf
+  # Find groups by searching for the user instead of reading memberOf off their
+  # entry. memberOf is an overlay plenty of OpenLDAP and FreeIPA installations
+  # do not enable, and without this a sign-in there succeeds with no groups at
+  # all - which reads to the operator as "your account has no access" rather
+  # than "promview cannot see your groups". Empty leaves it off.
+  groupBaseDN: ""
+  # One %s, replaced by the escaped user DN.
+  groupFilter: "(member=%s)"
+  groupNameAttribute: cn
   # cn stores a group's common name, dn its full distinguished name. Bindings
   # must be written in whichever form is stored; `promview access inspect`
   # shows what a directory actually reported.

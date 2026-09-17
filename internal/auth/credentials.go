@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -171,6 +172,13 @@ func (handler *CredentialHandler) login(response http.ResponseWriter, request *h
 	case err != nil:
 		// A broken directory is not a wrong password, and saying so would send
 		// an operator hunting for a typo during an outage.
+		//
+		// Logged because the response deliberately says nothing: the directory's
+		// own error text names the search filter, which contains the username,
+		// so it must not reach the wire. Without this line the cause exists
+		// nowhere at all, and "could not complete sign-in" is the only thing
+		// anyone has to debug an outage with.
+		slog.Error("sign-in could not reach the directory", "mode", handler.config.Mode, "error", err)
 		http.Error(response, "could not complete sign-in", http.StatusBadGateway)
 		return loginError
 	}
@@ -185,6 +193,7 @@ func (handler *CredentialHandler) login(response http.ResponseWriter, request *h
 		return loginDenied
 	}
 	if err != nil {
+		slog.Error("sign-in could not resolve the identity", "mode", handler.config.Mode, "error", err)
 		http.Error(response, "could not resolve identity", http.StatusInternalServerError)
 		return loginError
 	}

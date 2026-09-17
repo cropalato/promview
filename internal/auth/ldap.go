@@ -47,6 +47,19 @@ type LDAPConfig struct {
 	// GroupAttribute names the attribute on the user entry listing its groups,
 	// usually memberOf.
 	GroupAttribute string
+	// GroupBaseDN and GroupFilter find groups by searching for the user rather
+	// than by reading an attribute off their entry.
+	//
+	// Not a fallback for exotic directories: memberOf is an overlay that plenty
+	// of OpenLDAP and FreeIPA installations do not enable, and without this a
+	// sign-in there succeeds with no groups at all - which resolves to no roles
+	// and answers 403, telling the operator their account has no access rather
+	// than that promview cannot see their groups. Empty leaves it off.
+	GroupBaseDN string
+	// GroupFilter contains one %s, replaced by the escaped user DN.
+	GroupFilter string
+	// GroupNameAttribute is read off each group entry found this way.
+	GroupNameAttribute string
 	// GroupFormat is "cn" to store a group's common name or "dn" to store its
 	// full distinguished name. CN is what an operator reads off a directory
 	// browser; DN is for a deployment whose CNs collide across OUs.
@@ -93,6 +106,15 @@ func NewLDAPDirectory(config LDAPConfig) (*LDAPDirectory, error) {
 	}
 	if config.GroupFormat == "" {
 		config.GroupFormat = LDAPGroupFormatCN
+	}
+	if config.GroupFilter == "" {
+		config.GroupFilter = "(member=%s)"
+	}
+	if config.GroupNameAttribute == "" {
+		config.GroupNameAttribute = "cn"
+	}
+	if config.GroupBaseDN != "" && !strings.Contains(config.GroupFilter, "%s") {
+		return nil, errors.New("LDAP group filter must contain %s for the user DN")
 	}
 	if config.UsernameAttr == "" {
 		config.UsernameAttr = "uid"
@@ -141,13 +163,80 @@ func (directory *LDAPDirectory) Verify(
 		return DirectoryIdentity{}, err
 	}
 
-	// The second bind is the actual password check: the directory decides,
-	// and promview never learns the password's hash.
+	identity := directory.identityFrom(entry)
+	// Read the groups while still bound as the service account. Rebinding as
+	// the user first would run this search with whatever rights that user
+	// happens to have, which in a default OpenLDAP is not enough to see the
+	// groups organisational unit at all - and the search then fails with "no
+	// such object", which reads as a missing OU rather than as a permission the
+	// service account has and the user does not.
+	if directory.config.GroupBaseDN != "" {
+		found, err := directory.searchGroups(conn, entry.DN)
+		if err != nil {
+			return DirectoryIdentity{}, err
+		}
+		identity.Groups = mergeGroups(identity.Groups, found)
+	}
+
+	// The password check goes last, and it is a bind rather than a comparison:
+	// the directory decides, and promview never learns the password's hash.
+	// Everything above it needed directory read rights; this needs only the
+	// user's own credentials.
 	if err := conn.Bind(entry.DN, password); err != nil {
 		return DirectoryIdentity{}, ErrInvalidCredentials
 	}
+	return identity, nil
+}
 
-	return directory.identityFrom(entry), nil
+// searchGroups finds the groups that name this user as a member.
+//
+// A failure here is reported as an unavailable directory rather than swallowed.
+// Silently returning no groups would sign somebody in with no roles, and the
+// console would tell them their account has no access - which is a different
+// problem from the one they have, and sends them to the wrong person to fix it.
+func (directory *LDAPDirectory) searchGroups(conn ldapConn, userDN string) ([]string, error) {
+	filter := fmt.Sprintf(directory.config.GroupFilter, ldap.EscapeFilter(userDN))
+	result, err := conn.Search(&ldap.SearchRequest{
+		BaseDN:       directory.config.GroupBaseDN,
+		Scope:        ldap.ScopeWholeSubtree,
+		DerefAliases: ldap.NeverDerefAliases,
+		TimeLimit:    int(directory.config.Timeout.Seconds()),
+		Filter:       filter,
+		Attributes:   []string{directory.config.GroupNameAttribute},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: group search failed", ErrLDAPUnavailable)
+	}
+	groups := make([]string, 0, len(result.Entries))
+	for _, entry := range result.Entries {
+		name := entry.GetAttributeValue(directory.config.GroupNameAttribute)
+		if directory.config.GroupFormat == LDAPGroupFormatDN {
+			// The DN form has to be the group's own DN, not its name: that is
+			// what a binding written in DN form says.
+			name = entry.DN
+		}
+		if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
+			groups = append(groups, name)
+		}
+	}
+	return groups, nil
+}
+
+// mergeGroups unions the two sources without duplicating. A directory may
+// answer both ways, and a binding matching twice is the same binding.
+func mergeGroups(from ...[]string) []string {
+	merged := make([]string, 0, 8)
+	seen := map[string]bool{}
+	for _, group := range from {
+		for _, name := range group {
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			merged = append(merged, name)
+		}
+	}
+	return merged
 }
 
 func (directory *LDAPDirectory) searchUser(conn ldapConn, username string) (*ldap.Entry, error) {

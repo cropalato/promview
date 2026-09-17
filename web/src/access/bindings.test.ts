@@ -34,6 +34,32 @@ describe('role bindings', () => {
     expect(bindings[0]?.matchers).toEqual([{ name: 'team', operator: '=', value: 'platform' }]);
   });
 
+  it('keeps an LDAP group binding labelled as one', async () => {
+    // An LDAP binding flattened into oidc_group would read as access through
+    // the identity provider, which is the wrong directory and the wrong answer
+    // to whether the binding is doing anything at all.
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({
+          bindings: [
+            {
+              name: 'directory-admins',
+              subjectKind: 'ldap_group',
+              subjectIssuer: 'ldaps://directory.example',
+              subjectGroup: 'cn=admins,ou=groups,dc=example',
+              role: 'administrator',
+              matchers: [],
+            },
+          ],
+        }),
+      ),
+    );
+    const bindings = await fetchRoleBindings(fetchImpl);
+    expect(bindings[0]?.subjectKind).toBe('ldap_group');
+    expect(bindings[0]?.subjectIssuer).toBe('ldaps://directory.example');
+    expect(bindings[0]?.subjectGroup).toBe('cn=admins,ou=groups,dc=example');
+  });
+
   it('drops malformed entries rather than inventing bindings', async () => {
     const fetchImpl = vi.fn(() =>
       Promise.resolve(

@@ -101,7 +101,7 @@ describe('loadRuntimeConfig', () => {
   });
 
   it('accepts every mode the server can be running', async () => {
-    for (const authMode of ['open', 'oidc', 'local'] as const) {
+    for (const authMode of ['open', 'oidc', 'local', 'ldap'] as const) {
       const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ authMode }));
       await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({ authMode });
     }
@@ -147,8 +147,11 @@ describe('parseRuntimeConfig', () => {
     expect(() => parseRuntimeConfig('open')).toThrowError(/malformed/i);
   });
 
-  it('rejects the removed ldap auth mode', () => {
-    expect(() => parseRuntimeConfig({ authMode: 'ldap', productName: 'Promview' })).toThrowError(
+  it('still refuses a mode nobody here has seen', () => {
+    // Guessing would gate, or fail to gate, on an auth model this console has
+    // no code for, so an unknown mode stays a hard failure even now that the
+    // list has grown.
+    expect(() => parseRuntimeConfig({ authMode: 'saml', productName: 'Promview' })).toThrowError(
       /unsupported auth mode/i,
     );
   });
@@ -172,6 +175,7 @@ describe('sign-in requirement', () => {
     expect(parseRuntimeConfig({ authMode: 'open' }).requiresSignIn).toBe(false);
     expect(parseRuntimeConfig({ authMode: 'oidc' }).requiresSignIn).toBe(true);
     expect(parseRuntimeConfig({ authMode: 'local' }).requiresSignIn).toBe(true);
+    expect(parseRuntimeConfig({ authMode: 'ldap' }).requiresSignIn).toBe(true);
   });
 });
 
