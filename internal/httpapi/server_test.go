@@ -1109,3 +1109,202 @@ func TestBulkRejectsBadSelections(t *testing.T) {
 		}
 	}
 }
+
+// operatorRequest builds an authenticated operator request. Bearer rather than
+// cookie, so the CSRF origin rule (covered on its own below) stays out of the
+// way of what each case is actually asserting.
+func operatorRequest(method, target, body string) *http.Request {
+	request := httptest.NewRequest(method, target, strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer session-token")
+	return request
+}
+
+func operatorHandler(store *fakeStore) http.Handler {
+	return New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{
+		Subject: "operator-1", Roles: []string{"operator"},
+	}}, nil)
+}
+
+func TestAssignAlert(t *testing.T) {
+	store := &fakeStore{detail: alerts.Detail{Alert: alerts.Alert{ID: 42, Labels: map[string]string{}}}}
+	response := httptest.NewRecorder()
+	operatorHandler(store).ServeHTTP(
+		response,
+		operatorRequest(http.MethodPut, "/api/v1/alerts/42/assignee", `{"assignee":"platform-rota"}`),
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", response.Code, response.Body.String())
+	}
+	if store.assignee != "platform-rota" {
+		t.Errorf("assignee reaching the store = %q", store.assignee)
+	}
+}
+
+func TestAddAlertNoteIsCreated(t *testing.T) {
+	store := &fakeStore{detail: alerts.Detail{Alert: alerts.Alert{ID: 42, Labels: map[string]string{}}}}
+	response := httptest.NewRecorder()
+	operatorHandler(store).ServeHTTP(
+		response,
+		operatorRequest(http.MethodPost, "/api/v1/alerts/42/notes", `{"body":"paged the vendor"}`),
+	)
+	// 201: the request added something that was not there, unlike the toggles.
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body = %s", response.Code, response.Body.String())
+	}
+	if store.noteBody != "paged the vendor" {
+		t.Errorf("note body reaching the store = %q", store.noteBody)
+	}
+}
+
+func TestCloseAlert(t *testing.T) {
+	store := &fakeStore{detail: alerts.Detail{Alert: alerts.Alert{ID: 42, Labels: map[string]string{}}}}
+	response := httptest.NewRecorder()
+	operatorHandler(store).ServeHTTP(
+		response,
+		operatorRequest(http.MethodPost, "/api/v1/alerts/42/close", `{"closed":true}`),
+	)
+	if response.Code != http.StatusOK || !store.closed {
+		t.Fatalf("status = %d, closed = %v; body = %s", response.Code, store.closed, response.Body.String())
+	}
+}
+
+// Every operator endpoint rejects the same shapes of nonsense the same way, and
+// a body the decoder accepts but the handler does not check is how a malformed
+// request becomes a 500 instead of a 400.
+func TestOperatorEndpointsRejectBadRequests(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		method string
+		target string
+		body   string
+	}{
+		{name: "assign: id is not a number", method: http.MethodPut, target: "/api/v1/alerts/nope/assignee", body: `{"assignee":"x"}`},
+		{name: "assign: id is zero", method: http.MethodPut, target: "/api/v1/alerts/0/assignee", body: `{"assignee":"x"}`},
+		{name: "assign: field missing", method: http.MethodPut, target: "/api/v1/alerts/42/assignee", body: `{}`},
+		{name: "assign: wrong type", method: http.MethodPut, target: "/api/v1/alerts/42/assignee", body: `{"assignee":true}`},
+		{name: "assign: unknown field", method: http.MethodPut, target: "/api/v1/alerts/42/assignee", body: `{"assignee":"x","extra":1}`},
+		{name: "assign: trailing garbage", method: http.MethodPut, target: "/api/v1/alerts/42/assignee", body: `{"assignee":"x"} {}`},
+		{name: "close: field missing", method: http.MethodPost, target: "/api/v1/alerts/42/close", body: `{}`},
+		{name: "close: wrong type", method: http.MethodPost, target: "/api/v1/alerts/42/close", body: `{"closed":"yes"}`},
+		{name: "note: field missing", method: http.MethodPost, target: "/api/v1/alerts/42/notes", body: `{}`},
+		{name: "note: wrong type", method: http.MethodPost, target: "/api/v1/alerts/42/notes", body: `{"body":5}`},
+		{name: "bulk assign: no ids", method: http.MethodPut, target: "/api/v1/alerts/bulk/assignee", body: `{"ids":[],"assignee":"x"}`},
+		{name: "bulk assign: ids are not ids", method: http.MethodPut, target: "/api/v1/alerts/bulk/assignee", body: `{"ids":["x"],"assignee":"x"}`},
+		{name: "bulk assign: field missing", method: http.MethodPut, target: "/api/v1/alerts/bulk/assignee", body: `{"ids":["1"]}`},
+		{name: "bulk note: field missing", method: http.MethodPost, target: "/api/v1/alerts/bulk/notes", body: `{"ids":["1"]}`},
+		{name: "bulk note: unknown field", method: http.MethodPost, target: "/api/v1/alerts/bulk/notes", body: `{"ids":["1"],"body":"x","extra":1}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{detail: alerts.Detail{Alert: alerts.Alert{ID: 42, Labels: map[string]string{}}}}
+			response := httptest.NewRecorder()
+			operatorHandler(store).ServeHTTP(response, operatorRequest(test.method, test.target, test.body))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+// A viewer must not reach any of them, and must not be told which exist.
+func TestOperatorEndpointsRejectAViewer(t *testing.T) {
+	for _, test := range []struct {
+		method string
+		target string
+		body   string
+	}{
+		{http.MethodPut, "/api/v1/alerts/42/assignee", `{"assignee":"x"}`},
+		{http.MethodPost, "/api/v1/alerts/42/close", `{"closed":true}`},
+		{http.MethodPost, "/api/v1/alerts/42/notes", `{"body":"x"}`},
+		{http.MethodPut, "/api/v1/alerts/bulk/assignee", `{"ids":["1"],"assignee":"x"}`},
+		{http.MethodPost, "/api/v1/alerts/bulk/notes", `{"ids":["1"],"body":"x"}`},
+	} {
+		t.Run(test.target, func(t *testing.T) {
+			handler := New(config.Config{AuthMode: "oidc"}, &fakeStore{}, fakeAuthenticator{
+				principal: auth.Principal{Subject: "viewer", Roles: []string{"viewer"}},
+			}, nil)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, operatorRequest(test.method, test.target, test.body))
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+// The store's two sentinels have to reach the caller as different answers: one
+// says the alert is not yours to see, the other says fix the request.
+func TestOperatorEndpointsMapStoreErrors(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{name: "not found", err: alerts.ErrNotFound, wantStatus: http.StatusNotFound},
+		{name: "invalid", err: alerts.ErrInvalid, wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, target := range []struct {
+				method string
+				path   string
+				body   string
+			}{
+				{http.MethodPut, "/api/v1/alerts/42/assignee", `{"assignee":"x"}`},
+				{http.MethodPost, "/api/v1/alerts/42/notes", `{"body":"x"}`},
+			} {
+				store := &fakeStore{detailErr: test.err}
+				response := httptest.NewRecorder()
+				operatorHandler(store).ServeHTTP(response, operatorRequest(target.method, target.path, target.body))
+				if response.Code != test.wantStatus {
+					t.Fatalf("%s -> status = %d, want %d", target.path, response.Code, test.wantStatus)
+				}
+			}
+		})
+	}
+}
+
+// Close deliberately has no ErrInvalid path - a boolean is either present or it
+// is not - so only the not-found mapping is asserted for it.
+func TestCloseAlertMapsNotFound(t *testing.T) {
+	store := &fakeStore{detailErr: alerts.ErrNotFound}
+	response := httptest.NewRecorder()
+	operatorHandler(store).ServeHTTP(
+		response,
+		operatorRequest(http.MethodPost, "/api/v1/alerts/42/close", `{"closed":true}`),
+	)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", response.Code)
+	}
+}
+
+func TestBulkAssignAndNoteReachTheStore(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		method string
+		target string
+		body   string
+	}{
+		{
+			name: "assign", method: http.MethodPut, target: "/api/v1/alerts/bulk/assignee",
+			body: `{"ids":["1","2"],"assignee":"platform-rota"}`,
+		},
+		{
+			name: "note", method: http.MethodPost, target: "/api/v1/alerts/bulk/notes",
+			body: `{"ids":["1","2"],"body":"same root cause"}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{bulkOutcomes: []alerts.BulkOutcome{
+				{ID: 1, Status: alerts.BulkApplied},
+				{ID: 2, Status: alerts.BulkApplied},
+			}}
+			response := httptest.NewRecorder()
+			operatorHandler(store).ServeHTTP(response, operatorRequest(test.method, test.target, test.body))
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body = %s", response.Code, response.Body.String())
+			}
+			if len(store.bulkIDs) != 2 {
+				t.Errorf("ids reaching the store = %v, want two", store.bulkIDs)
+			}
+		})
+	}
+}
