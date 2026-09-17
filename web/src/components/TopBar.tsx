@@ -28,6 +28,12 @@ interface TopBarProps {
   session?: SessionInfo;
   onSignOut?: () => void;
   signOutPending?: boolean;
+  /**
+   * Opens the binding administration view. Present only for an administrator:
+   * the server refuses everybody else, and a control whose every request
+   * answers 403 is worse than no control.
+   */
+  onOpenAccess?: () => void;
   /** Browser-notification opt-in control; omitted hides it entirely. */
   notificationOptIn?: {
     state: NotificationOptInState;
@@ -51,6 +57,7 @@ export function TopBar({
   onSignOut,
   signOutPending = false,
   notificationOptIn,
+  onOpenAccess,
 }: TopBarProps) {
   const identityName =
     authMode === 'open'
@@ -73,6 +80,11 @@ export function TopBar({
           <span className="conn-dot" aria-hidden="true" />
           <span className="conn-label">{CONNECTION_LABEL[connection]}</span>
         </span>
+        {onOpenAccess !== undefined ? (
+          <button type="button" className="badge badge-mode topbar-access" onClick={onOpenAccess}>
+            Access
+          </button>
+        ) : null}
         {notificationOptIn !== undefined ? (
           <NotificationOptIn
             state={notificationOptIn.state}

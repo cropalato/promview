@@ -642,8 +642,6 @@ only signal — a source with no Alertmanager URL, or one that cannot be reached
   with one client and no readers. A deployment ingesting while consoles poll the
   stream and reconciliation sweeps is a different question, and it is the one
   most likely to find a problem first.
-- **Binding administration has no console UI.** The API exists and the CLI
-  exists; the console does not offer either, so granting access is a `curl`.
 - **`main` and `run` are untested**, as is the wrapper that records a created
   silence's provenance. They are process wiring and a database passthrough; the
   loops around them — expiry, reconciliation and stream pruning — are covered.

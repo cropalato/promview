@@ -125,6 +125,20 @@ export function canOperate(session: SessionInfo | undefined): boolean {
   return session.roles.some((role) => role === 'operator' || role === 'administrator');
 }
 
+/**
+ * Whether the console offers the binding administration view.
+ *
+ * Administrator only, and never anonymous: the server refuses an operator too,
+ * because changing who can do what is not an operator action. Offering a view
+ * whose every request answers 403 is worse than not offering it.
+ */
+export function canAdminister(session: SessionInfo | undefined): boolean {
+  if (session === undefined || session.anonymous) {
+    return false;
+  }
+  return session.roles.some((role) => role === 'administrator');
+}
+
 export function highestRole(roles: readonly string[]): string | undefined {
   let best: string | undefined;
   let bestRank = -1;

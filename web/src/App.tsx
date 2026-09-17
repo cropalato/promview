@@ -11,7 +11,7 @@ import type { LabelMatcher } from './alerts/filter';
 import type { AlertStreamEvent } from './alerts/stream';
 import type { AlertSummary } from './alerts/types';
 import type { AlertGroupSummary } from './alerts/api';
-import { OIDC_LOGIN_URL, canOperate } from './auth/session';
+import { OIDC_LOGIN_URL, canAdminister, canOperate } from './auth/session';
 import { apiUrl } from './config/apiBase';
 import { getHostSignIn } from './config/hostSession';
 import type { NavigateTo } from './auth/session';
@@ -31,6 +31,7 @@ import { resolveColumns } from './alerts/columns';
 import { FilterBar } from './components/FilterBar';
 import { SeverityStrip } from './components/SeverityStrip';
 import { StatusFooter } from './components/StatusFooter';
+import { AccessPanel } from './components/AccessPanel';
 import { TopBar } from './components/TopBar';
 import type { ConnectionState } from './components/TopBar';
 import { PulseMark } from './components/icons';
@@ -441,6 +442,14 @@ export default function App({ navigate }: AppProps = {}) {
   // Group rows carry no per-alert permission of their own, unlike the detail
   // drawer, which reads actions.canSilence from the server. This is the group
   // equivalent: the deployment can write silences, and this session may.
+  // Binding administration is its own view rather than a drawer: it is a table
+  // with a form, and it has nothing to do with the alert the drawer would be
+  // covering. Held in state rather than the URL, so it is not deep-linkable —
+  // the one thing here that is a convenience rather than a decision.
+  const [showAccess, setShowAccess] = useState(false);
+  const administrator = canAdminister(
+    sessionState.status === 'ready' ? sessionState.session : undefined,
+  );
   const silenceAvailable =
     config?.silenceEnabled === true &&
     canOperate(sessionState.status === 'ready' ? sessionState.session : undefined);
@@ -514,9 +523,12 @@ export default function App({ navigate }: AppProps = {}) {
           state: notificationOptInState,
           onToggle: toggleNotificationOptIn,
         }}
+        onOpenAccess={administrator ? () => setShowAccess(true) : undefined}
       />
       <main id="main" className="console">
-        {configState.status === 'loading' ? (
+        {administrator && showAccess ? (
+          <AccessPanel onClose={() => setShowAccess(false)} />
+        ) : configState.status === 'loading' ? (
           <section className="boot boot-loading" aria-label="Loading">
             <PulseMark className="boot-mark" />
             <h1 className="boot-title">Connecting to the Promview API</h1>
