@@ -677,6 +677,18 @@ make docker-build
 make verify-helm
 ```
 
+The scale the project commits to is measured rather than assumed:
+
+```sh
+make load-test              # seeds 50,000 alerts, reports ingest and read timings
+PROMVIEW_LOAD_ALERTS=5000 make load-test
+```
+
+It writes tens of thousands of rows and takes minutes, so it is deliberate
+rather than part of `make verify`. It drives the store directly: it does not
+measure the HTTP path, the SSE fanout, or contention between ingestion and
+reads.
+
 Migration verification requires a disposable PostgreSQL database because it applies up, down, and up migrations:
 
 ```sh

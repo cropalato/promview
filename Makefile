@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check docker-build changelog-check docs-check vuln vuln-go vuln-web vuln-desktop
+.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check load-test docker-build changelog-check docs-check vuln vuln-go vuln-web vuln-desktop
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
@@ -18,6 +18,12 @@ test:
 # `verify` for the same reason; CI runs it as its own job on every change.
 test-race:
 	go test -race ./cmd/... ./internal/...
+
+# The scale the project plan commits to, measured rather than assumed. Writes
+# tens of thousands of rows and takes minutes, so it is gated and deliberate:
+# PROMVIEW_LOAD_ALERTS overrides the count.
+load-test:
+	PROMVIEW_LOAD_TEST=1 go test ./internal/postgres -run TestLoadAtCommittedScale -v -timeout 20m
 
 test-postgres:
 	go test ./internal/postgres -run 'TestPendingMigrations|TestStoreIngestAndList|TestStoreExpireStaleAlerts|TestStoreGroupAlerts|TestStorePreferences|TestStoreReconcileSource|TestStoreReviveExpiredAlerts|TestStoreUpdateSource|TestStoreSilenceScope|TestStoreSilenceVisibility|TestStoreSyncSilences|TestStoreDesktopAuthCodes|TestStorePruneStreamEvents|TestStoreAssignAlert|TestStoreAlertNotes|TestStoreCloseAlert|TestStoreBulkActions|TestStoreRoleBindingAdministration|TestStoreCreatesTheFirstAdministrator'

@@ -10,6 +10,19 @@
 - Initial source: Prometheus Alertmanager webhooks only
 - Source topology: multiple Alertmanager installations
 - Expected scale: up to 50,000 active alerts and 100 received alerts per second
+
+That scale is measured rather than assumed. `make load-test` seeds the full
+50,000 and reports ingestion throughput and read latency; run against
+PostgreSQL 18.6 on a developer machine on 2026-09-17 it ingested at 1,236
+alerts per second, twelve times the committed rate, and answered the first page
+with its severity counts in 100ms, a label-matched page in 47ms, and a grouped
+page in 355ms.
+
+What it does not measure is as important: it drives the store directly, with one
+client and no concurrent readers, so it excludes the HTTP path, the SSE fanout
+to open consoles, and contention between ingestion and reads. It establishes
+that the data model and its indexes hold at the stated size; it does not
+establish behaviour under a production mix.
 - Authentication modes: open or OIDC
 - Open mode: anonymous read-only
 - Roles: viewer, operator, and administrator
