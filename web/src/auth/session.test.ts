@@ -10,6 +10,7 @@ import {
   loadSession,
   parseSession,
   signIn,
+  canAdminister,
   canOperate,
 } from './session';
 import type { SessionInfo } from './session';
@@ -307,9 +308,52 @@ describe('canOperate', () => {
     expect(canOperate(undefined)).toBe(false);
   });
 
-  it('refuses the anonymous reader open mode grants', () => {
-    // Open mode hands every reader the same anonymous viewer, so an operator
-    // control there could only ever answer 403.
-    expect(canOperate(session({ anonymous: true, roles: ['administrator'] }))).toBe(false);
+  it('allows an elevated open-mode principal, anonymous though it is', () => {
+    // This mirrors internal/auth/authorization.go: the server dropped its
+    // short-circuit on anonymous and now honours the roles an open deployment
+    // was told to grant. Refusing here would hide every control such a
+    // deployment exists to offer.
+    expect(canOperate(session({ anonymous: true, roles: ['viewer', 'operator'] }))).toBe(true);
+    expect(canOperate(session({ anonymous: true, roles: ['viewer', 'administrator'] }))).toBe(true);
+  });
+
+  it('still refuses the plain anonymous viewer an unelevated open mode grants', () => {
+    // The case an over-broad change would break: dropping the anonymity test
+    // must not turn every open deployment into an operating one.
+    expect(canOperate(session({ anonymous: true, roles: ['viewer'] }))).toBe(false);
+    expect(canOperate(session({ anonymous: true, roles: [] }))).toBe(false);
+  });
+});
+
+describe('canAdminister', () => {
+  function session(overrides: Partial<SessionInfo> = {}): SessionInfo {
+    return {
+      subject: 'ada',
+      email: 'ada@example.com',
+      displayName: 'Ada',
+      roles: ['administrator'],
+      anonymous: false,
+      ...overrides,
+    };
+  }
+
+  it('allows administrators only', () => {
+    expect(canAdminister(session({ roles: ['administrator'] }))).toBe(true);
+    expect(canAdminister(session({ roles: ['operator'] }))).toBe(false);
+    expect(canAdminister(session({ roles: ['viewer'] }))).toBe(false);
+    expect(canAdminister(undefined)).toBe(false);
+  });
+
+  it('allows an anonymous administrator where the deployment asked for one', () => {
+    // The server permits it, so a console that refused would be lying about
+    // what the deployment does.
+    expect(canAdminister(session({ anonymous: true, roles: ['viewer', 'administrator'] }))).toBe(
+      true,
+    );
+  });
+
+  it('still refuses the plain anonymous viewer and the anonymous operator', () => {
+    expect(canAdminister(session({ anonymous: true, roles: ['viewer'] }))).toBe(false);
+    expect(canAdminister(session({ anonymous: true, roles: ['viewer', 'operator'] }))).toBe(false);
   });
 });

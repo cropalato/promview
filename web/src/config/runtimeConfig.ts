@@ -8,9 +8,19 @@
 import { apiUrl } from './apiBase';
 import { apiFetch } from './transport';
 export type AuthMode = 'open' | 'oidc' | 'local' | 'ldap';
+export type OpenModeRole = 'viewer' | 'operator' | 'administrator';
 
 export interface RuntimeConfig {
   authMode: AuthMode;
+  /**
+   * What the anonymous principal open mode hands every reader is allowed to
+   * do, and the name its actions are recorded under. A deployment can elevate
+   * that principal past reading, and then everyone who can reach the port can
+   * act under one shared name — which is the one thing the console has to be
+   * able to say out loud, because nobody is looking for it.
+   */
+  openModeRole: OpenModeRole;
+  openModeAuthor: string;
   /**
    * Whether this deployment gates the console behind a sign-in. The console
    * asks this rather than testing for a particular mode, so a mode it has
@@ -53,7 +63,15 @@ export const RUNTIME_CONFIG_URL = '/api/v1/config';
 // console is old — and guessing would gate, or fail to gate, on an auth model
 // nobody here has seen.
 const AUTH_MODES: readonly AuthMode[] = ['open', 'oidc', 'local', 'ldap'];
+// Unlike authMode, a role the console does not recognise is not fatal: nothing
+// here has to understand it to render alerts, and the worst a fallback costs is
+// a hidden control the server would have accepted. Reading it as elevated would
+// cost a banner announcing access nobody has.
+const OPEN_MODE_ROLES: readonly OpenModeRole[] = ['viewer', 'operator', 'administrator'];
 const DEFAULT_PRODUCT_NAME = 'Promview';
+// Mirrors the server's own fallback, so an older backend that reports no author
+// is described by the name it would actually record actions under.
+const DEFAULT_OPEN_MODE_AUTHOR = 'promview-open-mode';
 // Mirrors the server's own defaults, used only when an older backend does not
 // report them. Two hours, capped at thirty days.
 const DEFAULT_SILENCE_SECONDS = 2 * 60 * 60;
@@ -114,6 +132,8 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
   const {
     authMode,
     requiresSignIn,
+    openModeRole,
+    openModeAuthor,
     productName,
     silenceEnabled,
     silenceDefaultSeconds,
@@ -133,6 +153,16 @@ export function parseRuntimeConfig(body: unknown): RuntimeConfig {
     // open issues sessions. Reading absent as false would leave the console
     // firing unauthenticated requests forever against a deployment that gates.
     requiresSignIn: typeof requiresSignIn === 'boolean' ? requiresSignIn : mode !== 'open',
+    // A server too old to report elevation cannot be doing any: absent reads as
+    // the unelevated deployment open mode has always been.
+    openModeRole:
+      typeof openModeRole === 'string' && OPEN_MODE_ROLES.includes(openModeRole as OpenModeRole)
+        ? (openModeRole as OpenModeRole)
+        : 'viewer',
+    openModeAuthor:
+      typeof openModeAuthor === 'string' && openModeAuthor.trim() !== ''
+        ? openModeAuthor
+        : DEFAULT_OPEN_MODE_AUTHOR,
     productName:
       typeof productName === 'string' && productName.trim() !== ''
         ? productName

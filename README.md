@@ -535,9 +535,40 @@ Three things are worth knowing from here, with the rest in
 | `ldap` | Anyone your directory says, with directory groups mapped to roles | You have Active Directory, OpenLDAP or FreeIPA and no OIDC |
 | `local` | Accounts created with `promview user`, held in Promview's own database | You have neither, and a handful of operators |
 
-Open mode can read alerts but cannot acknowledge, assign, close, note or silence
-anything: those record who did them, and an anonymous reader has no name to
-record.
+Open mode reads alerts and, by default, does nothing else: acknowledging,
+assigning, closing, noting and silencing all record who did them, and an
+anonymous reader has no name to record.
+
+### Open mode elevation
+
+A deployment can say otherwise, for a lab or a test instance where everyone who
+can reach the port is already trusted and a sign-in is friction with nothing
+behind it:
+
+```sh
+export PROMVIEW_AUTH_MODE=open
+export PROMVIEW_OPEN_MODE_ROLE=operator          # viewer (default) | operator | administrator
+export PROMVIEW_OPEN_MODE_AUTHOR=lab-console     # what actions are recorded under
+```
+
+**This gives everyone who can reach the port that role, with no sign-in.**
+Acknowledgements, assignments, notes and Alertmanager's `createdBy` are all
+recorded under the author string rather than a person, so nothing done in an
+elevated deployment can be traced to anybody. `administrator` additionally lets
+any reader rewrite who has access, and the bindings they write outlive the lab:
+switch that deployment to OIDC later and it carries a grant nobody can account
+for.
+
+Promview says so loudly — a startup warning for any elevation, a second one for
+`administrator`, and a non-dismissible banner in the console. The one worth
+alerting on is the metric, because a warning printed once at startup is not
+something anybody watches:
+
+```promql
+promview_open_mode_elevated == 1
+```
+
+That is how a lab setting that rode into production gets caught.
 
 ## Local Accounts
 

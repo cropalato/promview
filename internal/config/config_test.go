@@ -329,3 +329,60 @@ func TestLoadRejectsADefaultSilencePastTheMaximum(t *testing.T) {
 		t.Fatal("Load() error = nil, want error")
 	}
 }
+
+func TestLoadOpenModeRole(t *testing.T) {
+	for role, wantErr := range map[string]bool{
+		"viewer": false, "operator": false, "administrator": false,
+		"superuser": true, "Operator": true,
+	} {
+		t.Run(role, func(t *testing.T) {
+			t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+			t.Setenv("PROMVIEW_OPEN_MODE_ROLE", role)
+			cfg, err := Load()
+			if (err != nil) != wantErr {
+				t.Fatalf("Load() error = %v, wantErr = %v", err, wantErr)
+			}
+			if err == nil && cfg.OpenModeRole != role {
+				t.Fatalf("OpenModeRole = %q, want %q", cfg.OpenModeRole, role)
+			}
+		})
+	}
+}
+
+func TestLoadDefaultsOpenModeToViewer(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The default has to be the safe one: a deployment that did not ask for
+	// elevation must not have it.
+	if cfg.OpenModeRole != "viewer" || cfg.OpenModeAuthor == "" {
+		t.Fatalf("open mode defaults = %q / %q", cfg.OpenModeRole, cfg.OpenModeAuthor)
+	}
+}
+
+// Silently ignoring these outside open mode would leave somebody believing they
+// had widened or restricted access when they had not.
+func TestLoadRejectsOpenModeSettingsInOtherModes(t *testing.T) {
+	for _, setting := range []string{"PROMVIEW_OPEN_MODE_ROLE", "PROMVIEW_OPEN_MODE_AUTHOR"} {
+		t.Run(setting, func(t *testing.T) {
+			t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+			t.Setenv("PROMVIEW_AUTH_MODE", "local")
+			t.Setenv(setting, "operator")
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() accepted %s outside open mode", setting)
+			}
+		})
+	}
+}
+
+// Alertmanager refuses an unnamed silence, so an elevated open mode with a
+// blank author would be missing the thing it was turned on for.
+func TestLoadRejectsABlankOpenModeAuthor(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_OPEN_MODE_AUTHOR", "   ")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted a blank author")
+	}
+}

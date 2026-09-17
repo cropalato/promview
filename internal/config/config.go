@@ -50,6 +50,17 @@ type Config struct {
 	LDAPDisplayNameAttr  string
 	LDAPStartTLS         bool
 	LDAPTimeout          time.Duration
+	// OpenModeRole is the role every anonymous reader is granted in open mode.
+	//
+	// Viewer is the default and the only value appropriate to a deployment
+	// reachable by anyone who should not already be trusted. Operator and
+	// administrator exist for a lab, where everybody who can reach the port is
+	// trusted and a sign-in is friction with nothing behind it.
+	OpenModeRole string
+	// OpenModeAuthor is the name open-mode actions are recorded under. It is
+	// deliberately a mode's name rather than a person's, because that is
+	// honestly all the deployment knows.
+	OpenModeAuthor string
 	// SessionCookieSecure marks the session cookie Secure. It is not an OIDC
 	// setting: every mode that issues a session writes the same cookie, and a
 	// deployment that had to set one flag per mode would eventually set one and
@@ -86,6 +97,8 @@ func Load() (Config, error) {
 		MetricsAddress:       envOrDefault("PROMVIEW_METRICS_ADDRESS", ":9090"),
 		DatabaseURL:          os.Getenv("PROMVIEW_DATABASE_URL"),
 		AuthMode:             envOrDefault("PROMVIEW_AUTH_MODE", "open"),
+		OpenModeRole:         envOrDefault("PROMVIEW_OPEN_MODE_ROLE", "viewer"),
+		OpenModeAuthor:       envOrDefault("PROMVIEW_OPEN_MODE_AUTHOR", "promview-open-mode"),
 		WebDirectory:         envOrDefault("PROMVIEW_WEB_DIRECTORY", "web/dist"),
 		MigrationsDir:        envOrDefault("PROMVIEW_MIGRATIONS_DIRECTORY", "migrations"),
 		BootstrapSourceSlug:  os.Getenv("PROMVIEW_BOOTSTRAP_SOURCE_SLUG"),
@@ -243,8 +256,30 @@ func Load() (Config, error) {
 	// here only once the binary can actually serve it: admitting one early
 	// starts a server that authenticates nobody and explains nothing, which is
 	// a worse answer than refusing to boot.
+	// Meaningful only in open mode. Set anywhere else it is a misreading of what
+	// the setting does, and silently ignoring it would leave somebody believing
+	// they had restricted or widened access when they had not.
+	if cfg.AuthMode != "open" {
+		for _, name := range []string{"PROMVIEW_OPEN_MODE_ROLE", "PROMVIEW_OPEN_MODE_AUTHOR"} {
+			if os.Getenv(name) != "" {
+				return Config{}, fmt.Errorf("%s applies only when PROMVIEW_AUTH_MODE=open", name)
+			}
+		}
+	}
+
 	switch cfg.AuthMode {
 	case "open":
+		switch cfg.OpenModeRole {
+		case "viewer", "operator", "administrator":
+		default:
+			return Config{}, errors.New("PROMVIEW_OPEN_MODE_ROLE must be viewer, operator, or administrator")
+		}
+		if strings.TrimSpace(cfg.OpenModeAuthor) == "" {
+			// Alertmanager refuses a silence with no author, and an elevated
+			// open mode that could not silence would be missing the thing it
+			// was turned on for.
+			return Config{}, errors.New("PROMVIEW_OPEN_MODE_AUTHOR must not be blank")
+		}
 	case "local":
 		if err := validateLocal(cfg); err != nil {
 			return Config{}, err

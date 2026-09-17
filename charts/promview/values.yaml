@@ -26,6 +26,17 @@ auth:
   # which is the name it shipped under while OIDC was the only mode issuing a
   # session. May be false only on loopback hosts.
   sessionCookieSecure: null
+  # What an anonymous reader is granted when mode is open.
+  #
+  # viewer is the only value appropriate to a deployment reachable by anyone who
+  # should not already be trusted. operator and administrator are for a lab,
+  # where everybody who can reach the port is trusted and a sign-in is friction
+  # with nothing behind it - and where nothing anybody does can be attributed to
+  # a person, because there is no person to attribute it to.
+  openModeRole: viewer
+  # The name open-mode actions are recorded under, in acknowledgements,
+  # assignments, notes, and Alertmanager's createdBy.
+  openModeAuthor: promview-open-mode
 
 oidc:
   issuerURL: ""

@@ -34,6 +34,10 @@ data:
   PROMVIEW_OIDC_DISPLAY_NAME_CLAIM: {{ .Values.oidc.displayNameClaim | quote }}
   PROMVIEW_OIDC_GROUPS_CLAIM: {{ .Values.oidc.groupsClaim | quote }}
   {{- end }}
+  {{- if eq .Values.auth.mode "open" }}
+  PROMVIEW_OPEN_MODE_ROLE: {{ .Values.auth.openModeRole | quote }}
+  PROMVIEW_OPEN_MODE_AUTHOR: {{ .Values.auth.openModeAuthor | quote }}
+  {{- end }}
   {{- if eq .Values.auth.mode "ldap" }}
   PROMVIEW_LDAP_URL: {{ .Values.ldap.url | quote }}
   PROMVIEW_LDAP_ISSUER: {{ .Values.ldap.issuer | quote }}

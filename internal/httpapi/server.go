@@ -772,6 +772,12 @@ func (api *API) getConfig(w http.ResponseWriter, _ *http.Request) {
 		// deployment requires, so the next authentication mode does not need
 		// the console edited to know it exists.
 		"requiresSignIn": api.config.AuthMode != "open",
+		// Reported so the console can say plainly that everyone reaching it can
+		// act, and under what name. A deployment that elevated open mode by
+		// accident is one nobody is looking for, so the console has to be the
+		// thing that says so.
+		"openModeRole":   api.config.OpenModeRole,
+		"openModeAuthor": api.config.OpenModeAuthor,
 		"productName":    "Promview",
 		// The console needs the deployment's window to default and bound its own
 		// duration control rather than hardcoding one the server would reject.

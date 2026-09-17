@@ -38,17 +38,53 @@ type Authenticator interface {
 	Authenticate(context.Context, *http.Request) (Principal, error)
 }
 
-type OpenAuthenticator struct{}
+// OpenAuthenticator hands every unauthenticated reader the same principal.
+//
+// Role is viewer unless a deployment has deliberately said otherwise. An
+// elevated open mode is a lab arrangement: everybody who can reach the port can
+// acknowledge, assign and silence, all under one shared name, and nothing
+// recorded can be attributed to a person.
+type OpenAuthenticator struct {
+	Role Role
+	// Author is what actions are recorded under. Empty falls back to a name
+	// that reads as a mode rather than a person, because that is honestly all
+	// the deployment knows.
+	Author string
+}
 
-func (OpenAuthenticator) Authenticate(context.Context, *http.Request) (Principal, error) {
+func (authenticator OpenAuthenticator) Authenticate(context.Context, *http.Request) (Principal, error) {
+	role := authenticator.Role
+	if role == "" {
+		role = RoleViewer
+	}
+	author := authenticator.Author
+	if author == "" {
+		author = DefaultOpenModeAuthor
+	}
+	// Always a viewer grant, plus the elevated one where there is one. Keeping
+	// them separate means the label-scoped read path sees exactly what it saw
+	// before elevation, and only the operator checks see anything new.
+	grants := []Grant{{Role: RoleViewer}}
+	if role != RoleViewer {
+		grants = append(grants, Grant{Role: role})
+	}
+	displayName := "Anonymous viewer"
+	if role != RoleViewer {
+		displayName = "Open mode " + string(role)
+	}
 	return Principal{
-		Subject:     "anonymous",
-		DisplayName: "Anonymous viewer",
-		Roles:       []string{"viewer"},
+		Subject:     author,
+		DisplayName: displayName,
+		Roles:       RolesFromGrants(grants),
 		Anonymous:   true,
-		Grants:      []Grant{{Role: RoleViewer}},
+		Grants:      grants,
 	}, nil
 }
+
+// DefaultOpenModeAuthor is what open-mode actions are recorded under when the
+// deployment does not name one. Greppable on purpose: it should be obvious in
+// an audit trail that nobody signed in for this.
+const DefaultOpenModeAuthor = "promview-open-mode"
 
 // writeSessionCookie issues the session cookie every authentication mode ends
 // in. One writer, so promview_session means exactly one thing no matter which

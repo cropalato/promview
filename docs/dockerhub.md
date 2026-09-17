@@ -186,6 +186,8 @@ server-owned bindings.
 | `PROMVIEW_OIDC_EMAIL_CLAIM` | `email` | |
 | `PROMVIEW_OIDC_DISPLAY_NAME_CLAIM` | `name` | |
 | `PROMVIEW_OIDC_GROUPS_CLAIM` | `groups` | |
+| `PROMVIEW_OPEN_MODE_ROLE` | `viewer` | In open mode only: what every anonymous reader is granted. `operator` and `administrator` give that to anyone who can reach the port. |
+| `PROMVIEW_OPEN_MODE_AUTHOR` | `promview-open-mode` | The name open-mode actions are recorded under. Never a person's. |
 | `PROMVIEW_LDAP_URL` | _(unset)_ | Required in LDAP mode. `ldaps://` unless StartTLS is on or the host is loopback. |
 | `PROMVIEW_LDAP_BIND_DN` / `PROMVIEW_LDAP_BIND_PASSWORD` | _(unset)_ | Service account that performs the user search. Required in LDAP mode. |
 | `PROMVIEW_LDAP_BASE_DN` | _(unset)_ | Search base. Required in LDAP mode. |

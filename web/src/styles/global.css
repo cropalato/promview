@@ -684,6 +684,27 @@ code {
   font-size: 13px;
 }
 
+/* Elevated open mode borrows the warning treatment rather than inventing one:
+   it is the same class of thing as a failed sign-out, only permanent. */
+.open-mode-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.open-mode-banner-title {
+  font-weight: 650;
+}
+
+.open-mode-banner-copy {
+  margin: 0;
+  max-width: 90ch;
+}
+
+.open-mode-banner-author {
+  font-family: var(--font-mono);
+}
+
 /* Filter bar */
 .filter-bar {
   display: flex;

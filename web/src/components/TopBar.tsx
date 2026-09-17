@@ -26,8 +26,16 @@ interface TopBarProps {
   productName: string;
   connection: ConnectionState;
   authMode?: AuthMode;
-  /** Verified OIDC session; absent while sign-in is pending or unavailable. */
+  /**
+   * The principal the server reported, anonymous or not; absent while the
+   * identity request is still out or has failed.
+   */
   session?: SessionInfo;
+  /**
+   * Revokes the session. Present only where there is one to revoke: the
+   * anonymous principal open mode answers with was never issued, so the control
+   * would only ever revoke something that does not exist.
+   */
   onSignOut?: () => void;
   signOutPending?: boolean;
   /**
@@ -46,10 +54,12 @@ interface TopBarProps {
 /**
  * Compact identity/connection bar: product mark, live connection status,
  * the browser-notification opt-in, deployment auth mode, and the effective
- * identity. In open mode the server grants an anonymous viewer identity,
- * shown here explicitly; in OIDC mode a verified session shows its display
- * name and highest role plus a sign-out action. The connection indicator
- * reflects the live alert stream, not just shell config loading.
+ * identity. The name and role badge come from whatever the server reported,
+ * anonymous or not: an open-mode deployment can elevate its anonymous
+ * principal, and a bar that hardcoded "Anonymous viewer" would then be naming
+ * a role nobody here holds. Only the sign-out action turns on there being a
+ * session to revoke. The connection indicator reflects the live alert stream,
+ * not just shell config loading.
  */
 export function TopBar({
   productName,
@@ -61,13 +71,17 @@ export function TopBar({
   notificationOptIn,
   onOpenAccess,
 }: TopBarProps) {
+  // Placeholders only for the window before the identity request answers. Open
+  // mode's is the unelevated reading, because claiming a role the deployment
+  // may not grant is the worse of the two ways to be briefly wrong.
   const identityName =
-    authMode === 'open'
-      ? 'Anonymous viewer'
-      : session !== undefined
-        ? session.displayName
+    session !== undefined
+      ? session.displayName
+      : authMode === 'open'
+        ? 'Anonymous viewer'
         : 'Sign-in pending';
-  const roleBadge = authMode === 'open' ? 'viewer' : session && highestRole(session.roles);
+  const roleBadge =
+    session !== undefined ? highestRole(session.roles) : authMode === 'open' ? 'viewer' : undefined;
 
   return (
     <header className="topbar">
@@ -101,7 +115,7 @@ export function TopBar({
             <UserIcon className="identity-icon" />
             <span className="identity-name">{identityName}</span>
             {roleBadge ? <span className="badge badge-role">{roleBadge}</span> : null}
-            {session !== undefined && onSignOut !== undefined ? (
+            {onSignOut !== undefined ? (
               <button
                 type="button"
                 className="signout-button"

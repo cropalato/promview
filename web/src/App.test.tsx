@@ -16,11 +16,30 @@ const LDAP_CONFIG = { authMode: 'ldap', requiresSignIn: true, productName: 'Prom
 
 /** What open mode answers /api/v1/me with: a reader, not a session. */
 const ANONYMOUS_PRINCIPAL = {
-  subject: 'anonymous',
+  subject: 'promview-open-mode',
   email: '',
-  displayName: '',
+  displayName: 'Anonymous viewer',
   roles: ['viewer'],
   anonymous: true,
+};
+
+/**
+ * What an open deployment told to elevate answers with: still anonymous, but
+ * carrying grants the server will honour.
+ */
+const OPEN_OPERATOR_PRINCIPAL = {
+  subject: 'lab-console',
+  email: '',
+  displayName: 'Open mode operator',
+  roles: ['viewer', 'operator'],
+  anonymous: true,
+};
+
+const ELEVATED_OPEN_CONFIG = {
+  authMode: 'open',
+  productName: 'Promview',
+  openModeRole: 'operator',
+  openModeAuthor: 'lab-console',
 };
 
 const OIDC_PRINCIPAL = {
@@ -138,14 +157,18 @@ function alertsPage(overrides: Record<string, unknown> = {}): Record<string, unk
  * Routes the fetch mock: alerts get the page, `/api/v1/me` the anonymous
  * principal open mode grants every reader, everything else the config.
  */
-function mockApi(page: unknown = alertsPage(), config: unknown = OPEN_CONFIG): void {
+function mockApi(
+  page: unknown = alertsPage(),
+  config: unknown = OPEN_CONFIG,
+  principal: unknown = ANONYMOUS_PRINCIPAL,
+): void {
   fetchMock().mockImplementation((url: string) => {
     const target = String(url);
     if (target.startsWith('/api/v1/alerts')) {
       return Promise.resolve(jsonResponse(page));
     }
     if (target === '/api/v1/me') {
-      return Promise.resolve(jsonResponse(ANONYMOUS_PRINCIPAL));
+      return Promise.resolve(jsonResponse(principal));
     }
     return Promise.resolve(jsonResponse(config));
   });
@@ -354,6 +377,33 @@ describe('App', () => {
     ]);
     // No layout preferences: open mode has no user to key them against.
     expect(fetchMock()).not.toHaveBeenCalledWith('/api/v1/preferences');
+  });
+
+  it('warns in an open deployment that elevated its anonymous principal', async () => {
+    mockApi(alertsPage(), ELEVATED_OPEN_CONFIG, OPEN_OPERATOR_PRINCIPAL);
+    render(<App />);
+
+    // Alongside the alert list rather than on a boot screen: the operator
+    // acting on an alert is the one who needs to know this.
+    expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
+    const notice = screen.getByRole('status', { name: /open access warning/i });
+    expect(notice).toHaveTextContent(/open to everyone who can reach it/i);
+    expect(notice).toHaveTextContent('lab-console');
+    // The top bar reports what the server said, not the viewer it used to
+    // hardcode for every open deployment.
+    const banner = screen.getByRole('banner');
+    expect(within(banner).getByText('Open mode operator')).toBeInTheDocument();
+    expect(within(banner).getByText('operator')).toBeInTheDocument();
+  });
+
+  it('leaves a plain open deployment unbannered', async () => {
+    // Open mode has always been a read-only anonymous viewer; a warning there
+    // would be noise on every console that elevated nothing.
+    mockApi();
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
+    expect(screen.queryByText(/open to everyone who can reach it/i)).toBeNull();
   });
 
   it('offers no sign-out for the anonymous reader open mode grants', async () => {

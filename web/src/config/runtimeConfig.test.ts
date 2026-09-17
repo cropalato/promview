@@ -35,6 +35,9 @@ describe('loadRuntimeConfig', () => {
       authMode: 'open',
       // Open mode gates nothing, so the console never waits for a session.
       requiresSignIn: false,
+      // A server that reports no elevation cannot be doing any.
+      openModeRole: 'viewer',
+      openModeAuthor: 'promview-open-mode',
       productName: 'Promview',
       // A backend that reports no silence fields predates silencing and cannot
       // serve it, so absent reads as off rather than as enabled.
@@ -55,6 +58,8 @@ describe('loadRuntimeConfig', () => {
     await expect(loadRuntimeConfig(fetchImpl)).resolves.toEqual({
       authMode: 'oidc',
       requiresSignIn: true,
+      openModeRole: 'viewer',
+      openModeAuthor: 'promview-open-mode',
       productName: 'Promview',
       silenceEnabled: false,
       silenceDefaultSeconds: 2 * 60 * 60,
@@ -226,5 +231,51 @@ describe('silence removal capability', () => {
     await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({
       silenceRemoveSupported: true,
     });
+  });
+});
+
+describe('open-mode elevation', () => {
+  it('takes the role and the author the deployment reports', () => {
+    const config = parseRuntimeConfig({
+      authMode: 'open',
+      openModeRole: 'operator',
+      openModeAuthor: 'lab-console',
+    });
+
+    expect(config.openModeRole).toBe('operator');
+    expect(config.openModeAuthor).toBe('lab-console');
+  });
+
+  it('accepts every role an open deployment can be granting', () => {
+    for (const openModeRole of ['viewer', 'operator', 'administrator'] as const) {
+      expect(parseRuntimeConfig({ authMode: 'open', openModeRole }).openModeRole).toBe(
+        openModeRole,
+      );
+    }
+  });
+
+  it('reads a server that reports neither field as unelevated', () => {
+    // A backend too old to report elevation cannot be doing any, and guessing
+    // the other way would put a banner on screen claiming access nobody has.
+    const config = parseRuntimeConfig({ authMode: 'open' });
+
+    expect(config.openModeRole).toBe('viewer');
+    expect(config.openModeAuthor).toBe('promview-open-mode');
+  });
+
+  it('falls back to viewer for a role it does not know, rather than throwing', () => {
+    // Unlike authMode, this is not a value the console has to understand to
+    // render alerts: the cost of the fallback is a hidden control the server
+    // would have accepted, which beats refusing to boot.
+    expect(parseRuntimeConfig({ authMode: 'open', openModeRole: 'superuser' }).openModeRole).toBe(
+      'viewer',
+    );
+    expect(parseRuntimeConfig({ authMode: 'open', openModeRole: 7 }).openModeRole).toBe('viewer');
+  });
+
+  it('falls back to the server default for an empty author', () => {
+    expect(parseRuntimeConfig({ authMode: 'open', openModeAuthor: '   ' }).openModeAuthor).toBe(
+      'promview-open-mode',
+    );
   });
 });

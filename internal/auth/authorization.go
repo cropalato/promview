@@ -149,13 +149,12 @@ func (principal Principal) CanRead() bool {
 
 // CanAdminister reports whether the principal may change who can do what.
 //
-// Administrator only, and never anonymous: open mode has no identity to hold
-// accountable for a policy change, and a deployment that let one be made
-// without a name would have an audit trail that says nothing.
+// Administrator only, and decided by the grants rather than by whether anybody
+// signed in. An open-mode deployment can be told to hand out this role, and
+// then an audit trail of policy changes says only that the mode made them -
+// which is the deployment's choice to make and is warned about loudly at
+// startup, not something this check second-guesses per request.
 func (principal Principal) CanAdminister() bool {
-	if principal.Anonymous {
-		return false
-	}
 	for _, grant := range principal.Grants {
 		if grant.Role == RoleAdministrator {
 			return true
@@ -164,10 +163,13 @@ func (principal Principal) CanAdminister() bool {
 	return false
 }
 
+// CanOperate reports whether the principal may act on an alert.
+//
+// Grant-driven, with no special case for an anonymous reader. resolvePrincipal
+// never marks a principal anonymous - the flag is set in exactly one place, by
+// OpenAuthenticator - so no OIDC, LDAP or local principal could ever have
+// reached such a case, and removing it cannot widen what any of them can do.
 func (principal Principal) CanOperate() bool {
-	if principal.Anonymous {
-		return false
-	}
 	for _, grant := range principal.Grants {
 		if grant.Role == RoleOperator || grant.Role == RoleAdministrator {
 			return true
@@ -176,10 +178,12 @@ func (principal Principal) CanOperate() bool {
 	return false
 }
 
+// CanOperateLabels is CanOperate narrowed to one alert's labels.
+//
+// Grant-driven for the same reason: a matcher-less operator grant matches every
+// alert, which is what an elevated open mode wants, and a scoped one still only
+// matches inside its scope.
 func CanOperateLabels(principal Principal, labels map[string]string) bool {
-	if principal.Anonymous {
-		return false
-	}
 	for _, grant := range principal.Grants {
 		if grant.Role == RoleAdministrator {
 			return true
