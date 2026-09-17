@@ -42,6 +42,9 @@ type Store interface {
 	BulkAssign(context.Context, auth.Principal, []int64, string) ([]alerts.BulkOutcome, error)
 	BulkClose(context.Context, auth.Principal, []int64, bool) ([]alerts.BulkOutcome, error)
 	BulkNote(context.Context, auth.Principal, []int64, string) ([]alerts.BulkOutcome, error)
+	RoleBindings(context.Context) ([]auth.RoleBinding, error)
+	SetRoleBinding(context.Context, auth.RoleBinding) error
+	DeleteRoleBinding(context.Context, string) error
 	SilenceScopeForAlert(context.Context, auth.Principal, int64) (alerts.SilenceScope, error)
 	SilenceScopeForGroup(context.Context, auth.Principal, []string, map[string]string) (alerts.SilenceScope, error)
 	SilenceRemovalScope(context.Context, auth.Principal, int64, string) (alerts.SilenceTarget, error)
@@ -129,6 +132,9 @@ func NewObserved(
 	mux.Handle("DELETE /api/v1/alerts/{id}/silences/{silenceId}", api.requireAuthentication(http.HandlerFunc(api.removeAlertSilence)))
 	mux.Handle("POST /api/v1/groups/silence", api.requireAuthentication(http.HandlerFunc(api.silenceGroup)))
 	mux.Handle("POST /api/v1/groups/silence/preview", api.requireAuthentication(http.HandlerFunc(api.previewGroupSilence)))
+	mux.Handle("GET /api/v1/access/bindings", api.requireAuthentication(http.HandlerFunc(api.listRoleBindings)))
+	mux.Handle("PUT /api/v1/access/bindings/{name}", api.requireAuthentication(http.HandlerFunc(api.setRoleBinding)))
+	mux.Handle("DELETE /api/v1/access/bindings/{name}", api.requireAuthentication(http.HandlerFunc(api.deleteRoleBinding)))
 	mux.Handle("GET /api/v1/stream", api.requireAuthentication(http.HandlerFunc(api.streamAlerts)))
 	mux.Handle("GET /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.getPreferences)))
 	mux.Handle("PUT /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.putPreferences)))

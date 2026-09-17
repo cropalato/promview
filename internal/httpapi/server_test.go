@@ -22,36 +22,40 @@ import (
 )
 
 type fakeStore struct {
-	alerts       []alertmanager.IncomingAlert
-	query        alerts.Query
-	result       alerts.ListResult
-	events       []alerts.StreamEvent
-	detail       alerts.Detail
-	detailErr    error
-	acknowledged *bool
-	groupResult  alerts.GroupResult
-	groupErr     error
-	preferences  preferences.Preferences
-	prefErr      error
-	written      *preferences.Preferences
-	afterID      int64
-	retainedFrom int64
-	assignee     string
-	noteBody     string
-	closed       bool
-	bulkIDs      []int64
-	bulkOutcomes []alerts.BulkOutcome
-	bulkErr      error
-	cancel       context.CancelFunc
-	pingErr      error
-	sourceToken  string
-	principal    auth.Principal
-	silenceScope alerts.SilenceScope
-	silenceErr   error
-	recorded     []alerts.SilenceRecord
-	recordErr    error
-	groupBy      []string
-	groupKey     map[string]string
+	alerts         []alertmanager.IncomingAlert
+	query          alerts.Query
+	result         alerts.ListResult
+	events         []alerts.StreamEvent
+	detail         alerts.Detail
+	detailErr      error
+	acknowledged   *bool
+	groupResult    alerts.GroupResult
+	groupErr       error
+	preferences    preferences.Preferences
+	prefErr        error
+	written        *preferences.Preferences
+	afterID        int64
+	retainedFrom   int64
+	assignee       string
+	noteBody       string
+	closed         bool
+	bulkIDs        []int64
+	bulkOutcomes   []alerts.BulkOutcome
+	bulkErr        error
+	bindings       []auth.RoleBinding
+	binding        auth.RoleBinding
+	deletedBinding string
+	bindingErr     error
+	cancel         context.CancelFunc
+	pingErr        error
+	sourceToken    string
+	principal      auth.Principal
+	silenceScope   alerts.SilenceScope
+	silenceErr     error
+	recorded       []alerts.SilenceRecord
+	recordErr      error
+	groupBy        []string
+	groupKey       map[string]string
 
 	removalTarget   alerts.SilenceTarget
 	removalErr      error
@@ -135,6 +139,20 @@ func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal
 func (store *fakeStore) GetAlertDetail(_ context.Context, principal auth.Principal, _ int64) (alerts.Detail, error) {
 	store.principal = principal
 	return store.detail, store.detailErr
+}
+
+func (store *fakeStore) RoleBindings(context.Context) ([]auth.RoleBinding, error) {
+	return store.bindings, store.bindingErr
+}
+
+func (store *fakeStore) SetRoleBinding(_ context.Context, binding auth.RoleBinding) error {
+	store.binding = binding
+	return store.bindingErr
+}
+
+func (store *fakeStore) DeleteRoleBinding(_ context.Context, name string) error {
+	store.deletedBinding = name
+	return store.bindingErr
 }
 
 func (store *fakeStore) BulkAcknowledge(_ context.Context, principal auth.Principal, ids []int64, _ bool) ([]alerts.BulkOutcome, error) {
@@ -1306,5 +1324,113 @@ func TestBulkAssignAndNoteReachTheStore(t *testing.T) {
 				t.Errorf("ids reaching the store = %v, want two", store.bulkIDs)
 			}
 		})
+	}
+}
+
+func adminHandler(store *fakeStore) http.Handler {
+	return New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{
+		Subject: "admin-1", Roles: []string{"administrator"},
+	}}, nil)
+}
+
+func TestListRoleBindingsIncludesScopes(t *testing.T) {
+	store := &fakeStore{bindings: []auth.RoleBinding{{
+		Name: "platform", SubjectKind: auth.SubjectOIDCGroup, Role: auth.RoleOperator,
+		Matchers: []auth.LabelMatcher{{Name: "team", Operator: "=", Value: "platform"}},
+	}}}
+	response := httptest.NewRecorder()
+	adminHandler(store).ServeHTTP(response, operatorRequest(http.MethodGet, "/api/v1/access/bindings", ""))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", response.Code, response.Body.String())
+	}
+	// The scope is half of what a binding means; listing it without one would
+	// describe a different binding than the one in force.
+	if !strings.Contains(response.Body.String(), `"matchers"`) {
+		t.Errorf("body = %s, want the matchers", response.Body.String())
+	}
+}
+
+func TestSetAndDeleteRoleBinding(t *testing.T) {
+	store := &fakeStore{}
+	handler := adminHandler(store)
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, operatorRequest(http.MethodPut, "/api/v1/access/bindings/platform",
+		`{"subjectKind":"oidc_group","oidcIssuer":"https://idp.example","oidcGroup":"platform","role":"operator"}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", response.Code, response.Body.String())
+	}
+	// The path names the binding, so a body that omits the name still gets it.
+	if store.binding.Name != "platform" || store.binding.Role != auth.RoleOperator {
+		t.Errorf("binding reaching the store = %#v", store.binding)
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, operatorRequest(http.MethodDelete, "/api/v1/access/bindings/platform", ""))
+	if response.Code != http.StatusNoContent || store.deletedBinding != "platform" {
+		t.Fatalf("status = %d, deleted = %q", response.Code, store.deletedBinding)
+	}
+}
+
+// A PUT whose body names a different binding could rewrite one the caller did
+// not address, so it is refused rather than resolved in either direction.
+func TestSetRoleBindingRefusesAMismatchedName(t *testing.T) {
+	store := &fakeStore{}
+	response := httptest.NewRecorder()
+	adminHandler(store).ServeHTTP(response, operatorRequest(http.MethodPut, "/api/v1/access/bindings/platform",
+		`{"name":"admins","subjectKind":"oidc_group","oidcIssuer":"https://idp.example","oidcGroup":"x","role":"viewer"}`))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
+	}
+	if store.binding.Name != "" {
+		t.Errorf("a mismatched request reached the store as %#v", store.binding)
+	}
+}
+
+func TestRoleBindingErrorsAreTheCallersToFix(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "invalid", err: auth.ErrInvalidRoleBinding},
+		// Being told the change would lock everyone out is guidance, not a
+		// server failure: the caller can add a second administrator and retry.
+		{name: "last administrator", err: auth.ErrLastAdministrator},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{bindingErr: test.err}
+			response := httptest.NewRecorder()
+			adminHandler(store).ServeHTTP(response,
+				operatorRequest(http.MethodDelete, "/api/v1/access/bindings/admins", ""))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+// Everyone below administrator is refused, including an operator: changing who
+// can do what is not an operator action.
+func TestRoleBindingEndpointsRequireAnAdministrator(t *testing.T) {
+	for _, principal := range []auth.Principal{
+		{Subject: "viewer", Roles: []string{"viewer"}},
+		{Subject: "operator", Roles: []string{"operator"}},
+		{Anonymous: true},
+	} {
+		for _, target := range []struct {
+			method string
+			path   string
+		}{
+			{http.MethodGet, "/api/v1/access/bindings"},
+			{http.MethodPut, "/api/v1/access/bindings/x"},
+			{http.MethodDelete, "/api/v1/access/bindings/x"},
+		} {
+			handler := New(config.Config{AuthMode: "oidc"}, &fakeStore{}, fakeAuthenticator{principal: principal}, nil)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, operatorRequest(target.method, target.path, `{"role":"viewer"}`))
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("%s %s as %v -> %d, want 403", target.method, target.path, principal.Roles, response.Code)
+			}
+		}
 	}
 }

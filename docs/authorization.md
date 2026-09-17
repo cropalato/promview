@@ -140,3 +140,27 @@ kubectl --namespace promview exec deployment/promview -- \
 ```
 
 Treat binding changes as privileged administrative operations and record them through your deployment/change-management process until a dedicated administration API and audit UI are implemented.
+
+## Administering bindings over the API
+
+`GET /api/v1/access/bindings` lists every binding with its matchers.
+`PUT /api/v1/access/bindings/{name}` creates or replaces one, and
+`DELETE /api/v1/access/bindings/{name}` removes it. All three require an
+administrator; an operator is refused, and so is open mode's anonymous reader,
+because a policy change has to be attributable to somebody.
+
+The path names the binding. A body naming a different one is refused rather
+than resolved in either direction, so a `PUT` to one name can never rewrite
+another.
+
+A change that would leave the deployment with no administrator binding is
+refused, whether by deleting the last one or demoting it to a lesser role. The
+count and the write happen in one transaction, so two administrators removing
+each other at the same time cannot both succeed. A deployment that has no
+administrator binding at all can always create the first: that is how an
+open-mode deployment adopts OIDC.
+
+The CLI (`promview access set`, `access delete`) writes through the same store
+methods and is held to the same rule, so the shell is not a way around it.
+Bindings are evaluated from the database on every request, so a change takes
+effect on existing sessions immediately.

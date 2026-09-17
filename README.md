@@ -572,6 +572,30 @@ The default scopes are `openid,profile,email,groups`; the default claims are `pr
 
 Selectors support `=`, `!=`, `=~`, and `!~`. Selectors within one binding are ANDed; multiple matching bindings are ORed. Viewer and operator bindings may be scoped, while administrator bindings are always global.
 
+Bindings can be administered over the API as well as the CLI, by an
+administrator:
+
+```sh
+curl 'http://localhost:8080/api/v1/access/bindings'
+
+curl -X PUT 'http://localhost:8080/api/v1/access/bindings/platform-operators' \
+  -H 'Content-Type: application/json' \
+  -d '{"subjectKind":"oidc_group","oidcIssuer":"https://identity.example.com",
+       "oidcGroup":"promview-platform","role":"operator",
+       "matchers":[{"name":"team","operator":"=","value":"platform"}]}'
+
+curl -X DELETE 'http://localhost:8080/api/v1/access/bindings/platform-operators'
+```
+
+Administrator only — not operator: changing who can do what is not an operator
+action, and open mode has no identity to hold accountable for a policy change.
+
+**A change that would leave no administrator binding is refused**, whether by
+deleting the last one or demoting it. The check runs inside the same
+transaction as the write, so two administrators removing each other at once
+cannot both succeed. Creating the first administrator on a deployment that has
+none is always allowed.
+
 See [`docs/authorization.md`](docs/authorization.md) for binding administration, selector semantics, revocation behavior, and deployment-specific commands.
 
 Production issuer and redirect URLs must use HTTPS. Loopback HTTP is supported for provider testing by setting `PROMVIEW_OIDC_COOKIE_SECURE=false`; insecure cookies are rejected for non-loopback redirect hosts.
@@ -595,7 +619,7 @@ Alpha, and honest about it. What works today:
 | Notes | Working |
 | Close (local) | Working |
 | Bulk actions | Working |
-| Authorization administration API | Planned (CLI only) |
+| Authorization administration API | Working |
 | Stream event retention | Planned |
 
 A source being reconciled no longer has its alerts retired by expiry behind its
