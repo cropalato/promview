@@ -14,6 +14,8 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ### Changed
 
+- **auth:** `/api/v1/auth/*` is served by a router of its own rather than by the OIDC handler, and logout moves onto it. Logout is not an OIDC concept — every mode that issues a session has to be able to end one — but the only route that could was owned by the mode, so a second sign-in method would have arrived with no way to sign out. The session manager is built for any mode that is not `open` instead of for OIDC specifically. No route, request or response changed; `POST /api/v1/auth/logout` behaves exactly as before, and a path the active mode does not implement answers 404 as a server that predates the mode would.
+
 - **config:** `PROMVIEW_OIDC_COOKIE_SECURE` is now `PROMVIEW_SESSION_COOKIE_SECURE`, and the Helm chart reads it from `auth.sessionCookieSecure`. The flag was never an OIDC setting — every mode that issues a session writes the same `promview_session` cookie — and naming it after one mode is how a deployment ends up with the flag set for one and not another. The old environment variable and the old `oidc.cookieSecure` value are still honoured when the new names are unset, and are removed in 0.2.0. Where both are set the new name wins.
 
 ### Fixed

@@ -144,13 +144,6 @@ func (handler *OIDCHandler) ServeHTTP(response http.ResponseWriter, request *htt
 			return
 		}
 		handler.callback(response, request)
-	case "/api/v1/auth/logout":
-		if request.Method != http.MethodPost {
-			response.Header().Set("Allow", http.MethodPost)
-			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		handler.logout(response, request)
 	default:
 		http.NotFound(response, request)
 	}
@@ -321,15 +314,6 @@ func (handler *OIDCHandler) exchange(response http.ResponseWriter, request *http
 		"token":     token,
 		"expiresAt": expiresAt.Format(time.RFC3339),
 	})
-}
-
-func (handler *OIDCHandler) logout(response http.ResponseWriter, request *http.Request) {
-	if err := handler.sessions.Revoke(request.Context(), request); err != nil {
-		http.Error(response, "could not end session", http.StatusInternalServerError)
-		return
-	}
-	clearCookie(response, SessionCookieName, "/", handler.cookieSecure)
-	response.WriteHeader(http.StatusNoContent)
 }
 
 func randomToken() (string, error) {

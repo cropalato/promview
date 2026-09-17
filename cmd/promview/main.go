@@ -99,13 +99,19 @@ func run() error {
 			return fmt.Errorf("bootstrap source: %w", err)
 		}
 	}
+	// Open mode issues no session, so it needs neither a session manager nor
+	// any of /api/v1/auth/*. Every other mode needs both, which is why the
+	// manager is built here rather than inside the branch that picks how people
+	// prove who they are.
 	var authenticator auth.Authenticator = auth.OpenAuthenticator{}
 	var authenticationHandler http.Handler
-	if cfg.AuthMode == "oidc" {
+	if cfg.AuthMode != "open" {
 		const sessionTTL = 12 * time.Hour
 		sessionManager := auth.NewSessionManager(store, sessionTTL)
 		authenticator = sessionManager
-		if cfg.AuthMode == "oidc" {
+		routes := auth.RouterConfig{Sessions: sessionManager, CookieSecure: cfg.SessionCookieSecure}
+		switch cfg.AuthMode {
+		case "oidc":
 			discoveryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			provider, err := auth.NewDiscoveredOIDCProvider(discoveryCtx, auth.OIDCProviderConfig{
 				IssuerURL: cfg.OIDCIssuerURL, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
@@ -117,11 +123,12 @@ func run() error {
 			if err != nil {
 				return err
 			}
-			authenticationHandler = auth.NewOIDCHandler(
+			routes.OIDC = auth.NewOIDCHandler(
 				store, store, sessionManager, provider,
 				cfg.SessionCookieSecure, sessionTTL, store,
 			)
 		}
+		authenticationHandler = auth.NewRouter(routes)
 	}
 	// The same client reconciliation reads with; its timeout already bounds one
 	// Alertmanager request, which is the property a silence write needs too.
