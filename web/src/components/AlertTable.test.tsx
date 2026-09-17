@@ -363,3 +363,17 @@ describe('selection', () => {
     );
   });
 });
+
+describe('closed state', () => {
+  it('marks a closed alert so it does not read as an ordinary firing one', () => {
+    render(<AlertTable alerts={[{ ...firingAlert, closed: true }]} />);
+    // Beside the state, not replacing it: the source may still be firing.
+    expect(screen.getByText('firing')).toBeTruthy();
+    expect(screen.getByText('closed')).toBeTruthy();
+  });
+
+  it('says nothing about closing on an open alert', () => {
+    render(<AlertTable alerts={[firingAlert]} />);
+    expect(screen.queryByText('closed')).toBeNull();
+  });
+});

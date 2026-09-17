@@ -211,6 +211,22 @@ pub fn stream_stop(handle: State<'_, StreamHandle>) {
 mod tests {
     use super::*;
 
+    /// The forwarding loop passes the event name through verbatim, so a frame
+    /// the shell has no opinion about still arrives intact. This is the other
+    /// half of the same guarantee the parser makes: nothing between the socket
+    /// and the page filters on the name.
+    #[test]
+    fn a_non_alert_event_is_forwarded_under_its_own_name() {
+        let message = serde_json::to_string(&StreamMessage::Message {
+            event: "stream.gap".to_string(),
+            data: r#"{"resumeFrom":7,"retainedFrom":40}"#.to_string(),
+            id: None,
+        })
+        .unwrap();
+        assert!(message.contains(r#""event":"stream.gap""#));
+        assert!(message.contains(r#"retainedFrom"#));
+    }
+
     #[test]
     fn messages_serialise_with_a_discriminator_the_page_can_switch_on() {
         let open = serde_json::to_string(&StreamMessage::Open).unwrap();
