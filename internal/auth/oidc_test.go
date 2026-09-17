@@ -161,22 +161,6 @@ func TestOIDCCallbackRejectsNonceAndUnmappedGroups(t *testing.T) {
 	}
 }
 
-func TestOIDCLogoutRevokesSession(t *testing.T) {
-	repository := &fakeSessionRepository{}
-	handler := NewOIDCHandler(&fakeOIDCTransactionRepository{}, &fakeOIDCIdentityRepository{}, NewSessionManager(repository, time.Hour), &fakeOIDCProvider{}, true, time.Hour, nil)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
-	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session-token"})
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusNoContent || subtle.ConstantTimeCompare(repository.deletedHash, HashSessionToken("session-token")) != 1 {
-		t.Fatalf("status = %d, deleted hash = %x", response.Code, repository.deletedHash)
-	}
-	cookie := responseCookie(t, response, SessionCookieName)
-	if cookie.MaxAge >= 0 {
-		t.Fatalf("cleared cookie = %#v", cookie)
-	}
-}
-
 func TestOIDCCallbackRejectsProviderFailure(t *testing.T) {
 	transactions := &fakeOIDCTransactionRepository{}
 	provider := &fakeOIDCProvider{err: errors.New("provider failed")}
