@@ -33,6 +33,8 @@ describe('loadRuntimeConfig', () => {
 
     await expect(loadRuntimeConfig(fetchImpl)).resolves.toEqual({
       authMode: 'open',
+      // Open mode gates nothing, so the console never waits for a session.
+      requiresSignIn: false,
       productName: 'Promview',
       // A backend that reports no silence fields predates silencing and cannot
       // serve it, so absent reads as off rather than as enabled.
@@ -52,6 +54,7 @@ describe('loadRuntimeConfig', () => {
 
     await expect(loadRuntimeConfig(fetchImpl)).resolves.toEqual({
       authMode: 'oidc',
+      requiresSignIn: true,
       productName: 'Promview',
       silenceEnabled: false,
       silenceDefaultSeconds: 2 * 60 * 60,
@@ -95,6 +98,13 @@ describe('loadRuntimeConfig', () => {
       silenceDefaultSeconds: 3600,
       silenceMaxSeconds: 3600,
     });
+  });
+
+  it('accepts every mode the server can be running', async () => {
+    for (const authMode of ['open', 'oidc', 'local'] as const) {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ authMode }));
+      await expect(loadRuntimeConfig(fetchImpl)).resolves.toMatchObject({ authMode });
+    }
   });
 
   it('rejects unsupported auth modes', async () => {
@@ -141,6 +151,27 @@ describe('parseRuntimeConfig', () => {
     expect(() => parseRuntimeConfig({ authMode: 'ldap', productName: 'Promview' })).toThrowError(
       /unsupported auth mode/i,
     );
+  });
+});
+
+describe('sign-in requirement', () => {
+  it('takes the server at its word', () => {
+    // The flag is the question the console asks, so a server that says a mode
+    // needs no sign-in is believed over the console's own reading of the mode.
+    expect(parseRuntimeConfig({ authMode: 'local', requiresSignIn: true }).requiresSignIn).toBe(
+      true,
+    );
+    expect(parseRuntimeConfig({ authMode: 'oidc', requiresSignIn: false }).requiresSignIn).toBe(
+      false,
+    );
+  });
+
+  it('reads an older server that omits it from its mode', () => {
+    // Absent must not read as false: the console would then fire
+    // unauthenticated requests forever against a deployment that gates.
+    expect(parseRuntimeConfig({ authMode: 'open' }).requiresSignIn).toBe(false);
+    expect(parseRuntimeConfig({ authMode: 'oidc' }).requiresSignIn).toBe(true);
+    expect(parseRuntimeConfig({ authMode: 'local' }).requiresSignIn).toBe(true);
   });
 });
 

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { SessionError, endSession, loadSession } from '../auth/session';
 import type { NavigateTo, SessionFetch, SessionInfo } from '../auth/session';
-import type { AuthMode } from '../config/runtimeConfig';
 import { onHostSessionChange } from '../config/hostSession';
 
 export type SessionState =
@@ -25,14 +24,25 @@ function toError(value: unknown): Error {
 }
 
 /**
- * Resolves the session for protected deployments. Only OIDC mode calls
- * `/api/v1/me`: open mode keeps its anonymous viewer without an extra
- * request. In OIDC mode the state gates the console — alerts and the live
- * stream must not start until the state is `ready`:
+ * Resolves the session for every deployment.
  *
- * - `unauthenticated` (401) → sign-in link to the OIDC login endpoint;
+ * `/api/v1/me` is asked in all modes, open included: open mode answers 200
+ * with the anonymous principal, so the console learns its own roles from the
+ * server instead of assuming them. A mode-specific short-circuit here is
+ * exactly the thing that would need editing again for the next auth mode.
+ *
+ * Whether the result gates is a separate question, and `requiresSignIn`
+ * answers it: where a deployment demands a sign-in, `unauthenticated` is a
+ * wall and `gated` stays true until a session is verified; where it does not,
+ * the same state is just a resting state and the console loads anyway. The
+ * gating states are:
+ *
+ * - `unauthenticated` (401) → the sign-in gate for the deployment's mode;
  * - `forbidden` (403) → access-denied panel with a sign-out escape;
  * - `error` → retryable session check.
+ *
+ * `undefined` means the runtime config has not arrived yet: nothing is asked,
+ * because the answer would only race the config request.
  *
  * `signOut` revokes the server session and navigates home on success; a
  * failure keeps the session and flips `signOutState` to `error`.
@@ -44,10 +54,12 @@ function toError(value: unknown): Error {
  * other state.
  */
 export function useSession(
-  authMode: AuthMode | undefined,
+  requiresSignIn: boolean | undefined,
   deps: SessionDeps = {},
 ): {
   state: SessionState;
+  /** Whether the console must stay paused until a session is verified. */
+  gated: boolean;
   retry: () => void;
   signOut: () => void;
   signOutState: SignOutState;
@@ -59,7 +71,7 @@ export function useSession(
   const [signOutState, setSignOutState] = useState<SignOutState>('idle');
 
   useEffect(() => {
-    if (authMode !== 'oidc') {
+    if (requiresSignIn === undefined) {
       setState({ status: 'idle' });
       return;
     }
@@ -88,7 +100,7 @@ export function useSession(
     return () => {
       cancelled = true;
     };
-  }, [authMode, attempt, fetchImpl]);
+  }, [requiresSignIn, attempt, fetchImpl]);
 
   const retry = useCallback(() => setAttempt((current) => current + 1), []);
 
@@ -124,5 +136,10 @@ export function useSession(
     setState((current) => (current.status === 'ready' ? { status: 'unauthenticated' } : current));
   }, []);
 
-  return { state, retry, signOut, signOutState, expire };
+  // Only a deployment that demands a sign-in is held back by an unverified
+  // session. Elsewhere the console has always loaded without one, and a failed
+  // or refused /me must not take alerts down with it.
+  const gated = requiresSignIn === true && state.status !== 'ready';
+
+  return { state, gated, retry, signOut, signOutState, expire };
 }

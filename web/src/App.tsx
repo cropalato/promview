@@ -32,6 +32,7 @@ import { FilterBar } from './components/FilterBar';
 import { SeverityStrip } from './components/SeverityStrip';
 import { StatusFooter } from './components/StatusFooter';
 import { AccessPanel } from './components/AccessPanel';
+import { SignInForm } from './components/SignInForm';
 import { TopBar } from './components/TopBar';
 import type { ConnectionState } from './components/TopBar';
 import { PulseMark } from './components/icons';
@@ -69,13 +70,13 @@ export interface AppProps {
 
 /**
  * Console shell for the Alerts route. Boots by fetching the runtime
- * configuration; in OIDC mode it then verifies the session with
- * `GET /api/v1/me` before any alert fetch or stream starts — a 401 gates the
- * console behind a sign-in link, a 403 behind an access-denied panel. A 401
- * from any alert request after boot (session expired) drops back to that
- * same sign-in gate and stops alert/SSE activity. Open mode keeps its
- * anonymous viewer without the extra request. Once unlocked, it pages in
- * firing alerts from
+ * configuration, then asks `GET /api/v1/me` who it is — in every mode, since
+ * open mode answers with the anonymous principal rather than refusing. Where
+ * the deployment requires a sign-in, that answer gates: no alert fetch or
+ * stream starts until it is a session, a 401 shows the sign-in gate for the
+ * deployment's mode and a 403 an access-denied panel. A 401 from any alert
+ * request after boot (session expired) drops back to that same sign-in gate
+ * and stops alert/SSE activity. Once unlocked, it pages in firing alerts from
  * `GET /api/v1/alerts`, keeping the alerts loading and error states inside
  * the console area so the configured shell stays put. After the first ready
  * snapshot it opens the live event stream; stream events coalesce into quiet
@@ -87,23 +88,34 @@ export interface AppProps {
  */
 export default function App({ navigate }: AppProps = {}) {
   const { state: configState, retry: retryConfig } = useRuntimeConfig();
-  const authMode = configState.status === 'ready' ? configState.config.authMode : undefined;
+  // The gate follows what the deployment says it needs, not which mode it
+  // happens to run: every mode but open issues sessions, and the next one the
+  // server grows should gate here without this line being touched again.
+  const requiresSignIn =
+    configState.status === 'ready' ? configState.config.requiresSignIn : undefined;
   const {
     state: sessionState,
+    gated: sessionGated,
     retry: retrySession,
     signOut,
     signOutState,
     expire: expireSession,
-  } = useSession(authMode, { navigate });
+  } = useSession(requiresSignIn, { navigate });
   // Alert fetches and the live stream stay paused until the deployment's auth
-  // requirements are satisfied: config loaded, and — for OIDC — a verified
-  // session. Gating the detail drawer on the same flag keeps deep links from
-  // firing unauthenticated requests. A 401 from any alert request after boot
-  // means the session expired: expire() drops the console back to the OIDC
-  // sign-in gate, which pauses fetches and closes the stream again.
-  const consoleUnlocked =
-    configState.status === 'ready' &&
-    (configState.config.authMode !== 'oidc' || sessionState.status === 'ready');
+  // requirements are satisfied: config loaded, and — where a sign-in is
+  // required — a verified session. Gating the detail drawer on the same flag
+  // keeps deep links from firing unauthenticated requests. A 401 from any
+  // alert request after boot means the session expired: expire() drops the
+  // console back to the sign-in gate, which pauses fetches and closes the
+  // stream again.
+  const consoleUnlocked = configState.status === 'ready' && !sessionGated;
+  // The anonymous principal open mode answers with is not an identity anybody
+  // signed into, so the top bar gets nothing to name or to sign out of: the
+  // control would only ever revoke a session that was never issued.
+  const verifiedSession =
+    sessionState.status === 'ready' && !sessionState.session.anonymous
+      ? sessionState.session
+      : undefined;
 
   // Under a host shell, sign-in goes through the host to the system browser
   // instead of navigating the webview to the identity provider. Pending means
@@ -235,7 +247,9 @@ export default function App({ navigate }: AppProps = {}) {
   // console is unlocked, since an unauthenticated request would just 401.
   const { preferences, update: updatePreferences } = usePreferences(
     consoleUnlocked,
-    authMode === 'oidc',
+    // Server-backed wherever there is a signed-in operator to key a layout
+    // against, which is every mode that asks for a sign-in — not OIDC alone.
+    requiresSignIn === true,
   );
 
   const alertsQuery = useMemo(
@@ -485,17 +499,21 @@ export default function App({ navigate }: AppProps = {}) {
   const appliedFilterText = formatFilter(appliedMatchers);
 
   // The indicator follows the live path end to end: shell sync, session
-  // verification, hard request failures, then the stream itself.
+  // verification, hard request failures, then the stream itself. The session
+  // is on that path only where it gates: elsewhere the identity request is
+  // informational, and reporting Offline because it failed would be a lie
+  // about the alert path, which is working.
+  const sessionOnLivePath = requiresSignIn === true;
   let connection: ConnectionState;
   if (
     configState.status === 'loading' ||
-    sessionState.status === 'loading' ||
+    (sessionOnLivePath && sessionState.status === 'loading') ||
     alertsState.status === 'loading'
   ) {
     connection = 'loading';
   } else if (
     configState.status === 'error' ||
-    sessionState.status === 'error' ||
+    (sessionOnLivePath && sessionState.status === 'error') ||
     alertsState.status === 'error'
   ) {
     connection = 'error';
@@ -516,7 +534,7 @@ export default function App({ navigate }: AppProps = {}) {
         productName={config?.productName ?? DEFAULT_PRODUCT_NAME}
         connection={connection}
         authMode={config?.authMode}
-        session={sessionState.status === 'ready' ? sessionState.session : undefined}
+        session={verifiedSession}
         onSignOut={signOut}
         signOutPending={signOutState === 'pending'}
         notificationOptIn={{
@@ -545,44 +563,57 @@ export default function App({ navigate }: AppProps = {}) {
               Retry connection
             </button>
           </section>
-        ) : configState.config.authMode === 'oidc' && sessionState.status === 'unauthenticated' ? (
+        ) : requiresSignIn === true && sessionState.status === 'unauthenticated' ? (
           <section className="boot" aria-label="Sign in required">
             <PulseMark className="boot-mark" />
             <h1 className="boot-title">Sign in required</h1>
-            <p className="boot-copy">
-              This deployment uses OIDC sign-in. Alerts and the live stream stay paused until you
-              sign in with your identity provider.
-            </p>
-            {hostSignIn !== undefined ? (
+            <p className="boot-copy">Alerts and the live stream stay paused until you sign in.</p>
+            {configState.config.authMode === 'local' ? (
               <>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={startHostSignIn}
-                  disabled={hostSignInPending}
-                >
-                  {hostSignInPending
-                    ? 'Waiting for the browser…'
-                    : 'Sign in with your identity provider'}
-                </button>
-                {hostSignInPending ? (
-                  <p className="boot-copy" role="status">
-                    Finish signing in in the browser window that just opened.
-                  </p>
-                ) : null}
-                {hostSignInError !== null ? (
-                  <p className="boot-copy" role="alert">
-                    Sign-in failed: {hostSignInError}
-                  </p>
-                ) : null}
+                <p className="boot-copy">
+                  This deployment keeps its own accounts. Sign in with the username and password an
+                  administrator gave you.
+                </p>
+                <SignInForm onSignedIn={retrySession} />
               </>
-            ) : (
-              <a className="button" href={apiUrl(OIDC_LOGIN_URL)}>
-                Sign in with your identity provider
-              </a>
+            ) : null}
+            {configState.config.authMode !== 'oidc' ? null : (
+              <>
+                <p className="boot-copy">
+                  This deployment uses OIDC sign-in, so your identity provider does the asking.
+                </p>
+                {hostSignIn !== undefined ? (
+                  <>
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={startHostSignIn}
+                      disabled={hostSignInPending}
+                    >
+                      {hostSignInPending
+                        ? 'Waiting for the browser…'
+                        : 'Sign in with your identity provider'}
+                    </button>
+                    {hostSignInPending ? (
+                      <p className="boot-copy" role="status">
+                        Finish signing in in the browser window that just opened.
+                      </p>
+                    ) : null}
+                    {hostSignInError !== null ? (
+                      <p className="boot-copy" role="alert">
+                        Sign-in failed: {hostSignInError}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <a className="button" href={apiUrl(OIDC_LOGIN_URL)}>
+                    Sign in with your identity provider
+                  </a>
+                )}
+              </>
             )}
           </section>
-        ) : configState.config.authMode === 'oidc' && sessionState.status === 'forbidden' ? (
+        ) : requiresSignIn === true && sessionState.status === 'forbidden' ? (
           <section className="boot boot-error" role="alert" aria-label="Access denied">
             <PulseMark className="boot-mark" />
             <h1 className="boot-title boot-error-title">This account has no read access</h1>
@@ -599,7 +630,7 @@ export default function App({ navigate }: AppProps = {}) {
               {signOutState === 'pending' ? 'Signing out…' : 'Sign out'}
             </button>
           </section>
-        ) : configState.config.authMode === 'oidc' && sessionState.status === 'error' ? (
+        ) : requiresSignIn === true && sessionState.status === 'error' ? (
           <section className="boot boot-error" role="alert" aria-label="Session error">
             <PulseMark className="boot-mark" />
             <h1 className="boot-title boot-error-title">Cannot verify your session</h1>
@@ -608,7 +639,7 @@ export default function App({ navigate }: AppProps = {}) {
               Retry session check
             </button>
           </section>
-        ) : configState.config.authMode === 'oidc' && sessionState.status !== 'ready' ? (
+        ) : requiresSignIn === true && sessionState.status !== 'ready' ? (
           <section className="boot boot-loading" aria-label="Loading">
             <PulseMark className="boot-mark" />
             <h1 className="boot-title">Verifying your session</h1>

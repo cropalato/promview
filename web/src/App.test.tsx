@@ -10,6 +10,17 @@ const OPEN_CONFIG = { authMode: 'open', productName: 'Promview' };
 
 const OIDC_CONFIG = { authMode: 'oidc', productName: 'Promview' };
 
+const LOCAL_CONFIG = { authMode: 'local', requiresSignIn: true, productName: 'Promview' };
+
+/** What open mode answers /api/v1/me with: a reader, not a session. */
+const ANONYMOUS_PRINCIPAL = {
+  subject: 'anonymous',
+  email: '',
+  displayName: '',
+  roles: ['viewer'],
+  anonymous: true,
+};
+
 const OIDC_PRINCIPAL = {
   subject: 'https://idp.example|user-1',
   email: 'ada@example.com',
@@ -121,13 +132,21 @@ function alertsPage(overrides: Record<string, unknown> = {}): Record<string, unk
   };
 }
 
-/** Routes the fetch mock: the config endpoint gets OPEN_CONFIG, alerts get the page. */
+/**
+ * Routes the fetch mock: alerts get the page, `/api/v1/me` the anonymous
+ * principal open mode grants every reader, everything else the config.
+ */
 function mockApi(page: unknown = alertsPage(), config: unknown = OPEN_CONFIG): void {
-  fetchMock().mockImplementation((url: string) =>
-    Promise.resolve(
-      String(url).startsWith('/api/v1/alerts') ? jsonResponse(page) : jsonResponse(config),
-    ),
-  );
+  fetchMock().mockImplementation((url: string) => {
+    const target = String(url);
+    if (target.startsWith('/api/v1/alerts')) {
+      return Promise.resolve(jsonResponse(page));
+    }
+    if (target === '/api/v1/me') {
+      return Promise.resolve(jsonResponse(ANONYMOUS_PRINCIPAL));
+    }
+    return Promise.resolve(jsonResponse(config));
+  });
 }
 
 /**
@@ -314,18 +333,79 @@ describe('App', () => {
 
     expect(await screen.findByText('Connected')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: /all clear/i })).toBeInTheDocument();
-    expect(fetchMock()).toHaveBeenCalledTimes(3);
+    // The failed config request, then config, /me and the first alert page.
+    expect(fetchMock()).toHaveBeenCalledTimes(4);
   });
 
-  it('never requests the session in open mode', async () => {
+  it('asks who it is in open mode too, without waiting for the answer', async () => {
     mockApi();
     render(<App />);
 
     expect(await screen.findByText('Connected')).toBeInTheDocument();
+    // The roles an open deployment grants are the server's to state, so the
+    // console asks rather than assuming — but the answer gates nothing here,
+    // so alerts load alongside it instead of behind it.
     expect(fetchMock().mock.calls.map(([url]) => String(url))).toEqual([
       '/api/v1/config',
+      '/api/v1/me',
       '/api/v1/alerts?limit=100&status=firing',
     ]);
+    // No layout preferences: open mode has no user to key them against.
+    expect(fetchMock()).not.toHaveBeenCalledWith('/api/v1/preferences');
+  });
+
+  it('offers no sign-out for the anonymous reader open mode grants', async () => {
+    mockApi();
+    render(<App />);
+
+    const banner = screen.getByRole('banner');
+    expect(await within(banner).findByText('Anonymous viewer')).toBeInTheDocument();
+    // There is no session behind the anonymous principal, so the control
+    // could only ever revoke something that was never issued.
+    expect(within(banner).queryByRole('button', { name: /sign out/i })).toBeNull();
+  });
+
+  it('gates local deployments behind a username and password form', async () => {
+    let signedIn = false;
+    fetchMock().mockImplementation((url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target === '/api/v1/auth/login') {
+        signedIn = true;
+        expect(JSON.parse(String(init?.body))).toEqual({ username: 'ada', password: 'hunter2' });
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (target === '/api/v1/me') {
+        return Promise.resolve(
+          signedIn
+            ? jsonResponse(OIDC_PRINCIPAL)
+            : jsonResponse({ error: 'authentication required' }, 401),
+        );
+      }
+      if (target === '/api/v1/preferences') {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage()));
+      }
+      return Promise.resolve(jsonResponse(LOCAL_CONFIG));
+    });
+    render(<App />);
+
+    const gate = await screen.findByRole('region', { name: /sign in required/i });
+    // The OIDC copy would be a lie here, and the provider button would go
+    // nowhere: this deployment keeps the accounts itself.
+    expect(gate).not.toHaveTextContent(/identity provider/i);
+    expect(alertCalls()).toEqual([]);
+
+    fireEvent.change(within(gate).getByLabelText('Username'), { target: { value: 'ada' } });
+    fireEvent.change(within(gate).getByLabelText('Password'), { target: { value: 'hunter2' } });
+    fireEvent.click(within(gate).getByRole('button', { name: 'Sign in' }));
+
+    // The cookie is the server's to set; the console unlocks only once the
+    // re-checked session says so.
+    expect(await screen.findByRole('heading', { level: 1, name: 'Alerts' })).toBeInTheDocument();
+    expect(await within(screen.getByRole('banner')).findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(alertCalls()).toEqual(['/api/v1/alerts?limit=100&status=firing']);
   });
 
   it('gates oidc deployments behind a sign-in link when there is no session', async () => {

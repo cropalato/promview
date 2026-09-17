@@ -31,7 +31,7 @@ const PRINCIPAL = {
 };
 
 describe('useSession', () => {
-  it('stays idle without a /me request while the auth mode is unknown', async () => {
+  it('stays idle without a /me request while the deployment is unknown', async () => {
     const fetchImpl = vi.fn();
     const { result } = renderHook(() => useSession(undefined, { fetchImpl }));
 
@@ -41,19 +41,36 @@ describe('useSession', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('stays idle without a /me request in open mode', async () => {
-    const fetchImpl = vi.fn();
-    const { result } = renderHook(() => useSession('open', { fetchImpl }));
+  it('asks who it is even where no sign-in is required', async () => {
+    // Open mode answers 200 with the anonymous principal, so the console
+    // learns its own roles from the server instead of assuming them.
+    const anonymous = { subject: 'anonymous', roles: ['viewer'], anonymous: true };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(anonymous));
+    const { result } = renderHook(() => useSession(false, { fetchImpl }));
 
-    await act(async () => {});
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
 
-    expect(result.current.state).toEqual({ status: 'idle' });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledWith('/api/v1/me');
+    expect(result.current.gated).toBe(false);
   });
 
-  it('verifies the session in oidc mode', async () => {
+  it('gates the console on a 401 only where a sign-in is required', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ error: 'nope' }, 401));
+
+    const gated = renderHook(() => useSession(true, { fetchImpl }));
+    await waitFor(() => expect(gated.result.current.state.status).toBe('unauthenticated'));
+    expect(gated.result.current.gated).toBe(true);
+
+    // Same refusal, open deployment: the console has always loaded without a
+    // session there, and a failed /me must not take alerts down with it.
+    const ungated = renderHook(() => useSession(false, { fetchImpl }));
+    await waitFor(() => expect(ungated.result.current.state.status).toBe('unauthenticated'));
+    expect(ungated.result.current.gated).toBe(false);
+  });
+
+  it('verifies the session where a sign-in is required', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(PRINCIPAL));
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl }));
 
     expect(result.current.state).toEqual({ status: 'loading' });
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
@@ -74,14 +91,14 @@ describe('useSession', () => {
 
   it('maps a 401 to the unauthenticated gate', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ error: 'nope' }, 401));
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl }));
 
     await waitFor(() => expect(result.current.state).toEqual({ status: 'unauthenticated' }));
   });
 
   it('maps a 403 to the forbidden gate', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ error: 'nope' }, 403));
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl }));
 
     await waitFor(() => expect(result.current.state).toEqual({ status: 'forbidden' }));
   });
@@ -91,7 +108,7 @@ describe('useSession', () => {
       .fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
       .mockResolvedValue(jsonResponse(PRINCIPAL));
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl }));
 
     await waitFor(() => expect(result.current.state.status).toBe('error'));
 
@@ -103,7 +120,7 @@ describe('useSession', () => {
 
   it('drops a verified session back to the unauthenticated gate on expire', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(PRINCIPAL));
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl }));
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
     act(() => result.current.expire());
@@ -113,7 +130,7 @@ describe('useSession', () => {
 
   it('ignores expire when no session is verified', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ error: 'nope' }, 401));
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl }));
 
     await waitFor(() => expect(result.current.state).toEqual({ status: 'unauthenticated' }));
     act(() => result.current.expire());
@@ -127,7 +144,7 @@ describe('useSession', () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ error: 'nope' }, 401))
       .mockResolvedValue(jsonResponse(PRINCIPAL));
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl }));
 
     await waitFor(() => expect(result.current.state).toEqual({ status: 'unauthenticated' }));
 
@@ -141,7 +158,7 @@ describe('useSession', () => {
   it('drops a verified session back to the gate when the host announces a sign-out', async () => {
     const announce = installAnnouncingHost();
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(PRINCIPAL));
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl }));
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
     act(() => announce({ kind: 'signedOut' }));
@@ -160,7 +177,7 @@ describe('useSession', () => {
         ),
       );
     const navigate = vi.fn();
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl, navigate }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl, navigate }));
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
     act(() => result.current.signOut());
@@ -180,7 +197,7 @@ describe('useSession', () => {
         ),
       );
     const navigate = vi.fn();
-    const { result } = renderHook(() => useSession('oidc', { fetchImpl, navigate }));
+    const { result } = renderHook(() => useSession(true, { fetchImpl, navigate }));
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
     act(() => result.current.signOut());
