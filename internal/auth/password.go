@@ -6,17 +6,19 @@ package auth
 //
 // Argon2id would be the better choice on the merits: it is memory-hard, and
 // PBKDF2 is not, so a GPU or an ASIC recovers a PBKDF2 password far faster per
-// dollar. That matters if local_credentials is ever stolen. Argon2id lives in
-// golang.org/x/crypto, which this module deliberately dropped after carrying
-// critical advisories, and the standard library has no memory-hard KDF at all.
+// dollar. That matters if local_credentials is ever stolen.
 //
-// Re-adding an entire module permanently, for one function, is a decision worth
-// arguing on its own terms rather than making as a side effect of shipping a
-// login form - particularly here, where the attacker who has the credentials
-// table also has every Alertmanager bearer token in `sources` and every live
-// session hash, and so has no need to crack anything. If that calculus changes,
-// the stored format carries its own algorithm name and adding $argon2id$ is an
-// addition rather than a migration.
+// The standard library has no memory-hard KDF, so Argon2id would mean taking
+// golang.org/x/crypto as a direct dependency and compiling it in. It is in the
+// module graph already, as something a dependency depends on, but no package
+// this binary builds imports it today.
+//
+// That trade is not obviously worth making at this scale. These are a handful
+// of operator accounts, and the attacker holding the credentials table also
+// holds every Alertmanager bearer token in `sources` and every live session
+// hash from the same database, so cracking a password buys access they already
+// have. If that calculus changes, the stored format carries its own algorithm
+// name and adding $argon2id$ is an addition rather than a migration.
 
 import (
 	"crypto/pbkdf2"
