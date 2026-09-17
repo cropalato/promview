@@ -92,6 +92,16 @@ func TestLoadRejectsInsecureRemoteOIDCConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsUnknownAuthMode(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_AUTH_MODE", "kerberos")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want error")
+	}
+}
+
+// Deleted when LDAP ships. Until then it is what keeps the mode from being
+// accepted by a binary that cannot serve it.
 func TestLoadRejectsLDAPMode(t *testing.T) {
 	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
 	t.Setenv("PROMVIEW_AUTH_MODE", "ldap")
