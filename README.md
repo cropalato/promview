@@ -644,8 +644,9 @@ only signal — a source with no Alertmanager URL, or one that cannot be reached
   most likely to find a problem first.
 - **Binding administration has no console UI.** The API exists and the CLI
   exists; the console does not offer either, so granting access is a `curl`.
-- **`cmd/promview` is the thinnest-tested package**, at 58% statement coverage —
-  the expiry, reconcile and pruning loops.
+- **`main` and `run` are untested**, as is the wrapper that records a created
+  silence's provenance. They are process wiring and a database passthrough; the
+  loops around them — expiry, reconciliation and stream pruning — are covered.
 
 Issues and discussion are welcome. Beta means the feature set is settled and the
 gaps above are written down, not that this has been proven in production; real

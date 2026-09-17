@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **testing:** the sweep loops and instrumented wrappers in `cmd/promview` have tests. Stream pruning had none at all: the loop that keeps stream events from growing without bound was never exercised, including the zero-disables escape hatch and the rule that a failed prune must not end the loop — a loop that quietly stopped would leave the table growing while the server looked healthy. Lifting a silence had no test for the refresh it triggers, which is the half with more at stake than creating one, because removal puts alerts back on screen and the operator who lifted it is watching for exactly that. The counting silencer had none either, and its counter is the only thing that ever reports a silence failing to reach an Alertmanager. `poolSnapshot` is pure adaptation from the driver's statistics, where a field mapped to the wrong getter would misreport the pool with nothing failing. Mean function coverage in the package went from 58% to 76%, and the wholly untested functions from eight to three: `main`, `run`, and a database passthrough.
+
 ### Fixed
 
 - **packaging:** releases are published as pre-releases. `gh release create` was never told, so every release since the first was marked stable and took GitHub's Latest badge — including `0.1.0-beta.1`, which was presented as a stable release while its own notes, the README and the Docker Hub listing all said otherwise. The workflow now passes `--prerelease` for any tag carrying a semver pre-release suffix, and the seventeen existing releases were corrected. With none of them stable there is no Latest badge until the first release without a suffix, which is the honest state of a pre-1.0 project.
