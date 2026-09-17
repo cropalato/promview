@@ -147,7 +147,9 @@ func run() error {
 					BindDN: cfg.LDAPBindDN, BindPassword: cfg.LDAPBindPassword,
 					BaseDN: cfg.LDAPBaseDN, UserFilter: cfg.LDAPUserFilter,
 					GroupAttribute: cfg.LDAPGroupAttribute, GroupFormat: cfg.LDAPGroupFormat,
-					UsernameAttr: cfg.LDAPUsernameAttr, EmailAttr: cfg.LDAPEmailAttr,
+					GroupBaseDN: cfg.LDAPGroupBaseDN, GroupFilter: cfg.LDAPGroupFilter,
+					GroupNameAttribute: cfg.LDAPGroupNameAttr,
+					UsernameAttr:       cfg.LDAPUsernameAttr, EmailAttr: cfg.LDAPEmailAttr,
 					DisplayNameAttr: cfg.LDAPDisplayNameAttr,
 					StartTLS:        cfg.LDAPStartTLS, Timeout: cfg.LDAPTimeout,
 				})

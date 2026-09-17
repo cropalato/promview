@@ -61,9 +61,9 @@ export function AccessPanel({ onClose }: { onClose: () => void }) {
       </header>
 
       <p className="access-copy">
-        A binding grants a role to an OIDC group or a user, optionally narrowed to a label scope.
-        Roles and scopes are enforced in SQL on every query, count and stream, so a scoped viewer
-        cannot see outside it. Changes take effect on existing sessions immediately.
+        A binding grants a role to an OIDC group, an LDAP group, or a user, optionally narrowed to a
+        label scope. Roles and scopes are enforced in SQL on every query, count and stream, so a
+        scoped viewer cannot see outside it. Changes take effect on existing sessions immediately.
       </p>
 
       {error !== null ? (
@@ -153,7 +153,35 @@ function describeSubject(binding: RoleBinding): string {
   if (binding.subjectKind === 'user') {
     return `user ${binding.userID ?? 0}`;
   }
+  // Both group kinds read as the group at the directory it comes from. The
+  // issuer's scheme is what tells an OIDC binding from an LDAP one, so naming
+  // the kind as well would only repeat what the URL already says.
   return `${binding.subjectGroup ?? ''} @ ${binding.subjectIssuer ?? ''}`;
+}
+
+/**
+ * Which issuer schemes each group kind accepts. The server refuses the other
+ * pairing outright, and it is right to: a binding whose scheme contradicts its
+ * kind can never match anybody, yet it sits in the list looking exactly like
+ * access somebody has — worse than an issuer that is obviously wrong, because
+ * nobody goes looking. Checking here is guidance so the mistake is caught while
+ * it is still being typed; the server stays the authority.
+ */
+const ISSUER_SCHEMES: Record<'oidc_group' | 'ldap_group', readonly string[]> = {
+  oidc_group: ['http://', 'https://'],
+  ldap_group: ['ldap://', 'ldaps://'],
+};
+
+function issuerSchemeProblem(kind: 'oidc_group' | 'ldap_group', issuer: string): string | null {
+  const schemes = ISSUER_SCHEMES[kind];
+  const value = issuer.trim().toLowerCase();
+  if (schemes.some((scheme) => value.startsWith(scheme))) {
+    return null;
+  }
+  const wanted = schemes.join(' or ');
+  return kind === 'ldap_group'
+    ? `An LDAP group binding needs an issuer starting with ${wanted}`
+    : `An OIDC group binding needs an issuer starting with ${wanted}`;
 }
 
 function BindingForm({
@@ -181,6 +209,13 @@ function BindingForm({
     if (matchers === null) {
       onError('Scope must be comma-separated clauses like team=platform or host=~^web');
       return;
+    }
+    if (subjectKind !== 'user') {
+      const problem = issuerSchemeProblem(subjectKind, issuer);
+      if (problem !== null) {
+        onError(problem);
+        return;
+      }
     }
     setPending(true);
     saveRoleBinding({
@@ -229,6 +264,7 @@ function BindingForm({
           onChange={(event) => setSubjectKind(event.target.value as SubjectKind)}
         >
           <option value="oidc_group">OIDC group</option>
+          <option value="ldap_group">LDAP group</option>
           <option value="user">Promview user</option>
         </select>
       </label>
@@ -248,7 +284,11 @@ function BindingForm({
             <input
               className="access-input"
               value={issuer}
-              placeholder="https://identity.example.com"
+              placeholder={
+                subjectKind === 'ldap_group'
+                  ? 'ldaps://directory.example.com'
+                  : 'https://identity.example.com'
+              }
               onChange={(event) => setIssuer(event.target.value)}
             />
           </label>

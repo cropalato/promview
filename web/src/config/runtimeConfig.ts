@@ -7,7 +7,7 @@
  */
 import { apiUrl } from './apiBase';
 import { apiFetch } from './transport';
-export type AuthMode = 'open' | 'oidc' | 'local';
+export type AuthMode = 'open' | 'oidc' | 'local' | 'ldap';
 
 export interface RuntimeConfig {
   authMode: AuthMode;
@@ -52,7 +52,7 @@ export const RUNTIME_CONFIG_URL = '/api/v1/config';
 // value from outside this list means the deployment is broken, not that the
 // console is old — and guessing would gate, or fail to gate, on an auth model
 // nobody here has seen.
-const AUTH_MODES: readonly AuthMode[] = ['open', 'oidc', 'local'];
+const AUTH_MODES: readonly AuthMode[] = ['open', 'oidc', 'local', 'ldap'];
 const DEFAULT_PRODUCT_NAME = 'Promview';
 // Mirrors the server's own defaults, used only when an older backend does not
 // report them. Two hours, capped at thirty days.

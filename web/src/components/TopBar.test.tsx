@@ -12,6 +12,7 @@ describe('TopBar', () => {
       open: 'Open access',
       oidc: 'OIDC',
       local: 'Local accounts',
+      ldap: 'LDAP',
     };
 
     for (const [authMode, label] of Object.entries(labels)) {

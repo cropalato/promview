@@ -10,8 +10,8 @@ import { apiFetch } from '../config/transport';
 
 export const BINDINGS_URL = '/api/v1/access/bindings';
 
-/** Who a binding grants to: a Promview user, or an OIDC group. */
-export type SubjectKind = 'user' | 'oidc_group';
+/** Who a binding grants to: a Promview user, an OIDC group, or an LDAP group. */
+export type SubjectKind = 'user' | 'oidc_group' | 'ldap_group';
 
 export type BindingRole = 'viewer' | 'operator' | 'administrator';
 
@@ -65,6 +65,15 @@ function parseMatchers(value: unknown): BindingMatcher[] {
   return matchers;
 }
 
+/**
+ * Reads each kind as itself. Folding anything unfamiliar into `oidc_group`
+ * would label an LDAP binding as an OIDC one, and that label is what an
+ * administrator reads to decide whether a binding grants anything.
+ */
+function parseSubjectKind(value: unknown): SubjectKind {
+  return value === 'user' || value === 'ldap_group' ? value : 'oidc_group';
+}
+
 function parseBinding(value: unknown): RoleBinding | null {
   if (typeof value !== 'object' || value === null) {
     return null;
@@ -79,7 +88,7 @@ function parseBinding(value: unknown): RoleBinding | null {
   }
   return {
     name: raw.name,
-    subjectKind: raw.subjectKind === 'user' ? 'user' : 'oidc_group',
+    subjectKind: parseSubjectKind(raw.subjectKind),
     userID: typeof raw.userID === 'number' ? raw.userID : undefined,
     subjectIssuer: typeof raw.subjectIssuer === 'string' ? raw.subjectIssuer : undefined,
     subjectGroup: typeof raw.subjectGroup === 'string' ? raw.subjectGroup : undefined,

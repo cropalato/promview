@@ -13,6 +13,7 @@ import type { AlertSummary } from './alerts/types';
 import type { AlertGroupSummary } from './alerts/api';
 import { OIDC_LOGIN_URL, canAdminister, canOperate } from './auth/session';
 import { apiUrl } from './config/apiBase';
+import type { AuthMode } from './config/runtimeConfig';
 import { getHostSignIn } from './config/hostSession';
 import type { NavigateTo } from './auth/session';
 import { AlertDetailDrawer } from './components/AlertDetailDrawer';
@@ -57,6 +58,15 @@ import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import { useSession } from './hooks/useSession';
 
 const DEFAULT_PRODUCT_NAME = 'Promview';
+
+/**
+ * Modes that sign in with a username and password posted to
+ * `/api/v1/auth/login`. Where the password is checked differs — local against
+ * its own accounts, ldap against a directory — but the console's side of both
+ * is the same form, so the gate asks what a mode needs rather than naming the
+ * one mode it happened to be written for.
+ */
+const CREDENTIAL_AUTH_MODES: readonly AuthMode[] = ['local', 'ldap'];
 
 const NO_ALERTS: readonly AlertSummary[] = [];
 
@@ -568,11 +578,12 @@ export default function App({ navigate }: AppProps = {}) {
             <PulseMark className="boot-mark" />
             <h1 className="boot-title">Sign in required</h1>
             <p className="boot-copy">Alerts and the live stream stay paused until you sign in.</p>
-            {configState.config.authMode === 'local' ? (
+            {CREDENTIAL_AUTH_MODES.includes(configState.config.authMode) ? (
               <>
                 <p className="boot-copy">
-                  This deployment keeps its own accounts. Sign in with the username and password an
-                  administrator gave you.
+                  {configState.config.authMode === 'ldap'
+                    ? 'This deployment checks your credentials against its directory. Sign in with your directory username and password.'
+                    : 'This deployment keeps its own accounts. Sign in with the username and password an administrator gave you.'}
                 </p>
                 <SignInForm onSignedIn={retrySession} />
               </>
