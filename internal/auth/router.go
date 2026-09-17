@@ -13,16 +13,19 @@ import (
 type Router struct {
 	sessions     *SessionManager
 	cookieSecure bool
-	// oidc is nil in every mode but oidc. A path with no handler behind it
-	// answers 404, which is what a server that predates the mode would do, and
-	// is a truer answer than a 501 the console has no way to act on.
-	oidc *OIDCHandler
+	// oidc is nil in every mode but oidc, and credentials in every mode but
+	// local and ldap. A path with no handler behind it answers 404, which is
+	// what a server that predates the mode would do, and is a truer answer than
+	// a 501 the console has no way to act on.
+	oidc        *OIDCHandler
+	credentials *CredentialHandler
 }
 
 type RouterConfig struct {
 	Sessions     *SessionManager
 	CookieSecure bool
 	OIDC         *OIDCHandler
+	Credentials  *CredentialHandler
 }
 
 func NewRouter(config RouterConfig) *Router {
@@ -30,6 +33,7 @@ func NewRouter(config RouterConfig) *Router {
 		sessions:     config.Sessions,
 		cookieSecure: config.CookieSecure,
 		oidc:         config.OIDC,
+		credentials:  config.Credentials,
 	}
 }
 
@@ -41,6 +45,10 @@ func (router *Router) ServeHTTP(response http.ResponseWriter, request *http.Requ
 			return
 		}
 		router.logout(response, request)
+		return
+	}
+	if router.credentials != nil && request.URL.Path == "/api/v1/auth/login" {
+		router.credentials.ServeHTTP(response, request)
 		return
 	}
 	if router.oidc != nil {

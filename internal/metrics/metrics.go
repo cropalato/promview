@@ -74,6 +74,9 @@ type Metrics struct {
 	silenceRemovals *prometheus.CounterVec
 	silenceRecords  *prometheus.CounterVec
 
+	loginAttempts *prometheus.CounterVec
+	loginDuration *prometheus.HistogramVec
+
 	streamClients    prometheus.Gauge
 	streamPolls      prometheus.Counter
 	streamEventsSent prometheus.Counter
@@ -110,6 +113,22 @@ func New(version string) *Metrics {
 			Name: "promview_reconcile_last_success_timestamp_seconds",
 			Help: "When each source last reconciled successfully, in seconds since the epoch.",
 		}, []string{"source"}),
+		loginAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			// Brute force against an endpoint nobody counts is invisible: the
+			// server stays healthy, the logs stay quiet, and the only trace is
+			// a spike in a series that does not exist. Labelled by mode so an
+			// LDAP deployment can see that promview is the thing filling its
+			// directory's lockout counters.
+			Name: "promview_login_attempts_total",
+			Help: "Sign-in attempts, by authentication mode and outcome.",
+		}, []string{"mode", "result"}),
+		loginDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			// Password derivation is deliberately expensive, so this is also
+			// the saturation signal for the login endpoint.
+			Name:    "promview_login_duration_seconds",
+			Help:    "Time to answer a sign-in attempt, by authentication mode.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"mode"}),
 		silenceWrites: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "promview_silence_writes_total",
 			Help: "Silences promview tried to create, by Alertmanager and outcome.",
@@ -178,6 +197,8 @@ func New(version string) *Metrics {
 		m.httpDuration,
 		m.reconcileRuns,
 		m.reconcileLastSuccess,
+		m.loginAttempts,
+		m.loginDuration,
 		m.silenceWrites,
 		m.silenceRemovals,
 		m.silenceRecords,
@@ -238,6 +259,26 @@ func (m *Metrics) ReconcileFailed(source, reason string) {
 }
 
 // SilenceWritten records an attempt to create a silence on an Alertmanager.
+// Outcomes of a sign-in attempt. A closed set because they are label values,
+// and because the distinction an operator needs is between somebody guessing,
+// somebody locked out, and the directory being broken.
+const (
+	LoginSucceeded = "success"
+	LoginInvalid   = "invalid"
+	LoginThrottled = "throttled"
+	LoginDenied    = "denied"
+	LoginError     = "error"
+)
+
+// LoginAttempted records one sign-in attempt and how long answering it took.
+func (m *Metrics) LoginAttempted(mode, result string, elapsed time.Duration) {
+	if m == nil {
+		return
+	}
+	m.loginAttempts.WithLabelValues(mode, result).Inc()
+	m.loginDuration.WithLabelValues(mode).Observe(elapsed.Seconds())
+}
+
 func (m *Metrics) SilenceWritten(alertmanager string, err error) {
 	if m == nil {
 		return
