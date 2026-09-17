@@ -58,7 +58,7 @@ The current implementation provides:
 - bulk acknowledge, assign, close and note over an explicit selection, reported per alert
 - stream event retention with a watermark, and a `stream.gap` signal for clients resuming past it
 
-Authorization administration APIs remain planned work. The console can display an assignee and a note count but has no controls to assign, close, or add a note yet, and does not act on the `stream.gap` signal; those are client-side work against APIs that already exist.
+Authorization administration APIs remain planned work. The console can now assign, close and note from the alert drawer, reach closed alerts through an Open/Closed filter, and re-snapshot when the stream reports a retention gap. What remains client-side is row selection and a bulk action bar: the bulk endpoints exist and are reachable only by hand until they have one.
 
 ## Goals
 
