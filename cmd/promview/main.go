@@ -107,6 +107,10 @@ func run() error {
 	// prove who they are.
 	var authenticator auth.Authenticator = auth.OpenAuthenticator{}
 	var authenticationHandler http.Handler
+	// Non-nil only in the modes that check credentials. Its buckets are keyed
+	// by attacker-chosen usernames, so it has to be swept or it is a way to
+	// spend this process's memory from outside it.
+	var loginLimiter *auth.LoginLimiter
 	if cfg.AuthMode != "open" {
 		const sessionTTL = 12 * time.Hour
 		sessionManager := auth.NewSessionManager(store, sessionTTL)
@@ -129,6 +133,18 @@ func run() error {
 				store, store, sessionManager, provider,
 				cfg.SessionCookieSecure, sessionTTL, store,
 			)
+		case "local":
+			directory, err := auth.NewLocalDirectory(store)
+			if err != nil {
+				return err
+			}
+			loginLimiter = auth.NewLoginLimiter(auth.LoginLimiterConfig{})
+			routes.Credentials = auth.NewCredentialHandler(auth.CredentialHandlerConfig{
+				Mode: cfg.AuthMode, Verifier: directory, Identities: store,
+				Sessions: sessionManager, Limiter: loginLimiter,
+				CookieSecure: cfg.SessionCookieSecure, SessionTTL: sessionTTL,
+				DesktopCodes: store, Observe: instruments.LoginAttempted,
+			})
 		}
 		authenticationHandler = auth.NewRouter(routes)
 	}
@@ -208,6 +224,12 @@ func run() error {
 		runStreamPruning(ctx, store, instruments, cfg.StreamRetention, cfg.AlertExpiryInterval)
 	}()
 
+	limiterDone := make(chan struct{})
+	go func() {
+		defer close(limiterDone)
+		runLoginLimiterSweeps(ctx, loginLimiter, cfg.AlertExpiryInterval)
+	}()
+
 	reconcileDone := make(chan struct{})
 	go func() {
 		defer close(reconcileDone)
@@ -237,6 +259,7 @@ func run() error {
 		}
 		<-sweepDone
 		<-pruneDone
+		<-limiterDone
 		<-reconcileDone
 		<-refreshDone
 		return err
@@ -293,6 +316,32 @@ func runStreamPruning(
 // loop can be tested without a database.
 type expiryStore interface {
 	ExpireStaleAlerts(ctx context.Context, defaultStaleAfter time.Duration, now time.Time) (int, error)
+}
+
+// runLoginLimiterSweeps drops rate-limit buckets nobody has touched.
+//
+// Not housekeeping: the buckets are keyed by usernames an unauthenticated
+// caller chooses, so a limiter that is never swept is a way to spend this
+// process's memory from outside it. A nil limiter means a mode that checks no
+// credentials, and there is nothing to sweep.
+func runLoginLimiterSweeps(ctx context.Context, limiter *auth.LoginLimiter, interval time.Duration) {
+	if limiter == nil || interval <= 0 {
+		return
+	}
+	// Idle for an hour is far past any budget's refill, so a swept bucket is
+	// always one that had refilled to full anyway and carried no state worth
+	// keeping.
+	const idle = time.Hour
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			limiter.Sweep(idle)
+		}
+	}
 }
 
 // runExpirySweeps marks alerts whose source went quiet as expired, on a ticker,

@@ -66,8 +66,14 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $sourceTokenKey := required "bootstrapSource.tokenKey is required when bootstrapSource.enabled=true" .Values.bootstrapSource.tokenKey -}}
 {{- end -}}
 {{- if .Values.roleBindings -}}
+{{- /*
+  roleBindings here name a directory group, which only a directory mode has.
+  Local accounts are bound by user ID, and an ID is assigned when the account is
+  created - so a values file cannot know one, and `promview access set` is the
+  only place that can.
+*/ -}}
 {{- if ne .Values.auth.mode "oidc" -}}
-{{- fail "roleBindings require auth.mode=oidc" -}}
+{{- fail "roleBindings name a directory group and require auth.mode=oidc; bind local accounts with `promview access set --user-id`" -}}
 {{- end -}}
 {{- range .Values.roleBindings -}}
 {{- if and (eq .role "administrator") .selectors -}}

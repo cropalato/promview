@@ -69,7 +69,8 @@
           "type": "string",
           "enum": [
             "open",
-            "oidc"
+            "oidc",
+            "local"
           ]
         },
         "sessionCookieSecure": {

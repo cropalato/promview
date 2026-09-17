@@ -110,6 +110,39 @@ func TestLoadRejectsLDAPMode(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsLocalMode(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_AUTH_MODE", "local")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SessionCookieSecure {
+		t.Fatal("SessionCookieSecure = false by default")
+	}
+}
+
+// An insecure cookie on a published listener is a sign-in that appears to work
+// and then does not stick, which reads as a broken console rather than as the
+// misconfiguration it is.
+func TestLoadRejectsAnInsecureCookieOnAPublishedListener(t *testing.T) {
+	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
+	t.Setenv("PROMVIEW_AUTH_MODE", "local")
+	t.Setenv("PROMVIEW_SESSION_COOKIE_SECURE", "false")
+	for _, listen := range []string{":8080", "0.0.0.0:8080", "promview.example.com:8080"} {
+		t.Setenv("PROMVIEW_LISTEN_ADDRESS", listen)
+		if _, err := Load(); err == nil {
+			t.Fatalf("listening on %q with an insecure cookie was accepted", listen)
+		}
+	}
+	for _, listen := range []string{"127.0.0.1:8080", "localhost:8080", "[::1]:8080"} {
+		t.Setenv("PROMVIEW_LISTEN_ADDRESS", listen)
+		if _, err := Load(); err != nil {
+			t.Fatalf("listening on %q with an insecure cookie was refused: %v", listen, err)
+		}
+	}
+}
+
 func TestLoadAlertExpiryDefaults(t *testing.T) {
 	t.Setenv("PROMVIEW_DATABASE_URL", "postgres://example")
 	cfg, err := Load()

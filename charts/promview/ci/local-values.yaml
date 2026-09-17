@@ -1,0 +1,8 @@
+# Local accounts: no external identity provider, and nothing to point at.
+# Accounts and their bindings are created with `promview user` and
+# `promview access set`, so there is nothing here to declare but the mode.
+auth:
+  mode: local
+
+database:
+  existingSecret: promview-database

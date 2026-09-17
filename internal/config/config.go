@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -198,6 +199,10 @@ func Load() (Config, error) {
 	// a worse answer than refusing to boot.
 	switch cfg.AuthMode {
 	case "open":
+	case "local":
+		if err := validateLocal(cfg); err != nil {
+			return Config{}, err
+		}
 	case "oidc":
 		if err := validateOIDC(cfg); err != nil {
 			return Config{}, err
@@ -211,7 +216,28 @@ func Load() (Config, error) {
 
 // SupportedAuthModes is what PROMVIEW_AUTH_MODE accepts, in the order the error
 // message lists them.
-var SupportedAuthModes = []string{"open", "oidc"}
+var SupportedAuthModes = []string{"open", "oidc", "local"}
+
+// validateLocal checks the settings a password sign-in depends on.
+//
+// Local mode has no external service to point at, so the only thing to get
+// wrong is the session cookie - and getting it wrong is a sign-in that appears
+// to work and then does not stick, which reads as a broken console rather than
+// a misconfiguration.
+func validateLocal(cfg Config) error {
+	if cfg.SessionCookieSecure {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(cfg.ListenAddress)
+	if err != nil {
+		host = cfg.ListenAddress
+	}
+	// An empty host means every interface, which is not loopback-only.
+	if host == "" || !isLoopbackHost(host) {
+		return errors.New("PROMVIEW_SESSION_COOKIE_SECURE may be false only when listening on loopback")
+	}
+	return nil
+}
 
 func validateOIDC(cfg Config) error {
 	required := map[string]string{
