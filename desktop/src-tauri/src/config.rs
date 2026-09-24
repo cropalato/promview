@@ -25,6 +25,8 @@ pub struct Config {
     pub notification_rules: NotificationRules,
     /// Whether WebKitGTK may use its DMA-BUF renderer on this machine.
     pub dmabuf: DmabufPolicy,
+    /// Whether to ask GitHub, now and then, if a newer client is out.
+    pub update_check: bool,
     /// The file the settings came from, if one was found. Kept for the boot log
     /// and for the tray's reload, which re-reads the same path.
     pub source: Option<PathBuf>,
@@ -58,6 +60,8 @@ pub struct FileConfig {
     /// `auto` (the default) probes the machine, `on` and `off` say outright.
     /// Only consulted when `WEBKIT_DISABLE_DMABUF_RENDERER` is unset.
     pub webkit_dmabuf: Option<DmabufPolicy>,
+    /// On by default. Off for machines that cannot reach GitHub, or should not.
+    pub update_check: Option<bool>,
     /// Variables to export before anything reads them. For the settings that
     /// are not this application's own — a private CA bundle, a webview
     /// workaround — and that would otherwise need a wrapper script.
@@ -232,6 +236,7 @@ impl Config {
             poll_interval_secs,
             notification_rules: NotificationRules::compile(&file.notifications.rules)?,
             dmabuf: file.webkit_dmabuf.unwrap_or_default(),
+            update_check: file.update_check.unwrap_or(true),
             source,
         })
     }
@@ -416,6 +421,20 @@ mod tests {
         // A value that is not one of the three is a typo, and a typo that
         // parsed would silently pick a rendering path nobody asked for.
         assert!(FileConfig::parse("webkit_dmabuf = \"maybe\"").is_err());
+    }
+
+    #[test]
+    fn the_update_check_is_on_unless_switched_off() {
+        let config = Config::resolve(&FileConfig::parse("").unwrap(), None, no_env).unwrap();
+        assert!(config.update_check);
+
+        let off = Config::resolve(
+            &FileConfig::parse("update_check = false").unwrap(),
+            None,
+            no_env,
+        )
+        .unwrap();
+        assert!(!off.update_check);
     }
 
     #[test]

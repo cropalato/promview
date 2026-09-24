@@ -19,6 +19,8 @@ This is the walking skeleton from `docs/desktop-client-plan.md`, not the MVP.
 - Signing in against an `oidc` deployment, from the tray menu.
 - Native notifications for alerts the console's selector matches, narrowed by
   this machine's own filter if it has one.
+- The running version in the window titles and at the top of the tray menu,
+  flagged when a newer release is out. See [Updates](#updates).
 
 - The console loads and works: alerts, groups, detail, filters, preferences. Its
   API requests go through the Rust core over Tauri's `invoke`, not from the
@@ -199,9 +201,30 @@ has seen succeed is worse than not shipping it. Adding `"appimage"` to
 
 macOS is not built at all: it needs an Apple runner and a developer certificate.
 
+## Updates
+
+The client looks at the GitHub releases at startup and every twelve hours. When
+a newer one is out, the window titles read
+`Promview 0.1.0-beta.2 — update available: 0.1.0-beta.3` and the tray's top line
+becomes `Update available: …`, which opens that release in the browser. With
+nothing newer, the same line shows the running version and opens the release
+list. There is no notification: this is something to act on when convenient,
+not an interruption.
+
+A client on a final release is only offered final releases; one on a
+pre-release is offered both. A build from a working copy carries the unstamped
+`0.1.0` from `tauri.conf.json`, which sorts above every `0.1.0-beta.N`, so it is
+never flagged. A failed check is logged to stderr and leaves the last result on
+screen. `update_check = false` in the config file turns it off, for machines
+that cannot or should not reach GitHub.
+
+It only tells you. Installing stays with whatever installed the client: Tauri's
+updater can replace an AppImage on Linux but not a deb, rpm or pacman install,
+and a client overwriting files its package manager owns would fight it.
+
 ## What does not work yet
 
-The updater. Tauri's verifies signatures, so it waits on signing.
+Installing an update from inside the client; see [Updates](#updates).
 
 ## Running it
 
@@ -291,6 +314,7 @@ should not silently get defaults instead.
 server_url = "https://promview.internal"
 poll_interval_secs = 60
 webkit_dmabuf = "auto"   # or "on" / "off"; see A Linux rendering note
+update_check = true      # ask GitHub for newer releases; see Updates
 
 [env]
 SSL_CERT_FILE = "/etc/promview/internal-ca.pem"

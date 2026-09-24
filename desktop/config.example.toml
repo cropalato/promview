@@ -43,6 +43,12 @@ poll_interval_secs = 60
 # nothing here ever removes a variable you exported.
 webkit_dmabuf = "auto"
 
+# Whether to ask GitHub, at startup and every twelve hours, if a newer client
+# has been released. A newer one shows in the window titles and the tray menu;
+# nothing is installed and nothing pops up. Turn it off for machines that cannot
+# or should not reach github.com.
+update_check = true
+
 # Variables exported before anything reads them — the settings that are not this
 # application's own, and that would otherwise need a wrapper script around the
 # desktop entry.
