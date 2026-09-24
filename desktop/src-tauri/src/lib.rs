@@ -8,10 +8,10 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder};
@@ -22,6 +22,7 @@ use crate::credentials::{Credentials, Durability};
 use crate::notify::NotificationRules;
 use crate::proxy::ApiProxy;
 use crate::stream::{StreamActivity, StreamHandle};
+use crate::update::Upgrade;
 
 pub mod api;
 pub mod config;
@@ -32,6 +33,7 @@ pub mod rendering;
 pub mod signin;
 pub mod sse;
 pub mod stream;
+pub mod update;
 
 /// Injected before the app boots so the console resolves its API paths against
 /// the configured server. It runs ahead of any application script, which is why
@@ -68,8 +70,14 @@ fn is_browsable(url: &tauri::Url) -> bool {
 /// webview has no tabs to put them in, so without this the click does nothing;
 /// they belong in the operator's own browser instead.
 fn create_windows(app: &tauri::App) -> tauri::Result<()> {
+    let current = app.package_info().version.clone();
     for window_config in app.config().app.windows.clone() {
         WebviewWindowBuilder::from_config(app, &window_config)?
+            .title(crate::update::window_title(
+                &window_config.title,
+                &current,
+                None,
+            ))
             .on_new_window(|url, _features| {
                 if is_browsable(&url) {
                     if let Err(message) = crate::signin::open_in_browser(url.as_str()) {
@@ -83,6 +91,33 @@ fn create_windows(app: &tauri::App) -> tauri::Result<()> {
             .build()?;
     }
     Ok(())
+}
+
+/// The newest release worth offering, once a check has found one.
+#[derive(Default)]
+pub struct Updates(Mutex<Option<Upgrade>>);
+
+/// Puts the result of an update check where the operator will see it: the
+/// tray's version line and every window title.
+fn show_upgrade(
+    app: &AppHandle,
+    item: &MenuItem<tauri::Wry>,
+    current: &semver::Version,
+    upgrade: Option<Upgrade>,
+) {
+    let _ = item.set_text(crate::update::menu_label(current, upgrade.as_ref()));
+    for window_config in &app.config().app.windows {
+        if let Some(window) = app.get_webview_window(&window_config.label) {
+            let _ = window.set_title(&crate::update::window_title(
+                &window_config.title,
+                current,
+                upgrade.as_ref(),
+            ));
+        }
+    }
+    if let Ok(mut slot) = app.state::<Updates>().0.lock() {
+        *slot = upgrade;
+    }
 }
 
 fn toggle_window(window: &WebviewWindow) -> tauri::Result<()> {
@@ -151,6 +186,7 @@ pub fn run() {
         .manage(notifications)
         .manage(StreamHandle::default())
         .manage(Arc::new(StreamActivity::default()))
+        .manage(Updates::default())
         .manage(SignInState {
             credentials: Arc::clone(&credentials),
             server: config.server_url.clone(),
@@ -166,6 +202,17 @@ pub fn run() {
         ])
         .setup(move |app| {
             create_windows(app)?;
+
+            let current = app.package_info().version.clone();
+            // Always clickable: with an update it opens that release, without
+            // one the release list, which is also where the changelog lives.
+            let version_item = MenuItem::with_id(
+                app,
+                "version",
+                crate::update::menu_label(&current, None),
+                true,
+                None::<&str>,
+            )?;
 
             let quit = MenuItem::with_id(app, "quit", "Quit Promview", true, None::<&str>)?;
             let sign_in_item = MenuItem::with_id(app, "sign-in", "Sign in…", true, None::<&str>)?;
@@ -183,6 +230,8 @@ pub fn run() {
             let menu = Menu::with_items(
                 app,
                 &[
+                    &version_item,
+                    &PredefinedMenuItem::separator(app)?,
                     &console,
                     &compact,
                     &reload,
@@ -203,6 +252,18 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => app.exit(0),
+                    "version" => {
+                        let url = app
+                            .state::<Updates>()
+                            .0
+                            .lock()
+                            .ok()
+                            .and_then(|slot| slot.as_ref().map(|upgrade| upgrade.url.clone()))
+                            .unwrap_or_else(|| crate::update::RELEASES_PAGE.to_string());
+                        if let Err(message) = crate::signin::open_in_browser(&url) {
+                            eprintln!("promview-desktop: {message}");
+                        }
+                    }
                     "console" => {
                         if let Some(window) = app.get_webview_window("console") {
                             let _ = window.show();
@@ -236,6 +297,24 @@ pub fn run() {
                     _ => {}
                 })
                 .build(app)?;
+
+            if config.update_check {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        match crate::update::check(&current).await {
+                            Ok(upgrade) => show_upgrade(&app, &version_item, &current, upgrade),
+                            // Offline or rate-limited: the version line keeps
+                            // whatever the last check found, and the next one
+                            // tries again.
+                            Err(message) => eprintln!("promview-desktop: {message}"),
+                        }
+                        tokio::time::sleep(crate::update::CHECK_INTERVAL).await;
+                    }
+                });
+            } else {
+                eprintln!("promview-desktop: update check switched off");
+            }
 
             // The tray re-reads whenever the stream says something changed, and
             // on a timer as a fallback for when the stream is down or has not
