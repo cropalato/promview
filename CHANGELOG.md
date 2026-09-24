@@ -6,6 +6,20 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-09-24
+
+The second beta adds two ways to sign in without an identity provider — local
+accounts and an LDAP directory — lets open mode grant more than viewer for a
+lab where everyone is trusted, and gives administrators a console view for
+role bindings, closing one of the three gaps recorded for beta.1.
+
+That stretches what beta claimed: the feature set was called settled, and this
+release adds two authentication paths to it. They are the newest code here and
+the least exercised by anyone but the author, which is worth weighing before
+pointing one at a production directory. The two remaining known limits are in
+the README. The server is now built with Go 1.27 on Alpine 3.24; building from
+source needs Go 1.26.
+
 ### Added
 
 - **auth:** open mode can be told to grant more than viewer. `PROMVIEW_OPEN_MODE_ROLE` accepts `viewer` (the default), `operator` or `administrator`, and `PROMVIEW_OPEN_MODE_AUTHOR` names what actions are recorded under. It is for a lab or a test instance where everyone who can reach the port is already trusted and a sign-in is friction with nothing behind it — the case where open mode was previously most crippled, because acknowledging a test alert required an identity the deployment had deliberately chosen not to have.
@@ -54,11 +68,18 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 - **config:** `PROMVIEW_OIDC_COOKIE_SECURE` is now `PROMVIEW_SESSION_COOKIE_SECURE`, and the Helm chart reads it from `auth.sessionCookieSecure`. The flag was never an OIDC setting — every mode that issues a session writes the same `promview_session` cookie — and naming it after one mode is how a deployment ends up with the flag set for one and not another. The old environment variable and the old `oidc.cookieSecure` value are still honoured when the new names are unset, and are removed in 0.2.0. Where both are set the new name wins.
 
+- **build:** building from source needs Go 1.26. `golang.org/x/oauth2` v0.37.0 requires it, and `go.mod` also pins the `go1.26.8` toolchain, because CI installs whatever `go.mod` names and a bare `go 1.26.0` would have built and scanned against a standard library with reachable `crypto/tls`, `crypto/x509`, `net/http` and `net/url` advisories.
+
 ### Fixed
 
 - **build:** `make migration-check` runs every migration. It enumerated them by hand and the list stopped being updated at `000014`, so the seven migrations added since — and every down migration among them — were skipped by the check whose only job is to run them. It now reads the directory, refuses a migration with no matching down, and reports how many it applied, rolled back and reapplied. All twenty-two round-trip.
 
 - **packaging:** releases are published as pre-releases. `gh release create` was never told, so every release since the first was marked stable and took GitHub's Latest badge — including `0.1.0-beta.1`, which was presented as a stable release while its own notes, the README and the Docker Hub listing all said otherwise. The workflow now passes `--prerelease` for any tag carrying a semver pre-release suffix, and the seventeen existing releases were corrected. With none of them stable there is no Latest badge until the first release without a suffix, which is the honest state of a pre-1.0 project.
+
+### Build System
+
+- **container:** the server is compiled with Go 1.27 on Alpine 3.24, and the console bundle is built with Node 24. The image had been built with Go 1.25, which stopped receiving security fixes when 1.27 was released. Node 24 is the active LTS; CI and the release workflow moved with the image, so the bundle is tested on the runtime it ships from.
+- **deps:** go-oidc 3.21, go-jose 4.1.5, pgx 5.11 and oauth2 0.37 on the server; React 19.3, Vite 8, Vitest 5, and eslint 10 with react-hooks 7 in the console, whose code now passes the React Compiler rules that version adds; `dirs` 7 and `toml` 1.1 in the desktop shell. None of them fixes an advisory govulncheck or npm audit had found reachable — they keep the upgrade path short rather than close a hole.
 
 ## [0.1.0-beta.1] - 2026-09-17
 
