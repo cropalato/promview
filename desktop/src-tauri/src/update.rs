@@ -62,16 +62,6 @@ pub fn newest_upgrade(current: &Version, releases: &[Release]) -> Option<Upgrade
         })
 }
 
-/// What a window's title says: its name, the running version, and whether a
-/// newer one is out. The title bar is always on screen, which makes it the one
-/// place the operator will see this without going looking.
-pub fn window_title(name: &str, current: &Version, upgrade: Option<&Upgrade>) -> String {
-    match upgrade {
-        Some(upgrade) => format!("{name} {current} — update available: {}", upgrade.version),
-        None => format!("{name} {current}"),
-    }
-}
-
 /// The tray menu's version line.
 pub fn menu_label(current: &Version, upgrade: Option<&Upgrade>) -> String {
     match upgrade {
@@ -188,20 +178,12 @@ mod tests {
     }
 
     #[test]
-    fn titles_and_labels_carry_the_version() {
+    fn the_menu_label_carries_the_version() {
         let current = version("0.1.0-beta.2");
         let upgrade = Upgrade {
             version: version("0.1.0-beta.3"),
             url: String::new(),
         };
-        assert_eq!(
-            window_title("Promview", &current, None),
-            "Promview 0.1.0-beta.2"
-        );
-        assert_eq!(
-            window_title("Promview", &current, Some(&upgrade)),
-            "Promview 0.1.0-beta.2 — update available: 0.1.0-beta.3"
-        );
         assert_eq!(menu_label(&current, None), "Promview 0.1.0-beta.2");
         assert_eq!(
             menu_label(&current, Some(&upgrade)),

@@ -44,8 +44,8 @@ poll_interval_secs = 60
 webkit_dmabuf = "auto"
 
 # Whether to ask GitHub, at startup and every twelve hours, if a newer client
-# has been released. A newer one shows in the window titles and the tray menu;
-# nothing is installed and nothing pops up. Turn it off for machines that cannot
+# has been released. A newer one shows in the tray menu's top line; nothing is
+# installed and nothing pops up. Turn it off for machines that cannot
 # or should not reach github.com.
 update_check = true
 

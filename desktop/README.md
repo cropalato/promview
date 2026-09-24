@@ -19,8 +19,8 @@ This is the walking skeleton from `docs/desktop-client-plan.md`, not the MVP.
 - Signing in against an `oidc` deployment, from the tray menu.
 - Native notifications for alerts the console's selector matches, narrowed by
   this machine's own filter if it has one.
-- The running version in the window titles and at the top of the tray menu,
-  flagged when a newer release is out. See [Updates](#updates).
+- The running version at the top of the tray menu, flagged when a newer
+  release is out. See [Updates](#updates).
 
 - The console loads and works: alerts, groups, detail, filters, preferences. Its
   API requests go through the Rust core over Tauri's `invoke`, not from the
@@ -203,13 +203,12 @@ macOS is not built at all: it needs an Apple runner and a developer certificate.
 
 ## Updates
 
-The client looks at the GitHub releases at startup and every twelve hours. When
-a newer one is out, the window titles read
-`Promview 0.1.0-beta.2 — update available: 0.1.0-beta.3` and the tray's top line
-becomes `Update available: …`, which opens that release in the browser. With
-nothing newer, the same line shows the running version and opens the release
-list. There is no notification: this is something to act on when convenient,
-not an interruption.
+The client looks at the GitHub releases at startup and every twelve hours. The
+tray menu's top line shows the running version, `Promview 0.1.0-beta.2`, and
+opens the release list. When a newer release is out it becomes
+`Update available: 0.1.0-beta.3 (running 0.1.0-beta.2)…` and opens that
+release instead. The window titles stay plain, and there is no notification:
+this is something to act on when convenient, not an interruption.
 
 A client on a final release is only offered final releases; one on a
 pre-release is offered both. A build from a working copy carries the unstamped

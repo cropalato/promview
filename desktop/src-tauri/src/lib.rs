@@ -70,14 +70,8 @@ fn is_browsable(url: &tauri::Url) -> bool {
 /// webview has no tabs to put them in, so without this the click does nothing;
 /// they belong in the operator's own browser instead.
 fn create_windows(app: &tauri::App) -> tauri::Result<()> {
-    let current = app.package_info().version.clone();
     for window_config in app.config().app.windows.clone() {
         WebviewWindowBuilder::from_config(app, &window_config)?
-            .title(crate::update::window_title(
-                &window_config.title,
-                &current,
-                None,
-            ))
             .on_new_window(|url, _features| {
                 if is_browsable(&url) {
                     if let Err(message) = crate::signin::open_in_browser(url.as_str()) {
@@ -97,8 +91,7 @@ fn create_windows(app: &tauri::App) -> tauri::Result<()> {
 #[derive(Default)]
 pub struct Updates(Mutex<Option<Upgrade>>);
 
-/// Puts the result of an update check where the operator will see it: the
-/// tray's version line and every window title.
+/// Puts the result of an update check on the tray's version line.
 fn show_upgrade(
     app: &AppHandle,
     item: &MenuItem<tauri::Wry>,
@@ -106,15 +99,6 @@ fn show_upgrade(
     upgrade: Option<Upgrade>,
 ) {
     let _ = item.set_text(crate::update::menu_label(current, upgrade.as_ref()));
-    for window_config in &app.config().app.windows {
-        if let Some(window) = app.get_webview_window(&window_config.label) {
-            let _ = window.set_title(&crate::update::window_title(
-                &window_config.title,
-                current,
-                upgrade.as_ref(),
-            ));
-        }
-    }
     if let Ok(mut slot) = app.state::<Updates>().0.lock() {
         *slot = upgrade;
     }
