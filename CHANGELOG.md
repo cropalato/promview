@@ -6,6 +6,21 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-09-24
+
+A small release for the desktop client: links in an alert's details open in
+the browser, and the tray says which version is running and whether a newer
+one is out. The server and the console are unchanged from beta.2.
+
+### Added
+
+- **desktop:** the tray menu's top line shows the running version, `Promview 0.1.0-beta.3`, and opens the release list. When a newer release is out it becomes `Update available: … (running …)…` and opens that release. The client checks GitHub's releases at startup and every twelve hours; a client on a final release is only offered final releases. It only tells you — nothing is installed and nothing pops up, because Tauri's updater cannot replace a deb, rpm or pacman install. `update_check = false` in the config file turns it off.
+
+### Fixed
+
+- **desktop:** links that ask for a new window, such as an alert's Generator URL and Alertmanager URL, open in the system browser. A webview has nowhere to put a `target="_blank"` link, so clicking them did nothing. Only `http` and `https` addresses are handed to the browser; anything else is refused.
+- **desktop:** the page the browser lands on after signing in tries to close its own tab. Browsers usually refuse, because the tab was not opened by a script and the identity provider has added history entries, so the "you can close this tab" message stays as the fallback.
+
 ## [0.1.0-beta.2] - 2026-09-24
 
 The second beta adds two ways to sign in without an identity provider — local
