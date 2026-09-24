@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 interface AssigneeFieldProps {
   assignee: string;
@@ -25,9 +25,11 @@ export function AssigneeField({ assignee, onAssign }: AssigneeFieldProps) {
   // The drawer is remounted per alert id, but the assignment can also change
   // under it — another operator, or a reopen clearing it — so the field follows
   // the server rather than keeping a stale local edit.
-  useEffect(() => {
+  const [shownAssignee, setShownAssignee] = useState(assignee);
+  if (shownAssignee !== assignee) {
+    setShownAssignee(assignee);
     setValue(assignee);
-  }, [assignee]);
+  }
 
   const submit = (next: string) => {
     if (next === assignee) {

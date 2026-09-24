@@ -95,11 +95,22 @@ export function SilenceDialog({
         )
       : [];
 
-  const runResolve = useCallback(() => {
+  // `resolving` is raised before the request goes out: during render when
+  // `resolve` changes (it starts out raised for the first one), and in the
+  // handler when a conflict re-resolves. `resolve` is stored behind a thunk,
+  // since a function handed to useState would be called.
+  const [resolveShown, setResolveShown] = useState(() => resolve);
+  if (resolveShown !== resolve) {
+    setResolveShown(() => resolve);
+    if (resolve !== undefined) {
+      setResolving(true);
+    }
+  }
+
+  const requestResolve = useCallback(() => {
     if (resolve === undefined) {
       return;
     }
-    setResolving(true);
     resolve()
       .then((resolved) => {
         setPreview(resolved);
@@ -111,9 +122,17 @@ export function SilenceDialog({
       });
   }, [resolve]);
 
+  const runResolve = () => {
+    if (resolve === undefined) {
+      return;
+    }
+    setResolving(true);
+    requestResolve();
+  };
+
   useEffect(() => {
-    runResolve();
-  }, [runResolve]);
+    requestResolve();
+  }, [requestResolve]);
 
   useEffect(() => {
     dialogRef.current?.focus();

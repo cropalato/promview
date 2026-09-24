@@ -145,7 +145,7 @@ async function postSilence(
   } catch {
     throw new SilenceError('Unable to reach the Promview API', 0);
   }
-  let payload: unknown = null;
+  let payload: unknown;
   try {
     payload = await response.json();
   } catch {
@@ -227,7 +227,7 @@ export async function removeAlertSilence(
   if (response.ok) {
     return;
   }
-  let payload: unknown = null;
+  let payload: unknown;
   try {
     payload = await response.json();
   } catch {
@@ -272,7 +272,7 @@ export async function previewGroupSilence(
   } catch {
     throw new SilenceError('Unable to reach the Promview API', 0);
   }
-  let payload: unknown = null;
+  let payload: unknown;
   try {
     payload = await response.json();
   } catch {

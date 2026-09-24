@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { AlertSummary } from '../alerts/types';
 import type { AlertSelection } from '../components/AlertTable';
 
@@ -23,7 +23,9 @@ export function useAlertSelection(alerts: readonly AlertSummary[]): {
   // A refresh that drops rows drops their selection with them. Rebuilding only
   // when something actually left keeps the identity stable, so the table does
   // not re-render on every poll that changed nothing.
-  useEffect(() => {
+  const [prunedFor, setPrunedFor] = useState(loadedIds);
+  if (prunedFor !== loadedIds) {
+    setPrunedFor(loadedIds);
     setSelected((current) => {
       let changed = false;
       const next = new Set<string>();
@@ -36,7 +38,7 @@ export function useAlertSelection(alerts: readonly AlertSummary[]): {
       }
       return changed ? next : current;
     });
-  }, [loadedIds]);
+  }
 
   const onToggle = useCallback((id: string) => {
     setSelected((current) => {

@@ -133,8 +133,13 @@ export function useAlertNotifications({
     matchersRef.current = matchers;
   }, [matchers]);
 
-  const notifier = useMemo(
-    () =>
+  // The seen ledger is the notifier's only state, so it is what stays stable.
+  // The notifier itself is stateless and is built at event time, where its
+  // ref-backed accessors are read.
+  const store = useMemo(() => createSeenEventStore(storage), [storage]);
+
+  const handleEvent = useCallback(
+    (event: AlertStreamEvent) => {
       createAlertNotifier({
         isEnabled: () => enabledRef.current,
         matchers: () => matchersRef.current,
@@ -151,16 +156,10 @@ export function useAlertNotifications({
           navigateRef.current(alertId);
         },
         focusWindow: focusWindow ?? (() => window.focus()),
-        store: createSeenEventStore(storage),
-      }),
-    [resolvedFactory, storage, focusWindow, isDocumentHidden],
-  );
-
-  const handleEvent = useCallback(
-    (event: AlertStreamEvent) => {
-      notifier.handleEvent(event);
+        store,
+      }).handleEvent(event);
     },
-    [notifier],
+    [resolvedFactory, store, focusWindow, isDocumentHidden],
   );
 
   return { optInState, toggleOptIn, handleEvent };

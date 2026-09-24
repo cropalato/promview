@@ -63,8 +63,17 @@ export function useAlertDetail(
   addNote: (body: string) => Promise<void>;
 } {
   const { onUnauthorized } = options;
-  const [state, setState] = useState<AlertDetailState>({ status: 'idle' });
+  const [state, setState] = useState<AlertDetailState>(() =>
+    alertId === null ? { status: 'idle' } : { status: 'loading' },
+  );
   const [attempt, setAttempt] = useState(0);
+  // A new selection or a retry restarts from the loading state during render,
+  // so a stale alert is never painted for the new id.
+  const [request, setRequest] = useState({ alertId, attempt });
+  if (request.alertId !== alertId || request.attempt !== attempt) {
+    setRequest({ alertId, attempt });
+    setState(alertId === null ? { status: 'idle' } : { status: 'loading' });
+  }
   const alertIdRef = useRef(alertId);
   const readyRef = useRef(false);
   const refreshInFlightRef = useRef(false);
@@ -92,11 +101,9 @@ export function useAlertDetail(
 
   useEffect(() => {
     if (alertId === null) {
-      setState({ status: 'idle' });
       return;
     }
     let cancelled = false;
-    setState({ status: 'loading' });
 
     fetchAlertDetail(alertId)
       .then((detail) => {
@@ -130,39 +137,42 @@ export function useAlertDetail(
   );
 
   const runQuietRefresh = useCallback(
-    (id: string): void => {
-      if (refreshInFlightRef.current) {
-        refreshPendingRef.current = true;
-        return;
-      }
-      refreshInFlightRef.current = true;
-      fetchAlertDetail(id)
-        .then((detail) => {
-          if (disposedRef.current) {
-            return;
-          }
-          // Replace only when the drawer is still showing this alert.
-          setState((current) =>
-            current.status === 'ready' && alertIdRef.current === id
-              ? { status: 'ready', detail }
-              : current,
-          );
-        })
-        .catch((error: unknown) => {
-          // Quiet refresh: keep the stale detail; the next stream event retries.
-          // A 401 means the session expired — route back to the sign-in gate.
-          reportIfUnauthorized(error);
-        })
-        .finally(() => {
-          refreshInFlightRef.current = false;
-          if (!disposedRef.current && refreshPendingRef.current) {
-            refreshPendingRef.current = false;
-            const currentId = alertIdRef.current;
-            if (currentId !== null && readyRef.current) {
-              runQuietRefresh(currentId);
+    (target: string): void => {
+      const run = (id: string): void => {
+        if (refreshInFlightRef.current) {
+          refreshPendingRef.current = true;
+          return;
+        }
+        refreshInFlightRef.current = true;
+        fetchAlertDetail(id)
+          .then((detail) => {
+            if (disposedRef.current) {
+              return;
             }
-          }
-        });
+            // Replace only when the drawer is still showing this alert.
+            setState((current) =>
+              current.status === 'ready' && alertIdRef.current === id
+                ? { status: 'ready', detail }
+                : current,
+            );
+          })
+          .catch((error: unknown) => {
+            // Quiet refresh: keep the stale detail; the next stream event retries.
+            // A 401 means the session expired — route back to the sign-in gate.
+            reportIfUnauthorized(error);
+          })
+          .finally(() => {
+            refreshInFlightRef.current = false;
+            if (!disposedRef.current && refreshPendingRef.current) {
+              refreshPendingRef.current = false;
+              const currentId = alertIdRef.current;
+              if (currentId !== null && readyRef.current) {
+                run(currentId);
+              }
+            }
+          });
+      };
+      run(target);
     },
     [reportIfUnauthorized],
   );

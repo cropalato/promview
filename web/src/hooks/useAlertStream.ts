@@ -49,6 +49,15 @@ export function useAlertStream({
   const handlerRef = useRef(onAlertEvent);
   const gapHandlerRef = useRef(onStreamGap);
 
+  // Withdrawing the cursor reports `connecting`, whatever the closed client
+  // said last, and a resumed stream starts from `connecting` again.
+  const streaming = cursor !== null;
+  const [wasStreaming, setWasStreaming] = useState(streaming);
+  if (wasStreaming !== streaming) {
+    setWasStreaming(streaming);
+    setStatus('connecting');
+  }
+
   useEffect(() => {
     handlerRef.current = onAlertEvent;
   }, [onAlertEvent]);
@@ -61,7 +70,6 @@ export function useAlertStream({
     if (cursor === null) {
       clientRef.current?.close();
       clientRef.current = null;
-      setStatus('connecting');
       return;
     }
     if (clientRef.current === null) {
@@ -90,5 +98,5 @@ export function useAlertStream({
     [],
   );
 
-  return status;
+  return streaming ? status : 'connecting';
 }

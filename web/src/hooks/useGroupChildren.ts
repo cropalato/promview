@@ -79,9 +79,13 @@ export function useGroupChildren(
   const [children, setChildren] = useState<Record<string, GroupChildren>>({});
   const { onUnauthorized } = options;
   const unauthorizedRef = useRef(onUnauthorized);
-  unauthorizedRef.current = onUnauthorized;
+  useEffect(() => {
+    unauthorizedRef.current = onUnauthorized;
+  }, [onUnauthorized]);
   const queryRef = useRef(query);
-  queryRef.current = query;
+  useEffect(() => {
+    queryRef.current = query;
+  });
   // `refresh` iterates the expanded groups without capturing state.
   const childrenRef = useRef(children);
   useEffect(() => {

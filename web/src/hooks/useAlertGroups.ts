@@ -48,17 +48,23 @@ export function useAlertGroups(
   const unauthorizedRef = useRef(onUnauthorized);
   const loadingMoreRef = useRef(false);
 
+  // Every first-page load starts from the loading state, set during render
+  // when what it depends on changes.
+  const [load, setLoad] = useState({ enabled, queryKey, attempt });
+  if (load.enabled !== enabled || load.queryKey !== queryKey || load.attempt !== attempt) {
+    setLoad({ enabled, queryKey, attempt });
+    setState({ status: 'loading' });
+  }
+
   useEffect(() => {
     unauthorizedRef.current = onUnauthorized;
   }, [onUnauthorized]);
 
   useEffect(() => {
     if (!enabled) {
-      setState({ status: 'loading' });
       return;
     }
     let active = true;
-    setState({ status: 'loading' });
     void fetchAlertGroups({ ...query, status: 'firing', limit: ALERTS_PAGE_SIZE })
       .then((page) => {
         if (active) {
