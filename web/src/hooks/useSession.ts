@@ -66,17 +66,29 @@ export function useSession(
   expire: () => void;
 } {
   const { fetchImpl, navigate } = deps;
-  const [state, setState] = useState<SessionState>({ status: 'idle' });
+  const [state, setState] = useState<SessionState>(() =>
+    requiresSignIn === undefined ? { status: 'idle' } : { status: 'loading' },
+  );
   const [attempt, setAttempt] = useState(0);
   const [signOutState, setSignOutState] = useState<SignOutState>('idle');
 
+  // Every session check starts from idle or loading, set during render when
+  // what it depends on changes.
+  const [check, setCheck] = useState({ requiresSignIn, attempt, fetchImpl });
+  if (
+    check.requiresSignIn !== requiresSignIn ||
+    check.attempt !== attempt ||
+    check.fetchImpl !== fetchImpl
+  ) {
+    setCheck({ requiresSignIn, attempt, fetchImpl });
+    setState(requiresSignIn === undefined ? { status: 'idle' } : { status: 'loading' });
+  }
+
   useEffect(() => {
     if (requiresSignIn === undefined) {
-      setState({ status: 'idle' });
       return;
     }
     let cancelled = false;
-    setState({ status: 'loading' });
 
     loadSession(fetchImpl)
       .then((session) => {

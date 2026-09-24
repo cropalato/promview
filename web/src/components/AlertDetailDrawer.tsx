@@ -95,7 +95,7 @@ export function AlertDetailDrawer({
   // ARIA tab pattern: arrow keys move selection and focus together.
   const handleTabsKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const current = TABS.findIndex((tab) => tab.id === activeTab);
-    let next = current;
+    let next: number;
     if (event.key === 'ArrowRight') {
       next = (current + 1) % TABS.length;
     } else if (event.key === 'ArrowLeft') {

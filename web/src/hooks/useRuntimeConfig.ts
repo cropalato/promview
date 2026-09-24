@@ -18,10 +18,15 @@ function toError(value: unknown): Error {
 export function useRuntimeConfig(): { state: RuntimeConfigState; retry: () => void } {
   const [state, setState] = useState<RuntimeConfigState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  // A retry drops back to the loading state during render.
+  const [loadedAttempt, setLoadedAttempt] = useState(attempt);
+  if (loadedAttempt !== attempt) {
+    setLoadedAttempt(attempt);
+    setState({ status: 'loading' });
+  }
 
   useEffect(() => {
     let cancelled = false;
-    setState({ status: 'loading' });
 
     loadRuntimeConfig()
       .then((config) => {
