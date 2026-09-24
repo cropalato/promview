@@ -40,7 +40,7 @@ jobs:
         run: echo "DOCKERHUB_TOKEN is not set; skipping the description update." >> "${GITHUB_STEP_SUMMARY}"
 
       - if: env.DOCKERHUB_TOKEN != ''
-        uses: peter-evans/dockerhub-description@v4
+        uses: peter-evans/dockerhub-description@v5
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
