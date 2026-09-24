@@ -14,6 +14,7 @@
     "windows": [
       {
         "label": "console",
+        "create": false,
         "title": "Promview",
         "width": 1280,
         "height": 800,
@@ -24,6 +25,7 @@
       },
       {
         "label": "compact",
+        "create": false,
         "title": "Promview alerts",
         "width": 420,
         "height": 560,
