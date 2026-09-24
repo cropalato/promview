@@ -69,6 +69,7 @@ impl Callback {
                     respond(
                         request,
                         "Signed in. You can close this tab and return to Promview.",
+                        true,
                     );
                     return Ok(code);
                 }
@@ -76,17 +77,28 @@ impl Callback {
                     // A favicon request, or the provider sending an error. Say
                     // so and keep waiting rather than failing the sign-in on a
                     // stray fetch the browser made on its own.
-                    respond(request, "Waiting for a sign-in result…");
+                    respond(request, "Waiting for a sign-in result…", false);
                 }
             }
         }
     }
 }
 
-fn respond(request: tiny_http::Request, message: &str) {
+/// Answers the browser with a short page.
+///
+/// With `close`, the page also tries to close its own tab. Browsers refuse
+/// that for a tab no script opened once it has more than one history entry,
+/// which a trip through the identity provider usually leaves behind, so the
+/// message stays as the fallback rather than being replaced.
+fn respond(request: tiny_http::Request, message: &str, close: bool) {
+    let script = if close {
+        "<script>window.close()</script>"
+    } else {
+        ""
+    };
     let body = format!(
         "<!doctype html><meta charset=\"utf-8\"><title>Promview</title>\
-         <body style=\"font-family:system-ui;padding:2rem\">{message}</body>"
+         <body style=\"font-family:system-ui;padding:2rem\">{message}{script}</body>"
     );
     let header = "Content-Type: text/html; charset=utf-8".parse::<tiny_http::Header>();
     let mut response = tiny_http::Response::from_string(body);
