@@ -2824,7 +2824,7 @@ dependencies = [
  "tauri-build",
  "tiny_http",
  "tokio",
- "toml 0.9.12+spec-1.1.0",
+ "toml 1.1.4+spec-1.1.0",
  "url",
 ]
 
