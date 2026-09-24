@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::webview::NewWindowResponse;
+use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder};
 
 use crate::api::Client;
 use crate::config::{api_base, describe_source, Config};
@@ -51,6 +52,37 @@ fn announce_session(app: &AppHandle, kind: &str) {
     for (_, window) in app.webview_windows() {
         let _ = window.eval(&script);
     }
+}
+
+/// Whether a link the console asked to open in a new window may go to the
+/// system browser. Only web addresses: anything else handed to the platform
+/// opener could launch an arbitrary handler.
+fn is_browsable(url: &tauri::Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+}
+
+/// Creates the windows declared in the configuration.
+///
+/// They are built here rather than by Tauri so each one can say what happens
+/// to links that ask for a new window, such as an alert's generator URL. A
+/// webview has no tabs to put them in, so without this the click does nothing;
+/// they belong in the operator's own browser instead.
+fn create_windows(app: &tauri::App) -> tauri::Result<()> {
+    for window_config in app.config().app.windows.clone() {
+        WebviewWindowBuilder::from_config(app, &window_config)?
+            .on_new_window(|url, _features| {
+                if is_browsable(&url) {
+                    if let Err(message) = crate::signin::open_in_browser(url.as_str()) {
+                        eprintln!("promview-desktop: {message}");
+                    }
+                } else {
+                    eprintln!("promview-desktop: refused to open {url}");
+                }
+                NewWindowResponse::Deny
+            })
+            .build()?;
+    }
+    Ok(())
 }
 
 fn toggle_window(window: &WebviewWindow) -> tauri::Result<()> {
@@ -133,6 +165,8 @@ pub fn run() {
             show_notification,
         ])
         .setup(move |app| {
+            create_windows(app)?;
+
             let quit = MenuItem::with_id(app, "quit", "Quit Promview", true, None::<&str>)?;
             let sign_in_item = MenuItem::with_id(app, "sign-in", "Sign in…", true, None::<&str>)?;
             let sign_out_item = MenuItem::with_id(app, "sign-out", "Sign out", true, None::<&str>)?;
@@ -403,6 +437,16 @@ async fn show_notification(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_web_links_go_to_the_browser() {
+        let browsable = |url: &str| is_browsable(&tauri::Url::parse(url).unwrap());
+        assert!(browsable("http://prometheus/graph"));
+        assert!(browsable("https://alertmanager.example/#/alerts"));
+        assert!(!browsable("file:///etc/passwd"));
+        assert!(!browsable("javascript:alert(1)"));
+        assert!(!browsable("smb://share/x"));
+    }
 
     #[test]
     fn base_url_script_escapes_its_value() {
