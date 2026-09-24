@@ -21,7 +21,7 @@ cd promview
 docker compose up --build
 ```
 
-You need Go 1.25+, Node 22+, Docker with Compose, and Helm 3.14+ if you touch the
+You need Go 1.26+, Node 22+, Docker with Compose, and Helm 3.14+ if you touch the
 chart. The README's [Development](README.md#development) section has the rest.
 
 ## Verification
