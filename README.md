@@ -801,7 +801,7 @@ deployment feedback is the most useful thing it can get.
 
 ### Requirements
 
-- Go 1.25 or newer
+- Go 1.26 or newer
 - Node.js 22 or newer
 - Docker with Compose
 - Helm 3.14 or newer when packaging or installing the Kubernetes chart
