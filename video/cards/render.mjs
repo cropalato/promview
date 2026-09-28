@@ -90,21 +90,31 @@ export async function renderClips(clips) {
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  // Smoke: one of each, short.
-  const out = new URL('../out/cards/', import.meta.url).pathname;
+  // `--check`: half a second of every kind, which exercises the page, the
+  // fonts, the frame pipe and both encoders without rendering a video.
+  const { mkdir } = await import('node:fs/promises');
+  const out = new URL('../out/check/', import.meta.url).pathname;
+  await mkdir(out, { recursive: true });
+  const seconds = process.argv.includes('--check') ? 0.5 : 3;
   await renderClips([
-    { out: `${out}smoke-title.mp4`, kind: 'title', seconds: 3 },
+    { out: `${out}title.mp4`, kind: 'title', seconds },
     {
-      out: `${out}smoke-statement.mp4`,
+      out: `${out}statement.mp4`,
       kind: 'statement',
-      seconds: 3,
+      seconds,
       params: { lines: ['Alertmanager decides', 'who to wake up.'] },
     },
-    { out: `${out}smoke-end.mp4`, kind: 'end', seconds: 3 },
     {
-      out: `${out}smoke-caption.mov`,
+      out: `${out}code.mp4`,
+      kind: 'code',
+      seconds,
+      params: { title: 'config.toml', lines: ['[env]', 'SSL_CERT_FILE = "/etc/ca.pem"'] },
+    },
+    { out: `${out}end.mp4`, kind: 'end', seconds },
+    {
+      out: `${out}caption.mov`,
       kind: 'caption',
-      seconds: 3,
+      seconds,
       alpha: true,
       params: { text: 'Alertmanager sends. Promview remembers.' },
     },
