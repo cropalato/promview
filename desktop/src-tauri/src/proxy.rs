@@ -89,7 +89,17 @@ impl ApiProxy {
         let url = resolve(&self.base, &request.path)?;
         let method = parse_method(&request.method)?;
 
-        let mut builder = self.http.request(method, url.clone());
+        let mut builder = self
+            .http
+            .request(method, url.clone())
+            // A password sign-in is refused by the server unless the request
+            // names its origin, as a browser's would: a cross-site form post
+            // is how a victim gets signed into an attacker's account. The
+            // core is that browser here, and the origin it speaks for is the
+            // server it was configured with. Without this, local and LDAP
+            // sign-in from the desktop failed with a 403 the console could
+            // only report as missing read access.
+            .header(reqwest::header::ORIGIN, origin_of(&self.base));
         if let Some(token) = self.bearer() {
             builder = builder.bearer_auth(token);
         }
@@ -172,6 +182,12 @@ fn parse_method(raw: &str) -> Result<reqwest::Method, String> {
 }
 
 /// Headers the page may set. Anything naming the caller — authorization,
+/// The scheme, host and port of the server, which is what an Origin header
+/// carries; a path prefix kept for a reverse proxy is not part of it.
+fn origin_of(base: &Url) -> String {
+    base.origin().ascii_serialization()
+}
+
 /// cookies, the host — is the core's business, and letting the page set them
 /// would hand back the control this module exists to take.
 fn is_forwardable_header(name: &str) -> bool {
@@ -183,10 +199,32 @@ fn is_forwardable_header(name: &str) -> bool {
 
 #[tauri::command]
 pub async fn api_request(
+    app: tauri::AppHandle,
     proxy: State<'_, ApiProxy>,
     request: ApiRequest,
 ) -> Result<ApiResponse, String> {
-    proxy.send(request).await
+    let path = request.path.clone();
+    let response = proxy.send(request).await?;
+    // A password sign-in or a sign-out goes through this proxy like any other
+    // request, but it changes what every window may show: the jar it landed
+    // in is shared, so the compact window is signed in the moment the main
+    // one is, and has to be told, exactly as it is when the tray signs in.
+    if (200..300).contains(&response.status) {
+        if let Some(kind) = session_change(&path) {
+            crate::announce_session(&app, kind);
+        }
+    }
+    Ok(response)
+}
+
+/// What a successful request to this path means for the session, if anything.
+fn session_change(path: &str) -> Option<&'static str> {
+    let path = path.split(['?', '#']).next().unwrap_or(path);
+    match path.trim_end_matches('/') {
+        "/api/v1/auth/login" => Some("signedIn"),
+        "/api/v1/auth/logout" => Some("signedOut"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -219,6 +257,25 @@ mod tests {
         ] {
             assert!(resolve(&base(), path).is_err(), "expected {path:?} refused");
         }
+    }
+
+    #[test]
+    fn a_sign_in_or_out_through_the_proxy_is_a_session_change() {
+        assert_eq!(session_change("/api/v1/auth/login"), Some("signedIn"));
+        assert_eq!(
+            session_change("/api/v1/auth/logout?next=/"),
+            Some("signedOut")
+        );
+        assert_eq!(session_change("/api/v1/alerts"), None);
+        assert_eq!(session_change("/api/v1/auth/login/other"), None);
+    }
+
+    #[test]
+    fn origin_is_the_server_without_its_path() {
+        let base = Url::parse("https://promview.example.com/console/").unwrap();
+        assert_eq!(origin_of(&base), "https://promview.example.com");
+        let local = Url::parse("http://localhost:8080").unwrap();
+        assert_eq!(origin_of(&local), "http://localhost:8080");
     }
 
     #[test]

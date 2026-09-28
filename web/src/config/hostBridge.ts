@@ -69,6 +69,9 @@ function headerPairs(init?: RequestInit): [string, string][] {
   return Object.entries(headers);
 }
 
+/** Statuses a Response must not carry a body for (RFC 9110 and the Fetch spec). */
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+
 /** Builds the fetch that routes through the host's invoke bridge. */
 export function createHostFetch(invoke: Invoke, base: string) {
   return async (url: string, init?: RequestInit): Promise<Response> => {
@@ -81,7 +84,11 @@ export function createHostFetch(invoke: Invoke, base: string) {
       },
     });
     const response = raw as HostResponse;
-    return new Response(response.body, {
+    // The core always sends the body as a string, empty when the server sent
+    // nothing. The Response constructor rejects any body, even an empty one,
+    // for the null-body statuses, and a 204 is what a successful sign-in gets.
+    const body = NULL_BODY_STATUSES.has(response.status) ? null : response.body;
+    return new Response(body, {
       status: response.status,
       headers: new Headers(response.headers),
     });
