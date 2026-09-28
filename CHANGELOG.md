@@ -6,6 +6,12 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Fixed
+
+- **web:** the Unsilenced/Silenced and Open/Closed switches now refetch the flat list. The list's query key only covered matchers and sort, so pressing a switch changed the button and nothing else; the grouped view, which keys on the whole query, was unaffected.
+- **desktop:** password sign-in works through the core. Local and LDAP accounts never could sign in from the desktop client: the core sent no `Origin`, so the server refused the sign-in as cross-site and the console reported it as missing read access, and the `204 No Content` a successful sign-in answers with crashed the transport, which surfaced as "Unable to reach the Promview API". The core now names the server as its origin on every request and the transport builds bodiless responses correctly.
+- **desktop:** a sign-in or sign-out made in the console window is announced to every window, as one made from the tray already was, so the compact window is signed in the moment the main one is instead of staying on the sign-in gate.
+
 ## [0.1.0-beta.3] - 2026-09-24
 
 A small release for the desktop client: links in an alert's details open in

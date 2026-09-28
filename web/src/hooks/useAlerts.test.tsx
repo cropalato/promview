@@ -385,6 +385,32 @@ describe('useAlerts server-side query', () => {
     ]);
   });
 
+  it('restarts from the first page when the suppressed or closed switch changes', async () => {
+    fetchMock().mockImplementation(() =>
+      Promise.resolve(jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1 }))),
+    );
+    const { result, rerender } = renderHook(
+      ({ query }: { query: { suppressed?: boolean; closed?: boolean } }) =>
+        useAlerts(true, query, { liveRefreshDebounceMs: 0 }),
+      { initialProps: { query: {} } },
+    );
+
+    await waitFor(() => expect(result.current.state.status).toBe('ready'));
+    rerender({ query: { suppressed: true } });
+    await waitFor(() => expect(alertsFetchCalls()).toHaveLength(2));
+    rerender({ query: { suppressed: false } });
+    await waitFor(() => expect(alertsFetchCalls()).toHaveLength(3));
+    rerender({ query: { suppressed: false, closed: true } });
+    await waitFor(() => expect(alertsFetchCalls()).toHaveLength(4));
+
+    expect(alertsFetchCalls()).toEqual([
+      '/api/v1/alerts?limit=100&status=firing',
+      '/api/v1/alerts?limit=100&status=firing&suppressed=true',
+      '/api/v1/alerts?limit=100&status=firing&suppressed=false',
+      '/api/v1/alerts?limit=100&status=firing&suppressed=false&closed=true',
+    ]);
+  });
+
   it('ignores identity-only query changes', async () => {
     fetchMock().mockImplementation(() =>
       Promise.resolve(jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1 }))),
