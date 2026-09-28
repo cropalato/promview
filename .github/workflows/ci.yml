@@ -55,6 +55,33 @@ jobs:
         working-directory: web
       - run: make verify-web
 
+  # The product-video pipeline under video/: scripts, music and cards, which
+  # is everything the full render needs short of a display and the demo
+  # stack. Those run in the video workflow, on demand.
+  video:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            video/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install numpy scipy
+      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg fonts-jetbrains-mono
+      - run: npm ci
+        working-directory: web
+      - run: npm ci
+        working-directory: video
+      - run: npx playwright install --with-deps chromium
+        working-directory: video
+      - run: make video-check
+
   desktop:
     runs-on: ubuntu-latest
     steps:

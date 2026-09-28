@@ -5,6 +5,7 @@
 //   node video/build.mjs v2            the console tour
 //   node video/build.mjs v1            the trailer
 //   node video/build.mjs v3            the desktop client
+//   node video/build.mjs gifs          README clips from the captioned tour scenes
 //
 // Cuts land on bars: every clip is a whole number of bars (or a half, in the
 // trailer) and the music is generated for the same grid, so no transition
@@ -350,9 +351,44 @@ async function buildV3() {
   );
 }
 
+/**
+ * README clips: the captioned tour scenes as palette-optimised GIFs, 960 wide
+ * at 12 fps. Two passes, a palette from the frame differences, so a scene
+ * that mostly holds still spends its colours on what moves.
+ */
+async function buildGifs() {
+  await mkdir(`${OUT}gif/`, { recursive: true });
+  const scenes = [
+    'ingest',
+    'sources',
+    'filter',
+    'group',
+    'detail',
+    'operate',
+    'live',
+    'bulk',
+    'silence',
+    'themes',
+  ];
+  for (const name of scenes) {
+    const source = `${OUT}v2/${name}.mp4`;
+    ffmpeg([
+      '-i',
+      source,
+      '-vf',
+      'fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle',
+      '-loop',
+      '0',
+      `${OUT}gif/${name}.gif`,
+    ]);
+    console.log(`wrote ${OUT}gif/${name}.gif`);
+  }
+}
+
 const target = process.argv[2] ?? 'filter';
 if (target === 'all') await buildAll();
 else if (target === 'v2') await buildV2();
 else if (target === 'v1') await buildV1();
 else if (target === 'v3') await buildV3();
+else if (target === 'gifs') await buildGifs();
 else await buildScene(target);

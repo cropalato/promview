@@ -10,7 +10,8 @@ in [`docs/video-plan.md`](../docs/video-plan.md).
 make video-demo-up            # postgres, promview (local accounts), two Alertmanagers
 make video-capture-web        # the ten console scenes, in story order, from an empty console
 make video-capture-desktop    # the desktop client, one take, inside a sandbox desktop
-make video-assemble TARGET=v2 # v1 trailer, v2 console tour, v3 desktop client, all, or a scene
+make video-assemble TARGET=v2 # v1 trailer, v2 console tour, v3 desktop client, gifs, all, or a scene
+make video-check              # what CI runs: scripts, music and cards, no display needed
 make video-demo-down
 ```
 

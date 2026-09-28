@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check load-test docker-build changelog-check docs-check vuln vuln-go vuln-web vuln-desktop
+.PHONY: fmt fmt-check vet test test-race test-postgres build verify-go verify-web verify-desktop verify verify-helm helm-lint helm-template helm-package compose-check migration-check load-test docker-build changelog-check docs-check vuln vuln-go vuln-web vuln-desktop video video-check video-demo-up video-demo-down video-seed video-capture-web video-capture-desktop video-assemble
 
 fmt:
 	gofmt -w $$(find cmd internal -name '*.go')
@@ -143,3 +143,14 @@ video-assemble:
 	cd video && node build.mjs $(or $(TARGET),all)
 
 video: video-capture-web video-capture-desktop video-assemble
+
+# What can be verified without a display or the demo stack: every script
+# parses and is formatted, the music generator renders, and the card page
+# draws each kind of card through the frame pipe into both encoders. Runs in
+# CI on every change; the full render is the video workflow, on demand.
+video-check:
+	cd video && for f in $$(find . -name '*.mjs' -not -path './node_modules/*'); do node --check $$f || exit 1; done
+	npx --prefix web prettier --config web/.prettierrc.json --check "video/**/*.mjs"
+	mkdir -p video/out/check
+	python3 video/audio/synth.py preview video/out/check/preview.wav
+	cd video && node cards/render.mjs --check
