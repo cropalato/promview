@@ -1,0 +1,49 @@
+# Notification daemon for the desktop scenes. Top right, Nord, the console's face.
+[global]
+    monitor = 0
+    follow = none
+    width = 420
+    height = (0, 160)
+    origin = top-right
+    offset = (24, 24)
+    notification_limit = 3
+    progress_bar = false
+    transparency = 0
+    separator_height = 2
+    padding = 14
+    horizontal_padding = 16
+    frame_width = 1
+    frame_color = "#4c566a"
+    separator_color = frame
+    sort = yes
+    font = JetBrains Mono 11
+    line_height = 2
+    markup = full
+    format = "<b>%s</b>\n%b"
+    alignment = left
+    vertical_alignment = center
+    show_age_threshold = -1
+    ellipsize = end
+    ignore_newline = no
+    stack_duplicates = false
+    show_indicators = no
+    icon_position = off
+    corner_radius = 8
+    mouse_left_click = close_current
+    idle_threshold = 0
+
+[urgency_low]
+    background = "#3b4252"
+    foreground = "#eceff4"
+    timeout = 8
+
+[urgency_normal]
+    background = "#3b4252"
+    foreground = "#eceff4"
+    timeout = 8
+
+[urgency_critical]
+    background = "#3b4252"
+    foreground = "#eceff4"
+    frame_color = "#eeaab0"
+    timeout = 10
