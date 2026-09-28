@@ -77,6 +77,17 @@ describe('createHostFetch', () => {
     expect(payload.request.body).toBeUndefined();
   });
 
+  it('rebuilds a bodiless status without a body, as a sign-in answers 204', async () => {
+    // The core always sends a string body, empty when the server sent nothing,
+    // and the Response constructor refuses any body at all for a 204.
+    const invoke = vi.fn().mockResolvedValue({ status: 204, body: '', headers: [] });
+    const response = await createHostFetch(invoke, '')('/api/v1/auth/login', { method: 'POST' });
+
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+    await expect(response.text()).resolves.toBe('');
+  });
+
   it('carries a Headers instance through', async () => {
     const invoke = vi.fn().mockResolvedValue({ status: 200, body: '{}', headers: [] });
     await createHostFetch(invoke, '')('/api/v1/me', {

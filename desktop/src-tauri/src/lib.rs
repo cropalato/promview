@@ -47,7 +47,7 @@ fn base_url_script(base: &str) -> String {
 /// page-installed global the stream uses. The tray can sign in and out on its
 /// own, and a console left on the sign-in gate has to find out without the
 /// operator hunting for a refresh.
-fn announce_session(app: &AppHandle, kind: &str) {
+pub(crate) fn announce_session(app: &AppHandle, kind: &str) {
     let script = format!(
         "globalThis.__PROMVIEW_SESSION__&&globalThis.__PROMVIEW_SESSION__({{\"kind\":\"{kind}\"}});"
     );
