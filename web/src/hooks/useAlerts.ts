@@ -5,14 +5,28 @@ import type { AlertSummary } from '../alerts/types';
 
 /**
  * Server-side query applied to every alerts request: serialized label
- * matchers (repeated `match` params) plus the sort field/order. The hook
- * restarts from the first page whenever the query content changes.
+ * matchers (repeated `match` params), the sort field/order, and the
+ * suppressed/closed visibility switches. The hook restarts from the first
+ * page whenever the query content changes.
  */
-export type AlertsQueryInput = Pick<AlertsQuery, 'match' | 'sort' | 'order'>;
+export type AlertsQueryInput = Pick<
+  AlertsQuery,
+  'match' | 'sort' | 'order' | 'suppressed' | 'closed'
+>;
 
-/** Content key for a query; object identity is irrelevant to the hook. */
+/**
+ * Content key for a query; object identity is irrelevant to the hook. Every
+ * field that reaches the server must take part, or changing it would never
+ * trigger a refetch.
+ */
 function queryKeyOf(query: AlertsQueryInput): string {
-  return JSON.stringify([query.match ?? [], query.sort ?? null, query.order ?? null]);
+  return JSON.stringify([
+    query.match ?? [],
+    query.sort ?? null,
+    query.order ?? null,
+    query.suppressed ?? null,
+    query.closed ?? null,
+  ]);
 }
 
 /** Accumulated alert data: the rows loaded so far plus server-side totals. */
