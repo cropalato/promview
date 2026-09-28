@@ -1,0 +1,10 @@
+# The desktop client's configuration for the videos. Also what the config
+# scene shows on screen, so it should read well.
+server_url = "http://localhost:8080"
+poll_interval_secs = 30
+webkit_dmabuf = "off"
+update_check = false
+
+[[notifications.rules]]
+severity = "^critical$"
+team = "^(payments|platform)$"

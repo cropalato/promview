@@ -1,0 +1,79 @@
+# Panel for the desktop scenes: a dark bar at the bottom with the system tray
+# and a clock, the way a small Linux desktop looks. Nord colours.
+#-------------------------------------
+rounded = 0
+border_width = 0
+background_color = #2e3440 100
+border_color = #2e3440 0
+
+rounded = 4
+border_width = 0
+background_color = #434c5e 100
+border_color = #4c566a 100
+
+rounded = 4
+border_width = 0
+background_color = #3b4252 100
+border_color = #4c566a 100
+
+#-------------------------------------
+panel_items = TSC
+panel_size = 100% 40
+panel_margin = 0 0
+panel_padding = 8 0 8
+panel_background_id = 1
+wm_menu = 0
+panel_dock = 0
+panel_position = bottom center horizontal
+panel_layer = top
+panel_monitor = all
+autohide = 0
+strut_policy = follow_size
+font_shadow = 0
+
+#-------------------------------------
+taskbar_mode = single_desktop
+taskbar_padding = 0 0 4
+taskbar_background_id = 0
+taskbar_name = 0
+task_text = 1
+task_icon = 1
+task_centered = 0
+task_maximum_size = 220 34
+task_padding = 10 4 6
+task_font = JetBrains Mono 10
+task_font_color = #b8c1d1 100
+task_active_font_color = #eceff4 100
+task_background_id = 0
+task_active_background_id = 2
+task_icon_asb = 100 0 0
+task_active_icon_asb = 100 0 0
+urgent_nb_of_blink = 0
+
+#-------------------------------------
+systray_padding = 6 0 8
+systray_background_id = 0
+systray_sort = ascending
+systray_icon_size = 22
+systray_icon_asb = 100 0 0
+systray_monitor = 1
+
+#-------------------------------------
+time1_format = %H:%M
+time1_font = JetBrains Mono 11
+time1_timezone = UTC
+clock_font_color = #eceff4 100
+clock_padding = 12 0
+clock_background_id = 0
+clock_tooltip =
+
+#-------------------------------------
+tooltip_show_timeout = 0.3
+tooltip_hide_timeout = 0.2
+tooltip_padding = 10 6
+tooltip_background_id = 3
+tooltip_font_color = #eceff4 100
+tooltip_font = JetBrains Mono 11
+
+#-------------------------------------
+mouse_effects = 0

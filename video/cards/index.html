@@ -1,0 +1,258 @@
+<!doctype html>
+<!--
+  Title cards, captions and the trailer's motion, drawn on a canvas by a pure
+  function of time. render.mjs asks for one frame at a time, so nothing here
+  depends on wall-clock or on the previous frame: renderFrame(kind, t, dur, p)
+  always draws the same pixels for the same arguments.
+
+  Colours are the console's own Nord palette (web/src/styles/global.css) and
+  the type is the console's monospace face, so a card and a capture sit next
+  to each other without a seam.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; background: #000; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="1920" height="1080"></canvas>
+    <script>
+      const W = 1920, H = 1080;
+      const canvas = document.getElementById('c');
+      const ctx = canvas.getContext('2d', { alpha: true });
+
+      // Nord, as the console defines it.
+      const T = {
+        bg: '#2e3440', panel: '#3b4252', panelRaise: '#434c5e', border: '#4c566a',
+        text: '#eceff4', muted: '#b8c1d1', faint: '#a0aabb', accent: '#8fc4d3',
+        critical: '#eeaab0', warning: '#ebcb8b', info: '#9bc3c2',
+        dot: 'rgba(216, 222, 233, 0.06)',
+      };
+      const MONO = "'JetBrains Mono', 'Cascadia Mono', 'Liberation Mono', monospace";
+
+      const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+      const easeOutExpo = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+      const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+      // In over `fin` seconds, hold, out over `fout` seconds before `dur`.
+      const fadeInOut = (t, dur, fin = 0.4, fout = 0.3) =>
+        Math.min(easeOutCubic(clamp(t / fin)), clamp((dur - t) / fout));
+
+      function background() {
+        ctx.fillStyle = T.bg;
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = T.dot;
+        for (let y = 12; y < H; y += 24) for (let x = 12; x < W; x += 24) ctx.fillRect(x, y, 2, 2);
+        const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H);
+        g.addColorStop(0, 'rgba(0,0,0,0)');
+        g.addColorStop(1, 'rgba(0,0,0,0.35)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      // The favicon's pulse line, drawn up to `progress` of its length.
+      const PULSE = [[8, 36], [20, 36], [26, 20], [36, 48], [42, 30], [46, 36], [56, 36]];
+      function pulseLine(x, y, size, progress, alpha = 1) {
+        const s = size / 64;
+        const pts = PULSE.map(([px, py]) => [x + px * s, y + py * s]);
+        const lengths = [];
+        let total = 0;
+        for (let i = 1; i < pts.length; i += 1) {
+          const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+          lengths.push(d);
+          total += d;
+        }
+        let remaining = total * clamp(progress);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = T.accent;
+        ctx.lineWidth = 4 * s;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = T.accent;
+        ctx.shadowBlur = 18 * s;
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length && remaining > 0; i += 1) {
+          const f = clamp(remaining / lengths[i - 1]);
+          ctx.lineTo(
+            pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f,
+            pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f,
+          );
+          remaining -= lengths[i - 1];
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function text(str, x, y, o = {}) {
+        const { size = 32, color = T.text, weight = '500', align = 'left', letter = 0, alpha = 1 } = o;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = color;
+        ctx.font = `${weight} ${size}px ${MONO}`;
+        ctx.textAlign = align;
+        ctx.textBaseline = 'alphabetic';
+        if (letter) ctx.letterSpacing = `${letter}em`;
+        ctx.fillText(str, x, y);
+        ctx.restore();
+      }
+
+      function codeBox(lines, x, y, width, alpha) {
+        const pad = 28, lineH = 40, h = pad * 2 + lines.length * lineH - 10;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = T.panel;
+        ctx.strokeStyle = T.border;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, width, h, 12);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        lines.forEach((line, i) => {
+          text('$', x + pad, y + pad + 24 + i * lineH, { size: 26, color: T.faint, alpha });
+          text(line, x + pad + 34, y + pad + 24 + i * lineH, { size: 26, color: T.text, alpha });
+        });
+      }
+
+      const KINDS = {
+        // Opening: the pulse line draws itself, then the name rises under it.
+        title(t, dur, p) {
+          background();
+          const a = fadeInOut(t, dur, 0.5, 0.5);
+          pulseLine(W / 2 - 110, H / 2 - 190, 220, easeOutExpo(clamp(t / 1.1)), a);
+          const k = easeOutExpo(clamp((t - 0.6) / 0.9));
+          const rise = (1 - k) * 28;
+          text('Promview', W / 2, H / 2 + 110 + rise, { size: 104, weight: '700', align: 'center', alpha: a * k });
+          text(p.subtitle || 'OPS CONSOLE', W / 2, H / 2 + 170 + rise, { size: 24, color: T.faint, align: 'center', letter: 0.3, alpha: a * k });
+        },
+
+        // A sentence or two, centred. Each line arrives a beat after the last.
+        statement(t, dur, p) {
+          background();
+          const lines = p.lines || [];
+          const size = p.size || 64;
+          const out = clamp((dur - t) / 0.3);
+          const startY = H / 2 - ((lines.length - 1) * size * 1.35) / 2 + size * 0.35;
+          lines.forEach((line, i) => {
+            const k = easeOutExpo(clamp((t - i * 0.18) / 0.8));
+            text(line, W / 2, startY + i * size * 1.35 + (1 - k) * 34, {
+              size, weight: '600', align: 'center', alpha: k * out,
+              color: p.accentLine === i ? T.accent : T.text,
+            });
+          });
+          if (p.kicker) {
+            const k = easeOutExpo(clamp(t / 0.8));
+            text(p.kicker, W / 2, startY - size * 1.2, { size: 22, color: T.faint, align: 'center', letter: 0.25, alpha: k * out });
+          }
+        },
+
+        // Where to get it.
+        end(t, dur, p) {
+          background();
+          const a = fadeInOut(t, dur, 0.5, 0.6);
+          const k = easeOutExpo(clamp(t / 0.9));
+          pulseLine(W / 2 - 40, 210, 80, 1, a);
+          text('Promview', W / 2, 360, { size: 72, weight: '700', align: 'center', alpha: a });
+          text(p.tagline || 'An operational console for the alerts Alertmanager is already sending you.', W / 2, 415, {
+            size: 24, color: T.muted, align: 'center', alpha: a,
+          });
+          const k2 = easeOutExpo(clamp((t - 0.4) / 0.9));
+          codeBox(p.commands || ['docker compose up --build'], W / 2 - 440, 500 + (1 - k2) * 20, 880, a * k2);
+          text(p.url || 'github.com/cropalato/promview', W / 2, 720, { size: 40, weight: '600', color: T.accent, align: 'center', alpha: a * k2 });
+          text(p.footer || 'MIT  ·  beta  ·  Linux and Windows desktop installers on every release', W / 2, 790, {
+            size: 20, color: T.faint, align: 'center', alpha: a * k2,
+          });
+        },
+
+        // A configuration file, as an operator would see it. Lines arrive one
+        // after another; comments faint, tables in accent, strings warm.
+        code(t, dur, p) {
+          background();
+          const out = clamp((dur - t) / 0.4);
+          const lines = p.lines || [];
+          const lineH = 40, pad = 32, width = 1040;
+          const x = W / 2 - width / 2, y = 300;
+          const height = pad * 2 + lines.length * lineH - 8;
+          const k0 = easeOutExpo(clamp(t / 0.6));
+          text(p.title || '', W / 2, 240, { size: 22, color: T.faint, align: 'center', letter: 0.2, alpha: k0 * out });
+          ctx.save();
+          ctx.globalAlpha = k0 * out;
+          ctx.fillStyle = T.panel;
+          ctx.strokeStyle = T.border;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.roundRect(x, y, width, height, 12);
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+          lines.forEach((line, i) => {
+            const k = easeOutExpo(clamp((t - 0.3 - i * 0.11) / 0.5));
+            const alpha = k * out;
+            const ly = y + pad + 26 + i * lineH;
+            const lx = x + pad + (1 - k) * 16;
+            const trimmed = line.trim();
+            if (trimmed.startsWith('#')) return text(line, lx, ly, { size: 24, color: T.faint, alpha });
+            if (trimmed.startsWith('[')) return text(line, lx, ly, { size: 24, color: T.accent, weight: '600', alpha });
+            const eq = line.indexOf('=');
+            if (eq === -1) return text(line, lx, ly, { size: 24, alpha });
+            const keyPart = line.slice(0, eq + 1);
+            text(keyPart, lx, ly, { size: 24, alpha });
+            ctx.font = `500 24px ${MONO}`;
+            const keyWidth = ctx.measureText(keyPart).width;
+            text(line.slice(eq + 1), lx + keyWidth, ly, { size: 24, color: T.warning, alpha });
+          });
+        },
+
+        // Lower third, transparent background, slides in from the left.
+        caption(t, dur, p) {
+          const k = easeOutExpo(clamp(t / 0.55));
+          const a = k * clamp((dur - t) / 0.3);
+          const x = 64 + (1 - k) * -40;
+          const y = H - 96;
+          ctx.save();
+          ctx.globalAlpha = a;
+          ctx.font = `500 30px ${MONO}`;
+          const width = ctx.measureText(p.text || '').width + 72;
+          ctx.fillStyle = 'rgba(46, 52, 64, 0.88)';
+          ctx.strokeStyle = T.border;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.roundRect(x, y - 44, width, 64, 10);
+          ctx.fill();
+          ctx.stroke();
+          ctx.clip();
+          ctx.fillStyle = T.accent;
+          ctx.fillRect(x, y - 44, 6, 64);
+          ctx.restore();
+          text(p.text || '', x + 30, y + 3, { size: 30, alpha: a });
+        },
+      };
+
+      // A frame is "held" when the picture no longer changes with time, so
+      // the renderer can reuse the last encoded frame instead of drawing it.
+      const HOLD = {
+        title: (t, dur) => t > 1.6 && t < dur - 0.5,
+        statement: (t, dur, p) => t > 0.8 + ((p.lines || []).length - 1) * 0.18 && t < dur - 0.3,
+        end: (t, dur) => t > 1.4 && t < dur - 0.6,
+        caption: (t, dur) => t > 0.55 && t < dur - 0.3,
+        code: (t, dur, p) => t > 0.9 + ((p.lines || []).length - 1) * 0.11 && t < dur - 0.4,
+      };
+
+      window.renderFrame = (kind, t, dur, params = {}) => {
+        ctx.clearRect(0, 0, W, H);
+        KINDS[kind](t, dur, params);
+        return HOLD[kind](t, dur, params);
+      };
+      window.frameData = () => canvas.toDataURL('image/png');
+      window.ready = Promise.all([
+        document.fonts.load(`500 30px ${MONO}`),
+        document.fonts.load(`600 64px ${MONO}`),
+        document.fonts.load(`700 104px ${MONO}`),
+      ]);
+    </script>
+  </body>
+</html>

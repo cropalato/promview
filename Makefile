@@ -115,3 +115,31 @@ vuln-desktop:
 	cd desktop/src-tauri && cargo audit
 
 vuln: vuln-go vuln-web vuln-desktop
+
+# Product videos. Every frame comes from the scripts under video/; see
+# docs/video-plan.md. The demo stack is disposable and holds nothing.
+VIDEO_COMPOSE := docker compose -f video/demo/compose.yaml
+
+video-demo-up:
+	$(VIDEO_COMPOSE) up --build --wait
+
+video-demo-down:
+	$(VIDEO_COMPOSE) down --volumes
+
+video-seed:
+	node video/demo/seed.mjs --wave $(or $(WAVE),base)
+
+video-capture-web:
+	video/scenes/capture.sh $(or $(SCENE),all)
+
+# Needs openbox, tint2, snixembed, dunst and xdotool, and a client built with
+# `cargo build --release --features tauri/custom-protocol`.
+video-capture-desktop:
+	video/scenes/capture.sh tour
+
+# TARGET is a scene name, all (every scene plus a rough cut), v2 (the
+# console tour) or v1 (the trailer).
+video-assemble:
+	cd video && node build.mjs $(or $(TARGET),all)
+
+video: video-capture-web video-capture-desktop video-assemble

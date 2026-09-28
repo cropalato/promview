@@ -5,3 +5,5 @@
 /web/dist/
 /web/coverage/
 .playwright-mcp/
+/video/out/
+/video/node_modules/

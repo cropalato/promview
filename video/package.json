@@ -1,0 +1,16 @@
+{
+  "name": "promview-video",
+  "private": true,
+  "description": "Scripted captures, title cards and assembly for the Promview product videos",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "seed": "node demo/seed.mjs",
+    "screenshot": "node screenshot.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

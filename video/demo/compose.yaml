@@ -1,0 +1,105 @@
+# Demo stack for the product videos. Disposable: everything here exists to make
+# a convincing capture and nothing in it is meant for another use.
+#
+#   docker compose -f video/demo/compose.yaml up --build --wait
+#   node video/demo/seed.mjs --wave base
+#
+# The console runs in local auth mode with one operator account, and two real
+# Alertmanagers each route to their own Promview source. Alerts are injected
+# through Alertmanager's own API, so the webhook, grouping, silences and
+# reconciliation in the videos are the real thing.
+#
+# Credentials below are demo values committed on purpose. They open nothing but
+# this stack on a developer machine.
+
+name: promview-video
+
+x-app-environment: &app-environment
+  PROMVIEW_DATABASE_URL: postgres://promview:promview@postgres:5432/promview?sslmode=disable
+  PROMVIEW_AUTH_MODE: local
+  # Reconciliation is what flags a silenced row; the default minute would leave
+  # the silence scene waiting on nothing visible.
+  PROMVIEW_RECONCILE_INTERVAL: 5s
+  PROMVIEW_SILENCE_DEFAULT_DURATION: 2h
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: promview
+      POSTGRES_USER: promview
+      POSTGRES_PASSWORD: promview
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promview -d promview"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  migrate:
+    build: ../..
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *app-environment
+
+  # Creates the operator account and both sources. Runs the application image
+  # so the CLI is exactly the one the release ships.
+  bootstrap:
+    build: ../..
+    entrypoint: ["sh", "/bootstrap.sh"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-environment
+      DEMO_USERNAME: ada
+      DEMO_PASSWORD: correct-horse-battery-staple
+      PRODUCTION_TOKEN: video-production-token-2026
+      STAGING_TOKEN: video-staging-token-2026
+    volumes:
+      - ./bootstrap.sh:/bootstrap.sh:ro
+
+  app:
+    build: ../..
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment: *app-environment
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  alertmanager-production:
+    image: prom/alertmanager:v0.34.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=:9093
+    volumes:
+      - ./alertmanager-production.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    depends_on:
+      app:
+        condition: service_healthy
+
+  alertmanager-staging:
+    image: prom/alertmanager:v0.34.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=:9093
+    volumes:
+      - ./alertmanager-staging.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9094:9093"
+    depends_on:
+      app:
+        condition: service_healthy

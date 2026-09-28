@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Window manager for the desktop scenes: plain decorations, no desktop menu,
+     nothing that would animate or steal a frame. No mouse bindings on the
+     client area: openbox's click-to-focus grab swallowed the button events
+     the webview needed, so focus is given with xdotool instead. -->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <focus><focusNew>yes</focusNew><followMouse>no</followMouse></focus>
+  <placement><policy>Smart</policy><center>yes</center></placement>
+  <theme>
+    <name>Onyx</name>
+    <titleLayout>NLC</titleLayout>
+    <keepBorder>yes</keepBorder>
+    <animateIconify>no</animateIconify>
+    <font place="ActiveWindow"><name>JetBrains Mono</name><size>10</size><weight>Bold</weight></font>
+    <font place="InactiveWindow"><name>JetBrains Mono</name><size>10</size></font>
+  </theme>
+  <desktops><number>1</number><popupTime>0</popupTime></desktops>
+  <margins><bottom>40</bottom></margins>
+  <keyboard>
+    <keybind key="A-F4"><action name="Close"/></keybind>
+  </keyboard>
+  <mouse>
+    <context name="Titlebar">
+      <mousebind button="Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="Left" action="Drag"><action name="Move"/></mousebind>
+    </context>
+  </mouse>
+  <menu/>
+  <applications/>
+</openbox_config>
