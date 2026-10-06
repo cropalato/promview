@@ -66,7 +66,7 @@ jobs:
       - run: make video-assemble TARGET=v3
       - run: make video-assemble TARGET=v1
       - run: make video-assemble TARGET=gifs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: promview-videos
           path: |
