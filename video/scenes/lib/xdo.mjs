@@ -2,6 +2,7 @@
 // geometry. The desktop scenes use this where the web scenes use Playwright.
 
 import { execFileSync, spawn } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 import { sleep } from './beat.mjs';
 
 export const xdo = (...args) =>
@@ -153,6 +154,38 @@ export function launch(command, args = [], { log } = {}) {
     detached: false,
   });
   return { child, stop: () => child.kill('SIGTERM') };
+}
+
+/**
+ * With VIDEO_PROBE set, records where the keyboard focus and the pointer are
+ * and what is on screen, under a label. For a take that works on one machine
+ * and not on another: the video shows the symptom, this shows the state. Off
+ * by default because a screenshot costs time the scene's clock does not
+ * know about, and it never throws.
+ */
+export function probe(label) {
+  if (!process.env.VIDEO_PROBE) return;
+  const dir = new URL('../../out/scenes/', import.meta.url).pathname;
+  const ask = (...args) => {
+    try {
+      return xdo(...args).replace(/\n/g, ' ');
+    } catch (err) {
+      return `(${err.message.split('\n')[0]})`;
+    }
+  };
+  const focus = ask('getwindowfocus');
+  const line = [
+    label,
+    `focus=${focus} "${ask('getwindowfocus', 'getwindowname')}"`,
+    `active="${ask('getactivewindow', 'getwindowname')}"`,
+    `mouse=${ask('getmouselocation', '--shell')}`,
+  ].join(' | ');
+  try {
+    appendFileSync(`${dir}tour.probe.log`, `${line}\n`);
+    screenshot(`${dir}probe-${label}.png`);
+  } catch (err) {
+    console.error(`probe ${label}: ${err.message.split('\n')[0]}`);
+  }
 }
 
 export const screenshot = (path) =>

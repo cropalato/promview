@@ -4,7 +4,7 @@
 // The build cuts captions and cards around it by beat.
 
 import { runDesktopScene } from '../lib/desktopScene.mjs';
-import { typeKeys } from '../lib/xdo.mjs';
+import { typeKeys, probe } from '../lib/xdo.mjs';
 import { sleep } from '../lib/beat.mjs';
 import { OPERATOR, enableNotifications } from '../lib/console.mjs';
 
@@ -87,18 +87,24 @@ export async function body({
     await pointer.moveTo(...rel(FORM.username), { ms: 800 });
     mark('click');
     await pointer.click();
+    probe('1-username-clicked');
     await typeKeys(OPERATOR.username, { delay: 70 });
+    probe('2-username-typed');
   });
   await at(10.5, async () => {
     await pointer.moveTo(...rel(FORM.password), { ms: 500 });
     mark('click');
     await pointer.click();
+    probe('3-password-clicked');
     await typeKeys(OPERATOR.password, { delay: 22 });
+    probe('4-password-typed');
   });
   await at(13, async () => {
     await pointer.moveTo(...rel(FORM.submit), { ms: 500 });
     mark('apply');
     await pointer.click();
+    await sleep(1500);
+    probe('5-submitted');
   });
   await at(15.5, () => pointer.moveTo(main.x + 640, main.y + 620, { ms: 900 }));
 
