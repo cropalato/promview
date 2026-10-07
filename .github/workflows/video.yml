@@ -75,5 +75,15 @@ jobs:
             video/out/v3.mp4
             video/out/gif/*.gif
           if-no-files-found: error
+      # The client's own log and the scene marks: what a failed or odd take
+      # needs in order to be diagnosed without filming it again.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: promview-video-logs
+          path: |
+            video/out/scenes/*.log
+            video/out/scenes/*.marks.json
+          if-no-files-found: warn
       - if: always()
         run: make video-demo-down
