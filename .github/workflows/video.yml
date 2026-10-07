@@ -61,7 +61,11 @@ jobs:
           cd desktop/src-tauri && cargo build --release --features tauri/custom-protocol
       - run: make video-demo-up
       - run: make video-capture-web
+      # VIDEO_PROBE makes the tour record focus, pointer and a screenshot at
+      # each step of the sign-in; the logs artifact below carries them.
       - run: make video-capture-desktop
+        env:
+          VIDEO_PROBE: "1"
       - run: make video-assemble TARGET=v2
       - run: make video-assemble TARGET=v3
       - run: make video-assemble TARGET=v1
@@ -84,6 +88,7 @@ jobs:
           path: |
             video/out/scenes/*.log
             video/out/scenes/*.marks.json
+            video/out/scenes/probe-*.png
           if-no-files-found: warn
       - if: always()
         run: make video-demo-down
