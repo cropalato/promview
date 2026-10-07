@@ -112,7 +112,7 @@ export async function body({
     await sleep(1500);
     probe('5-submitted');
   });
-  await at(15.5, () => pointer.moveTo(main.x + 640, main.y + 620, { ms: 900 }));
+  await at(15.5, () => pointer.moveTo(...rel([640, 620]), { ms: 900 }));
 
   // Compact window over the terminal.
   await at(19, () => menu(3));
