@@ -42,7 +42,9 @@ export function findWindow(...search) {
  * does not reach. Absolute position from xwininfo.
  */
 export function findInTree(namePattern) {
-  const tree = execFileSync('xwininfo', ['-root', '-tree'], { encoding: 'utf8' });
+  const tree = execFileSync('xwininfo', ['-root', '-tree'], {
+    encoding: 'utf8',
+  });
   const pattern = new RegExp(namePattern);
   for (const line of tree.split('\n')) {
     // Name or class may carry the label, so the whole line is matched.
@@ -61,6 +63,19 @@ export function findInTree(namePattern) {
     }
   }
   return null;
+}
+
+/**
+ * Where a window's client area really is on the screen, from xwininfo. Read
+ * at the moment it is needed: a move the client applies asynchronously can
+ * leave an earlier read of xdotool's geometry stale.
+ */
+export function clientOrigin(id) {
+  const out = execFileSync('xwininfo', ['-id', id], { encoding: 'utf8' });
+  const x = /Absolute upper-left X:\s+(-?\d+)/.exec(out);
+  const y = /Absolute upper-left Y:\s+(-?\d+)/.exec(out);
+  if (!x || !y) throw new Error(`no geometry from xwininfo for ${id}`);
+  return { x: Number(x[1]), y: Number(y[1]) };
 }
 
 export async function waitForWindow(search, { timeoutMs = 15_000, tree = false } = {}) {
@@ -136,7 +151,9 @@ export class XPointer {
  * `xdotool windowclose`, which destroys the window outright.
  */
 export async function clickClose(pointer, geometry, { ms = 700 } = {}) {
-  await pointer.moveTo(geometry.x + geometry.width - 13, geometry.y - 13, { ms });
+  await pointer.moveTo(geometry.x + geometry.width - 13, geometry.y - 13, {
+    ms,
+  });
   await pointer.click();
 }
 
@@ -174,8 +191,19 @@ export function probe(label) {
     }
   };
   const focus = ask('getwindowfocus');
+  const win = ask('search', '--onlyvisible', '--name', '^Promview$').split(' ')[0];
+  const origin = () => {
+    try {
+      const o = clientOrigin(win);
+      return `${o.x},${o.y}`;
+    } catch (err) {
+      return `(${err.message.split('\n')[0]})`;
+    }
+  };
   const line = [
     label,
+    `xdotool=${ask('getwindowgeometry', '--shell', win)}`,
+    `xwininfo=${origin()}`,
     `focus=${focus} "${ask('getwindowfocus', 'getwindowname')}"`,
     `active="${ask('getactivewindow', 'getwindowname')}"`,
     `mouse=${ask('getmouselocation', '--shell')}`,

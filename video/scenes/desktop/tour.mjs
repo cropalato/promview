@@ -4,7 +4,7 @@
 // The build cuts captions and cards around it by beat.
 
 import { runDesktopScene } from '../lib/desktopScene.mjs';
-import { typeKeys, probe } from '../lib/xdo.mjs';
+import { typeKeys, probe, clientOrigin } from '../lib/xdo.mjs';
 import { sleep } from '../lib/beat.mjs';
 import { OPERATOR, enableNotifications } from '../lib/console.mjs';
 
@@ -31,7 +31,9 @@ export async function setup(ctx) {
   ctx.xdo('windowmove', term.id, 40, 70);
   ctx.xdo('windowsize', term.id, 1400, 860);
 
-  ctx.launch(process.env.PROMVIEW_DESKTOP_BIN, [], { log: `${VIDEO}out/scenes/tour.desktop.log` });
+  ctx.launch(process.env.PROMVIEW_DESKTOP_BIN, [], {
+    log: `${VIDEO}out/scenes/tour.desktop.log`,
+  });
   ctx.main = await ctx.waitForWindow(['--name', '^Promview$']);
   ctx.xdo('windowmove', ctx.main.id, MAIN.x, MAIN.y);
   await sleep(2500);
@@ -54,7 +56,11 @@ export async function body({
   close,
   main,
 }) {
-  const rel = ([x, y]) => [main.x + x, main.y + y];
+  // Read when the click is made, not from the geometry taken earlier.
+  const rel = ([x, y]) => {
+    const origin = clientOrigin(main.id);
+    return [origin.x + x, origin.y + y];
+  };
   const menu = async (downs) => {
     const tray = await trayIcon();
     await pointer.moveToWindow(tray, { ms: 900 });
