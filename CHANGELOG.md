@@ -6,6 +6,16 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-beta.4] - 2026-10-08
+
+A fix release. Local and LDAP accounts can finally sign in from the desktop
+client, and the console's flat list follows the Silenced and Closed switches.
+The API and the database schema are unchanged from beta.3.
+
+### Added
+
+- **video:** the product videos are produced from scripts under `video/`: the console and the desktop client are driven on a virtual display and assembled with captions, cards and music. A `Video` workflow renders them on demand, and `make video-check` verifies the parts that need no display on every change.
+
 ### Fixed
 
 - **web:** the Unsilenced/Silenced and Open/Closed switches now refetch the flat list. The list's query key only covered matchers and sort, so pressing a switch changed the button and nothing else; the grouped view, which keys on the whole query, was unaffected.
