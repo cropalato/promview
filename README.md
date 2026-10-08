@@ -455,6 +455,25 @@ for Linux (`.deb`, `.rpm`) and Windows (`.msi`, `.exe`) are attached to every
 [`desktop/packaging/aur`](desktop/packaging/aur). macOS is not built: signing
 needs certificates this project does not have.
 
+### Install or Upgrade the Desktop Client
+
+On Linux x86_64, one command installs the newest release, or upgrades a client
+that is already installed. It picks the package that matches the system's
+package manager (`pacman`, `apt`, `dnf` or `zypper`) and asks for root only for
+the final install step:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cropalato/promview/main/scripts/install-desktop.sh | bash
+```
+
+Run it again whenever a new release is out. The script is
+[`scripts/install-desktop.sh`](scripts/install-desktop.sh); with a clone it takes
+a release tag to pin a version (`scripts/install-desktop.sh v0.1.0-beta.3`) and
+`--print` to show what it would install without installing it. The packages are
+unsigned, and every release so far is a pre-release, which is why the script
+reads the release list instead of GitHub's "latest". On Windows, download the
+`.msi` or `.exe` from the [releases](https://github.com/cropalato/promview/releases).
+
 ### Desktop Sign-In
 
 A desktop client cannot receive the cookie the browser flow ends in, so it signs
