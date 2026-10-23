@@ -103,11 +103,11 @@ impl Client {
 
     /// Firing counts. Asks for a single alert because only the aggregate is
     /// wanted: the page itself is the server's, and the tray needs none of it.
-    pub async fn firing_counts(&self) -> Result<AlertCounts, String> {
-        let url = self.alerts_url(1, &[])?;
-        let body = self.get(url.clone()).await.map_err(|err| err.to_string())?;
+    pub async fn firing_counts(&self) -> Result<AlertCounts, ApiError> {
+        let url = self.alerts_url(1, &[]).map_err(ApiError::Other)?;
+        let body = self.get(url.clone()).await?;
         let page: AlertsPage = serde_json::from_str(&body)
-            .map_err(|err| format!("decode alerts from {url}: {err}"))?;
+            .map_err(|err| ApiError::Other(format!("decode alerts from {url}: {err}")))?;
         Ok(AlertCounts {
             total: page.total,
             critical: *page.severity_counts.get("critical").unwrap_or(&0),
@@ -256,11 +256,12 @@ mod tests {
         let (base, _seen) = serve_once(401, "unauthorized");
         let credentials = Arc::new(Credentials::new("https://needs-session.example"));
 
-        let message = client(base, credentials)
+        let err = client(base, credentials)
             .firing_counts()
             .await
             .expect_err("401 is an error");
-        assert!(message.contains("sign in"), "unexpected message: {message}");
+        assert!(matches!(err, ApiError::SignInNeeded(_)), "got {err:?}");
+        assert!(err.to_string().contains("sign in"), "unexpected: {err}");
     }
 
     /// Like `serve_once`, but hands back the request target instead.

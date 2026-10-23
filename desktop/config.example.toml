@@ -49,6 +49,13 @@ webkit_dmabuf = "auto"
 # or should not reach github.com.
 update_check = true
 
+# Offer the firing alerts to other programs on this machine over D-Bus, as
+# org.promview.Desktop on the session bus. Read-only, and it uses the session
+# this client is signed in with, so a program that reads them needs no
+# credentials of its own. Linux only; set false to keep the alerts to this
+# client.
+dbus = true
+
 # Variables exported before anything reads them — the settings that are not this
 # application's own, and that would otherwise need a wrapper script around the
 # desktop entry.

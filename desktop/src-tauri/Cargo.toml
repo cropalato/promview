@@ -45,3 +45,9 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# The tray's own notifications already pull zbus in through notify-rust; the
+# interface other local programs read alerts from is the one place it is used
+# directly. D-Bus is Linux's, so nothing else builds it.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"

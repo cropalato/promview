@@ -1,0 +1,37 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<!--
+  What promview-desktop offers on the session bus: bus name org.promview.Desktop,
+  object /org/promview/Desktop. Read-only; nothing here changes an alert and no
+  credential crosses it.
+
+  Kept by hand next to src-tauri/src/dbus.rs, and checked against the running
+  service by src-tauri/tests/dbus.rs, so the two cannot drift apart unnoticed.
+-->
+<node>
+  <interface name="org.promview.Desktop1">
+    <!--
+      The firing alerts, as the server's own GET /api/v1/alerts answered,
+      undecoded, returned as the one string.
+      limit is clamped to 1..500. Each matcher is a label matcher such as
+      "team=platform" or "severity!=info"; they are ANDed by the server.
+      Fails with org.promview.Desktop.Error.SignInNeeded when the server wants a
+      session this client does not have, and org.promview.Desktop.Error.Unreachable
+      for any other failure.
+    -->
+    <method name="GetAlerts">
+      <arg name="limit" type="u" direction="in"/>
+      <arg name="matches" type="as" direction="in"/>
+      <arg type="s" direction="out"/>
+    </method>
+    <!--
+      The stream reported something that may have changed the alerts. Carries
+      nothing: call GetAlerts again with your own limit and matchers.
+    -->
+    <signal name="AlertsChanged"/>
+    <!-- "ok", "unreachable" or "signin-needed". Emits PropertiesChanged. -->
+    <property name="State" type="s" access="read"/>
+    <!-- The Promview server this client is pointed at. -->
+    <property name="Server" type="s" access="read"/>
+  </interface>
+</node>

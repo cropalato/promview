@@ -16,7 +16,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, WebviewWindow, WebviewWindowBuilder};
 
-use crate::api::Client;
+use crate::api::{ApiError, Client};
 use crate::config::{api_base, describe_source, Config};
 use crate::credentials::{Credentials, Durability};
 use crate::notify::NotificationRules;
@@ -27,6 +27,7 @@ use crate::update::Upgrade;
 pub mod api;
 pub mod config;
 pub mod credentials;
+pub mod dbus;
 pub mod notify;
 pub mod proxy;
 pub mod rendering;
@@ -313,16 +314,36 @@ pub fn run() {
             );
             let fallback = Duration::from_secs(config.poll_interval_secs);
             let activity: Arc<StreamActivity> = Arc::clone(&app.state::<Arc<StreamActivity>>());
+            let offer_bus = config.dbus;
+            let server = config.server_url.clone();
             tauri::async_runtime::spawn(async move {
+                // The bus is told what the tray learns rather than reading for
+                // itself: one read per change, whoever is listening.
+                let bus = if offer_bus {
+                    crate::dbus::start(client.clone(), &server).await
+                } else {
+                    eprintln!("promview-desktop: dbus interface switched off");
+                    None
+                };
                 loop {
-                    let tooltip = match client.firing_counts().await {
-                        Ok(counts) => format!("Promview — {}", counts.tray_label()),
-                        Err(message) => {
-                            eprintln!("promview-desktop: {message}");
-                            "Promview — cannot reach the server".to_string()
+                    let (tooltip, state) = match client.firing_counts().await {
+                        Ok(counts) => (
+                            format!("Promview — {}", counts.tray_label()),
+                            crate::dbus::State::Ok,
+                        ),
+                        Err(err) => {
+                            eprintln!("promview-desktop: {err}");
+                            let state = match err {
+                                ApiError::SignInNeeded(_) => crate::dbus::State::SignInNeeded,
+                                ApiError::Other(_) => crate::dbus::State::Unreachable,
+                            };
+                            ("Promview — cannot reach the server".to_string(), state)
                         }
                     };
                     let _ = tray.set_tooltip(Some(&tooltip));
+                    if let Some(bus) = &bus {
+                        bus.set_state(state).await;
+                    }
 
                     tokio::select! {
                         _ = activity.wait() => {
@@ -330,6 +351,9 @@ pub fn run() {
                             // tooltip is concerned; settle before re-reading so
                             // an alert storm costs one request, not hundreds.
                             tokio::time::sleep(Duration::from_millis(500)).await;
+                            if let Some(bus) = &bus {
+                                bus.alerts_changed().await;
+                            }
                         }
                         _ = tokio::time::sleep(fallback) => {}
                     }

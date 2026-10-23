@@ -178,6 +178,34 @@ has no click callback to hand back, so deep-linking to the alert is still to
 come. And the console only notifies while its window is hidden, as it does in a
 browser, so a visible window shows the alert in the table instead.
 
+## Reading the alerts from other programs
+
+On Linux the client offers the firing alerts to other programs of the same user on
+the session bus, so something that wants to show them (a desktop widget, a
+wallpaper) needs no credentials of its own: it asks this client, which already
+holds the session and the stream.
+
+| | |
+|---|---|
+| Bus name, object, interface | `org.promview.Desktop`, `/org/promview/Desktop`, `org.promview.Desktop1` |
+| `GetAlerts(limit u, matches as) → s` | The server's own `GET /api/v1/alerts?status=firing` body, undecoded. `limit` is clamped to 1..500; each matcher is passed as a `match` parameter (`team=platform`, `severity!=info`). |
+| `AlertsChanged()` signal | The stream reported something that may have changed the alerts. It carries nothing: call `GetAlerts` again with your own limit and matchers. Bursts are settled for half a second first. |
+| `State` property | `ok`, `unreachable` or `signin-needed`, with `PropertiesChanged`. |
+| `Server` property | The server this client is pointed at. |
+| Errors | `org.promview.Desktop.Error.SignInNeeded` (the server wants a session this client lacks; sign in from the tray) and `org.promview.Desktop.Error.Unreachable`. |
+
+```sh
+busctl --user call org.promview.Desktop /org/promview/Desktop org.promview.Desktop1 GetAlerts uas 50 1 severity=critical
+busctl --user monitor org.promview.Desktop
+```
+
+It is read-only on purpose: the session bus is open to every process of the user,
+so nothing that changes an alert, and no token, goes over it. If another client
+already owns the name, this one logs it and runs without the interface. Set
+`dbus = false` in the config file to not offer it. The interface is described in
+[`org.promview.Desktop1.xml`](org.promview.Desktop1.xml), which a test checks
+against the running service.
+
 ## Installers
 
 Tagging a release builds the client on Linux and Windows and attaches the
@@ -314,6 +342,7 @@ server_url = "https://promview.internal"
 poll_interval_secs = 60
 webkit_dmabuf = "auto"   # or "on" / "off"; see A Linux rendering note
 update_check = true      # ask GitHub for newer releases; see Updates
+dbus = true             # offer the alerts on the session bus; see Reading the alerts from other programs
 
 [env]
 SSL_CERT_FILE = "/etc/promview/internal-ca.pem"
