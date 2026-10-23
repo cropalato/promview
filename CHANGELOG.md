@@ -6,6 +6,14 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+## [0.1.0-beta.5] - 2026-10-23
+
+A feature release for the desktop client: on Linux it now offers the firing
+alerts to other programs on the session bus, so a widget or wallpaper can show
+them without credentials of its own. A script installs or upgrades the client,
+and CI builds with a Go toolchain that has the standard-library advisories
+fixed. The API and the database schema are unchanged from beta.4.
+
 ### Added
 
 - **desktop:** `scripts/install-desktop.sh` installs or upgrades the client from the newest GitHub release, picking the package format from the system's package manager. Releases are all pre-releases, which GitHub's "latest" endpoint skips, so it reads the release list instead.
