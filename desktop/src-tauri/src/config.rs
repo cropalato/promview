@@ -27,6 +27,8 @@ pub struct Config {
     pub dmabuf: DmabufPolicy,
     /// Whether to ask GitHub, now and then, if a newer client is out.
     pub update_check: bool,
+    /// Whether to offer the alerts to other programs on the session bus.
+    pub dbus: bool,
     /// The file the settings came from, if one was found. Kept for the boot log
     /// and for the tray's reload, which re-reads the same path.
     pub source: Option<PathBuf>,
@@ -62,6 +64,9 @@ pub struct FileConfig {
     pub webkit_dmabuf: Option<DmabufPolicy>,
     /// On by default. Off for machines that cannot reach GitHub, or should not.
     pub update_check: Option<bool>,
+    /// On by default. Off where nothing on the machine should read the alerts
+    /// from this client, or where there is no session bus to offer them on.
+    pub dbus: Option<bool>,
     /// Variables to export before anything reads them. For the settings that
     /// are not this application's own — a private CA bundle, a webview
     /// workaround — and that would otherwise need a wrapper script.
@@ -237,6 +242,7 @@ impl Config {
             notification_rules: NotificationRules::compile(&file.notifications.rules)?,
             dmabuf: file.webkit_dmabuf.unwrap_or_default(),
             update_check: file.update_check.unwrap_or(true),
+            dbus: file.dbus.unwrap_or(true),
             source,
         })
     }
@@ -421,6 +427,16 @@ mod tests {
         // A value that is not one of the three is a typo, and a typo that
         // parsed would silently pick a rendering path nobody asked for.
         assert!(FileConfig::parse("webkit_dmabuf = \"maybe\"").is_err());
+    }
+
+    #[test]
+    fn the_bus_interface_is_on_unless_switched_off() {
+        let config = Config::resolve(&FileConfig::parse("").unwrap(), None, no_env).unwrap();
+        assert!(config.dbus);
+
+        let off =
+            Config::resolve(&FileConfig::parse("dbus = false").unwrap(), None, no_env).unwrap();
+        assert!(!off.dbus);
     }
 
     #[test]

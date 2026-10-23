@@ -6,6 +6,10 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **desktop:** on Linux the client offers the firing alerts to other programs of the same user on the session bus, as `org.promview.Desktop`: a read-only `GetAlerts` that returns the server's own alerts body, an `AlertsChanged` signal when the stream reports a change, and `State` and `Server` properties. A program that shows alerts no longer needs a session of its own. `dbus = false` in the config file turns it off.
+
 ## [0.1.0-beta.4] - 2026-10-08
 
 A fix release. Local and LDAP accounts can finally sign in from the desktop
