@@ -48,6 +48,25 @@ impl AlertCounts {
     }
 }
 
+/// The most alerts one read may ask for; the server refuses more.
+pub const MAX_ALERTS_LIMIT: u32 = 500;
+
+/// Why a read failed, split on the one distinction a caller acts on: signing
+/// in fixes the first, nothing the caller does fixes the second.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApiError {
+    SignInNeeded(String),
+    Other(String),
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SignInNeeded(message) | Self::Other(message) => f.write_str(message),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct AlertsPage {
     #[serde(default)]
@@ -85,10 +104,50 @@ impl Client {
     /// Firing counts. Asks for a single alert because only the aggregate is
     /// wanted: the page itself is the server's, and the tray needs none of it.
     pub async fn firing_counts(&self) -> Result<AlertCounts, String> {
+        let url = self.alerts_url(1, &[])?;
+        let body = self.get(url.clone()).await.map_err(|err| err.to_string())?;
+        let page: AlertsPage = serde_json::from_str(&body)
+            .map_err(|err| format!("decode alerts from {url}: {err}"))?;
+        Ok(AlertCounts {
+            total: page.total,
+            critical: *page.severity_counts.get("critical").unwrap_or(&0),
+            warning: *page.severity_counts.get("warning").unwrap_or(&0),
+            info: *page.severity_counts.get("info").unwrap_or(&0),
+        })
+    }
+
+    /// The firing alerts as the server sent them, undecoded.
+    ///
+    /// Handed on as-is because the readers of this (the D-Bus interface, and
+    /// through it the constellation HUD) already decode the server's own
+    /// shape; reshaping it here would give them a second format to track.
+    /// `limit` is clamped to what the server accepts, and `matches` are label
+    /// matchers passed through as `match` parameters, nothing else.
+    pub async fn firing_alerts(&self, limit: u32, matches: &[String]) -> Result<String, ApiError> {
         let url = self
+            .alerts_url(limit.clamp(1, MAX_ALERTS_LIMIT), matches)
+            .map_err(ApiError::Other)?;
+        self.get(url).await
+    }
+
+    fn alerts_url(&self, limit: u32, matches: &[String]) -> Result<Url, String> {
+        let mut url = self
             .base
-            .join("api/v1/alerts?limit=1&status=firing")
+            .join("api/v1/alerts")
             .map_err(|err| format!("build alerts url: {err}"))?;
+        {
+            let mut query = url.query_pairs_mut();
+            query
+                .append_pair("limit", &limit.to_string())
+                .append_pair("status", "firing");
+            for matcher in matches {
+                query.append_pair("match", matcher);
+            }
+        }
+        Ok(url)
+    }
+
+    async fn get(&self, url: Url) -> Result<String, ApiError> {
         let mut request = self
             .http
             .get(url.clone())
@@ -105,26 +164,22 @@ impl Client {
         let response = request
             .send()
             .await
-            .map_err(|err| format!("query {url}: {err}"))?;
+            .map_err(|err| ApiError::Other(format!("query {url}: {err}")))?;
         let status = response.status();
         if !status.is_success() {
             // An unauthenticated server is not an unreachable one, and the
             // tooltip should not say it is: the answer is to sign in.
             if status == reqwest::StatusCode::UNAUTHORIZED {
-                return Err(format!("{url} needs a session: sign in from the tray"));
+                return Err(ApiError::SignInNeeded(format!(
+                    "{url} needs a session: sign in from the tray"
+                )));
             }
-            return Err(format!("{url} returned HTTP {status}"));
+            return Err(ApiError::Other(format!("{url} returned HTTP {status}")));
         }
-        let page: AlertsPage = response
-            .json()
+        response
+            .text()
             .await
-            .map_err(|err| format!("decode alerts from {url}: {err}"))?;
-        Ok(AlertCounts {
-            total: page.total,
-            critical: *page.severity_counts.get("critical").unwrap_or(&0),
-            warning: *page.severity_counts.get("warning").unwrap_or(&0),
-            info: *page.severity_counts.get("info").unwrap_or(&0),
-        })
+            .map_err(|err| ApiError::Other(format!("read alerts from {url}: {err}")))
     }
 }
 
@@ -206,6 +261,84 @@ mod tests {
             .await
             .expect_err("401 is an error");
         assert!(message.contains("sign in"), "unexpected message: {message}");
+    }
+
+    /// Like `serve_once`, but hands back the request target instead.
+    fn serve_once_target(body: &'static str) -> (Url, std::sync::mpsc::Receiver<String>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind test server");
+        let base = Url::parse(&format!("http://{}/", server.server_addr())).expect("test url");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok(request) = server.recv() {
+                let _ = tx.send(request.url().to_string());
+                let _ = request.respond(tiny_http::Response::from_string(body));
+            }
+        });
+        (base, rx)
+    }
+
+    #[tokio::test]
+    async fn firing_alerts_returns_the_body_untouched() {
+        let body = r#"{"alerts":[],"total":0,"severityCounts":{}}"#;
+        let (base, _seen) = serve_once(200, body);
+        let credentials = Arc::new(Credentials::new("https://raw-body.example"));
+
+        let got = client(base, credentials)
+            .firing_alerts(50, &[])
+            .await
+            .expect("body");
+        assert_eq!(got, body);
+    }
+
+    #[tokio::test]
+    async fn firing_alerts_encodes_matchers_and_asks_for_firing() {
+        let (base, seen) = serve_once_target("{}");
+        let credentials = Arc::new(Credentials::new("https://matchers.example"));
+        let matches = vec!["team=platform".to_string(), "severity!=info".to_string()];
+
+        client(base, credentials)
+            .firing_alerts(50, &matches)
+            .await
+            .expect("body");
+        assert_eq!(
+            seen.recv().expect("request"),
+            "/api/v1/alerts?limit=50&status=firing&match=team%3Dplatform&match=severity%21%3Dinfo"
+        );
+    }
+
+    #[tokio::test]
+    async fn firing_alerts_clamps_the_limit_to_what_the_server_accepts() {
+        let credentials = Arc::new(Credentials::new("https://clamp.example"));
+        for (asked, sent) in [(0, 1), (9999, 500)] {
+            let (base, seen) = serve_once_target("{}");
+            client(base, Arc::clone(&credentials))
+                .firing_alerts(asked, &[])
+                .await
+                .expect("body");
+            assert_eq!(
+                seen.recv().expect("request"),
+                format!("/api/v1/alerts?limit={sent}&status=firing")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn firing_alerts_tells_sign_in_from_unreachable() {
+        let credentials = Arc::new(Credentials::new("https://typed-errors.example"));
+
+        let (base, _seen) = serve_once(401, "unauthorized");
+        let err = client(base, Arc::clone(&credentials))
+            .firing_alerts(10, &[])
+            .await
+            .expect_err("401 is an error");
+        assert!(matches!(err, ApiError::SignInNeeded(_)), "got {err:?}");
+
+        let (base, _seen) = serve_once(500, "boom");
+        let err = client(base, credentials)
+            .firing_alerts(10, &[])
+            .await
+            .expect_err("500 is an error");
+        assert!(matches!(err, ApiError::Other(_)), "got {err:?}");
     }
 
     #[test]
