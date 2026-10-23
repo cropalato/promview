@@ -22,6 +22,7 @@ fixed. The API and the database schema are unchanged from beta.4.
 ### Fixed
 
 - **deps:** the Go toolchain is `go1.26.10`. `govulncheck` reported 11 standard-library advisories reachable from the server on 1.26.8 (`net/http`, `net/textproto`, `crypto/tls`, `crypto/x509`), fixed in 1.26.9 and 1.26.10. The container image already builds with Go 1.27; this is the toolchain CI and `go build` pick from `go.mod`.
+- **deps-desktop:** `quinn-proto` 0.11.19, `rustls` 0.23.46 and `rustls-webpki` 0.103.16, which close eight RustSec advisories (RUSTSEC-2026-0338, 0340, 0343, 0346 to 0349 and 0382) that `cargo audit` reported on the previous locked versions.
 - **packaging:** the AUR recipe depends on `hicolor-icon-theme`, since the package installs icons under `/usr/share/icons/hicolor`.
 
 ## [0.1.0-beta.4] - 2026-10-08
