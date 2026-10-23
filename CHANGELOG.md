@@ -8,7 +8,13 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ### Added
 
+- **desktop:** `scripts/install-desktop.sh` installs or upgrades the client from the newest GitHub release, picking the package format from the system's package manager. Releases are all pre-releases, which GitHub's "latest" endpoint skips, so it reads the release list instead.
 - **desktop:** on Linux the client offers the firing alerts to other programs of the same user on the session bus, as `org.promview.Desktop`: a read-only `GetAlerts` that returns the server's own alerts body, an `AlertsChanged` signal when the stream reports a change, and `State` and `Server` properties. A program that shows alerts no longer needs a session of its own. `dbus = false` in the config file turns it off.
+
+### Fixed
+
+- **deps:** the Go toolchain is `go1.26.10`. `govulncheck` reported 11 standard-library advisories reachable from the server on 1.26.8 (`net/http`, `net/textproto`, `crypto/tls`, `crypto/x509`), fixed in 1.26.9 and 1.26.10. The container image already builds with Go 1.27; this is the toolchain CI and `go build` pick from `go.mod`.
+- **packaging:** the AUR recipe depends on `hicolor-icon-theme`, since the package installs icons under `/usr/share/icons/hicolor`.
 
 ## [0.1.0-beta.4] - 2026-10-08
 
