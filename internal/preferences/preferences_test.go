@@ -234,3 +234,16 @@ func TestViewPreferencesRoundTripAndLegacyDecode(t *testing.T) {
 		t.Fatalf("legacy view = %+v, want nil so callers can tell it was never chosen", legacy.View)
 	}
 }
+
+func TestNotificationsFollowTheViewUnlessTheyAreToldNot(t *testing.T) {
+	if !(Notifications{}).EffectiveFollowView() {
+		t.Fatal("an absent choice must mean follow the view, not Go's zero value")
+	}
+	off := false
+	if (Notifications{FollowView: &off}).EffectiveFollowView() {
+		t.Fatal("an explicit false must be honoured")
+	}
+	if !Default().Notifications.EffectiveFollowView() {
+		t.Fatal("the default must follow the view")
+	}
+}

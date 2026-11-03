@@ -363,3 +363,50 @@ func TestStoreViewClosedVisibilityPersistsAndSurvivesOlderClients(t *testing.T) 
 		t.Fatalf("preferences = closed %q density %q, want the stored choice kept and the layout saved", read.ClosedVisibility, read.Density)
 	}
 }
+
+func TestStoreViewFollowViewDefaultsOnAndSurvivesOlderClients(t *testing.T) {
+	ctx, store, pool := viewTestStore(t)
+	user := viewTestUser(t, ctx, store, pool, "ada@example.com", auth.Grant{Role: auth.RoleViewer})
+
+	// A row from before the switch existed has no key at all.
+	if err := store.WritePreferences(ctx, user, preferences.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE user_preferences SET preferences = jsonb_set(preferences, '{notifications}', (preferences->'notifications') - 'followView'::text)
+		WHERE user_id = $1`, user.UserID); err != nil {
+		t.Fatal(err)
+	}
+	read, err := store.ReadPreferences(ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !read.Notifications.EffectiveFollowView() || read.Notifications.FollowView == nil {
+		t.Fatalf("legacy followView = %v, want true: a missing key must not read as off", read.Notifications.FollowView)
+	}
+
+	off := preferences.Default()
+	no := false
+	off.Notifications.FollowView = &no
+	if err := store.WritePreferences(ctx, user, off); err != nil {
+		t.Fatal(err)
+	}
+
+	// An older client saves its layout without knowing the switch exists.
+	older := preferences.Default()
+	older.Notifications.FollowView = nil
+	older.Density = "compact"
+	if err := store.WritePreferences(ctx, user, older); err != nil {
+		t.Fatal(err)
+	}
+	read, err = store.ReadPreferences(ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Density != "compact" {
+		t.Errorf("density = %q, want the older client's layout saved", read.Density)
+	}
+	if read.Notifications.EffectiveFollowView() {
+		t.Fatal("followView was erased by a client that does not know it")
+	}
+}

@@ -52,6 +52,11 @@ func (store *Store) ReadPreferences(ctx context.Context, principal auth.Principa
 		// it did then, rather than silently matching nothing.
 		value.Notifications = preferences.Default().Notifications
 	}
+	if value.Notifications.FollowView == nil {
+		// A row from before the switch existed: the default is true, not Go's zero value.
+		followView := true
+		value.Notifications.FollowView = &followView
+	}
 	if value.ClosedVisibility == "" {
 		value.ClosedVisibility = preferences.Default().ClosedVisibility
 	}
@@ -72,7 +77,7 @@ func (store *Store) WritePreferences(ctx context.Context, principal auth.Princip
 	if err := preferences.Validate(value); err != nil {
 		return err
 	}
-	if value.View == nil || value.ClosedVisibility == "" {
+	if value.View == nil || value.ClosedVisibility == "" || value.Notifications.FollowView == nil {
 		// A client that does not know about a field must not erase the choice a
 		// newer one stored. Reading falls back to the defaults for a user who
 		// has never made one, so persisting what it returns is equivalent.
@@ -85,6 +90,9 @@ func (store *Store) WritePreferences(ctx context.Context, principal auth.Princip
 		}
 		if value.ClosedVisibility == "" {
 			value.ClosedVisibility = current.ClosedVisibility
+		}
+		if value.Notifications.FollowView == nil {
+			value.Notifications.FollowView = current.Notifications.FollowView
 		}
 	}
 	encoded, err := json.Marshal(value)

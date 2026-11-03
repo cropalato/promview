@@ -83,6 +83,18 @@ type Notifications struct {
 	// everything: the vacuous-truth reading would turn switching notifications
 	// on into a page for every alert in the deployment.
 	Matchers []NotificationMatcher `json:"matchers"`
+	// FollowView makes notifications follow the automatic view: an alert
+	// notifies only if the console would show it, critical bypass included, and
+	// the selector above applies on top. A pointer for the same reason as
+	// Preferences.View: absent means the default, true, and on a write means
+	// "keep what is stored", so a client that predates it cannot erase the
+	// choice.
+	FollowView *bool `json:"followView,omitempty"`
+}
+
+// EffectiveFollowView resolves an absent choice to the default, true.
+func (value Notifications) EffectiveFollowView() bool {
+	return value.FollowView == nil || *value.FollowView
 }
 
 const (
@@ -203,12 +215,15 @@ func Default() Preferences {
 		// configurable. Opting in should do what it always did; widening it is
 		// then the operator's explicit choice.
 		Notifications: Notifications{
-			Enabled:  false,
-			Matchers: []NotificationMatcher{{Name: "severity", Op: "=", Value: "critical"}},
+			Enabled:    false,
+			Matchers:   []NotificationMatcher{{Name: "severity", Op: "=", Value: "critical"}},
+			FollowView: boolPointer(true),
 		},
 		View: &ViewPreferences{Enabled: true, CriticalBypass: true},
 	}
 }
+
+func boolPointer(value bool) *bool { return &value }
 
 // Validate rejects anything the console could not render, so a bad write is
 // refused at the door rather than breaking every later read.
