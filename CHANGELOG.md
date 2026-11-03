@@ -4,7 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The project uses [Conventional Commits](https://www.conventionalcommits.org/) and follows [Semantic Versioning](https://semver.org/). Entries are grouped by the conventional commit type that affects users or maintainers.
 
-## [Unreleased]
+## [0.1.0-beta.6] - 2026-11-03
+
+A feature release: users now see the alerts of their own teams by default. An
+automatic view narrows the console, the stream, the counts and the desktop tray
+to the groups a user belongs to, from their scoped bindings and from internal
+view groups that administrators define, users join, and administrators can pin.
+It is a convenience and never a permission: scope stays the only security
+boundary, and critical alerts ignore the view unless the user chooses otherwise.
+Notifications follow the view. The release also fixes a bug that made every save
+of a signed-in user's layout fail, and closes the code scanning and dependency
+findings open at the time. It adds migration `000025_view_groups`, which
+`promview migrate` (and the Helm migration hook) applies before the new version
+starts, and only adds tables.
 
 ### Added
 
@@ -14,7 +26,6 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 - **notifications:** notifications follow the automatic view. An alert notifies only if the console would show it, critical bypass included, and the selector applies on top; an event the view does not include (`viewMatch: outside`) stays silent, and one turned away is not remembered as seen. `notifications.followView` (default true) turns it off, in which case the console opens its stream unnarrowed while notifications are on so the alerts its list is narrowed away from still arrive. A stored row or a client that predates the switch means true, and a write that omits it keeps the stored choice. The View menu has the switch, shown only for a caller who has a view.
 - **desktop:** the tray tooltip says how many alerts the user's view leaves out of its counts (`· N hidden by your view`), and "No firing alerts in your view" where the view is empty but the deployment is not. The tray already read under the saved view, since that is what the server applies to a request that names none; without this a narrowed count looked like a quiet deployment.
 - **preferences:** `view.enabled` and `view.criticalBypass`, both defaulting to true. A stored row or a client that predates them means the defaults rather than Go's zero value, and a write that omits `view` keeps the stored choice, so an older console saving its layout cannot erase it.
-
 - **alerts:** internal view groups. An administrator defines a named selector, users join and leave it themselves, and an administrator can pin it on a user or on a directory group (OIDC or LDAP), in which case it cannot be left (`409`). The selectors of every group a caller belongs to are ORed into their automatic view, so a caller whose bindings are all scoped can now have a view too. A view group is a convenience and never a permission: it is intersected with scope in the same SQL as the derived view, and a test checks that a group outside a caller's scope shows nothing of it. A pinned group is still seen past with the global `view.enabled` switch. Listing is open to signed-in users, but selectors, pins and member counts are shown to administrators only, since a selector can name labels the reader cannot see. Managed with `promview view-group set|delete|list|pin|unpin` and `/api/v1/view-groups`. Adds migration `000025_view_groups`.
 
 ### Fixed
