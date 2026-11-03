@@ -2,7 +2,7 @@
 // column shows both, and grouping by source folds the table in two.
 
 import { runScene } from '../lib/scene.mjs';
-import { seed, standardConsole, toggleViewMenu } from '../lib/console.mjs';
+import { seed, standardConsole } from '../lib/console.mjs';
 
 export const name = 'sources';
 export const bars = 4;

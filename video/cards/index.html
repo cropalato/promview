@@ -154,7 +154,6 @@
         end(t, dur, p) {
           background();
           const a = fadeInOut(t, dur, 0.5, 0.6);
-          const k = easeOutExpo(clamp(t / 0.9));
           pulseLine(W / 2 - 40, 210, 80, 1, a);
           text('Promview', W / 2, 360, { size: 72, weight: '700', align: 'center', alpha: a });
           text(p.tagline || 'An operational console for the alerts Alertmanager is already sending you.', W / 2, 415, {
