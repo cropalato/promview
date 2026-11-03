@@ -657,8 +657,13 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 	if err != nil {
 		return alerts.ListResult{}, err
 	}
-	where, args := alertFilters(principal, query, "alert")
+	view := resolveView(principal, query.View)
+	where, args := alertFiltersWithView(principal, query, "alert", view, viewApply)
 	counts, total, err := store.readSeverityCounts(ctx, where, args)
+	if err != nil {
+		return alerts.ListResult{}, err
+	}
+	viewSummary, err := store.summarizeView(ctx, principal, query, view)
 	if err != nil {
 		return alerts.ListResult{}, err
 	}
@@ -707,6 +712,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 		if err := json.Unmarshal(annotationsJSON, &item.Annotations); err != nil {
 			return alerts.ListResult{}, fmt.Errorf("decode annotations for alert %d: %w", item.ID, err)
 		}
+		item.ViewMatch = view.classify(item.Labels)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -733,6 +739,7 @@ func (store *Store) ListAlerts(ctx context.Context, principal auth.Principal, qu
 		SeverityCounts: counts,
 		Total:          total,
 		StreamCursor:   streamCursor,
+		View:           viewSummary,
 	}, nil
 }
 
@@ -878,7 +885,11 @@ func (store *Store) AcknowledgeAlert(ctx context.Context, principal auth.Princip
 	return store.GetAlertDetail(ctx, principal, id)
 }
 
-func (store *Store) StreamEvents(ctx context.Context, principal auth.Principal, afterID int64, limit int) (alerts.StreamBatch, error) {
+// StreamEvents returns events after afterID that the caller may see. A non-nil
+// options applies the caller's view with the same rules the snapshot used, so a
+// stream resumed from a snapshot's cursor agrees with it: an alert leaving the
+// view reaches the client as a removal, the way one leaving scope does.
+func (store *Store) StreamEvents(ctx context.Context, principal auth.Principal, options *alerts.ViewOptions, afterID int64, limit int) (alerts.StreamBatch, error) {
 	var scannedThrough int64
 	var retainedFrom int64
 	// The watermark rides along on the window query rather than costing a second
@@ -902,8 +913,21 @@ func (store *Store) StreamEvents(ctx context.Context, principal auth.Principal, 
 			return alerts.StreamBatch{}, err
 		}
 	}
+	view := resolveView(principal, options)
 	access, args := readAccessCondition(principal, "event.labels", []any{afterID, scannedThrough})
+	access = "(" + access + ")"
+	if view.filtering() {
+		var condition string
+		condition, args = view.visibleCondition("event.labels", args)
+		access += " AND " + condition
+	}
 	previousAccess, args := readAccessCondition(principal, "event.previous_labels", args)
+	previousAccess = "(" + previousAccess + ")"
+	if view.filtering() {
+		var condition string
+		condition, args = view.visibleCondition("event.previous_labels", args)
+		previousAccess += " AND " + condition
+	}
 	rows, err := store.pool.Query(ctx, `
 		SELECT event.id, event.event_type, event.alert_id, event.occurred_at,
 		       event.severity, event.alert_name, event.summary, event.source_slug, event.team,
@@ -938,7 +962,9 @@ func (store *Store) StreamEvents(ctx context.Context, principal auth.Principal, 
 				return alerts.StreamBatch{}, fmt.Errorf("decode previous stream event labels: %w", err)
 			}
 		}
-		if !auth.CanReadLabels(principal, event.Labels) && auth.CanReadLabels(principal, event.PreviousLabels) {
+		visible := auth.CanReadLabels(principal, event.Labels) && view.includes(event.Labels)
+		wasVisible := event.PreviousLabels != nil && auth.CanReadLabels(principal, event.PreviousLabels) && view.includes(event.PreviousLabels)
+		if !visible && wasVisible {
 			event.Type = "alert.removed"
 			event.Redacted = true
 			event.Severity = ""
@@ -946,6 +972,8 @@ func (store *Store) StreamEvents(ctx context.Context, principal auth.Principal, 
 			event.Summary = ""
 			event.SourceSlug = ""
 			event.Team = ""
+		} else {
+			event.ViewMatch = view.classify(event.Labels)
 		}
 		events = append(events, event)
 	}
@@ -1025,9 +1053,33 @@ func alertMateriallyChanged(
 		!reflect.DeepEqual(previousAnnotations, incoming.Annotations), nil
 }
 
+type viewMode int
+
+const (
+	// viewApply narrows the result to the view. This is the ordinary list.
+	viewApply viewMode = iota
+	// viewInvert selects exactly what viewApply removes, to count it.
+	viewInvert
+)
+
 func alertFilters(principal auth.Principal, query alerts.Query, alias string) (string, []any) {
+	return alertFiltersWithView(principal, query, alias, resolveView(principal, query.View), viewApply)
+}
+
+func alertFiltersWithView(principal auth.Principal, query alerts.Query, alias string, view resolvedView, mode viewMode) (string, []any) {
 	access, args := readAccessCondition(principal, alias+".labels", nil)
 	conditions := []string{"(" + access + ")"}
+	// The view is ANDed after scope and can only remove rows from it. Inverted,
+	// it still sits inside scope, so a hidden count never includes an alert the
+	// caller may not read.
+	if mode == viewInvert || view.filtering() {
+		var condition string
+		condition, args = view.visibleCondition(alias+".labels", args)
+		if mode == viewInvert {
+			condition = "NOT " + condition
+		}
+		conditions = append(conditions, condition)
+	}
 	add := func(expression string, value any) {
 		args = append(args, value)
 		conditions = append(conditions, fmt.Sprintf(expression, len(args)))

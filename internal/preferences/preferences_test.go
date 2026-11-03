@@ -1,6 +1,9 @@
 package preferences
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestDefaultIsValid(t *testing.T) {
 	if err := Validate(Default()); err != nil {
@@ -196,5 +199,38 @@ func TestValidateIgnoresGroupingKeysWhenDisabled(t *testing.T) {
 	value.Grouping = Grouping{Enabled: false, Keys: nil}
 	if err := Validate(value); err != nil {
 		t.Fatalf("Validate() with grouping off error = %v", err)
+	}
+}
+
+func TestEffectiveViewDefaultsWhenAbsent(t *testing.T) {
+	var absent Preferences
+	if view := absent.EffectiveView(); !view.Enabled || !view.CriticalBypass {
+		t.Fatalf("EffectiveView() = %+v, want both on: an absent choice must not read as off", view)
+	}
+	chosen := Preferences{View: &ViewPreferences{Enabled: false, CriticalBypass: false}}
+	if view := chosen.EffectiveView(); view.Enabled || view.CriticalBypass {
+		t.Fatalf("EffectiveView() = %+v, want the explicit choice", view)
+	}
+}
+
+func TestViewPreferencesRoundTripAndLegacyDecode(t *testing.T) {
+	encoded, err := json.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Preferences
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.View == nil || !decoded.View.Enabled || !decoded.View.CriticalBypass {
+		t.Fatalf("round trip view = %+v", decoded.View)
+	}
+	// A document with no `view` key at all, as an older console writes it.
+	var legacy Preferences
+	if err := json.Unmarshal([]byte(`{"density":"auto"}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.View != nil {
+		t.Fatalf("legacy view = %+v, want nil so callers can tell it was never chosen", legacy.View)
 	}
 }

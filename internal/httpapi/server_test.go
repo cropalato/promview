@@ -55,6 +55,7 @@ type fakeStore struct {
 	recorded       []alerts.SilenceRecord
 	recordErr      error
 	groupBy        []string
+	streamView     *alerts.ViewOptions
 	groupKey       map[string]string
 
 	removalTarget   alerts.SilenceTarget
@@ -123,8 +124,9 @@ func (store *fakeStore) WritePreferences(_ context.Context, principal auth.Princ
 	return nil
 }
 
-func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal, afterID int64, _ int) (alerts.StreamBatch, error) {
+func (store *fakeStore) StreamEvents(_ context.Context, principal auth.Principal, view *alerts.ViewOptions, afterID int64, _ int) (alerts.StreamBatch, error) {
 	store.principal = principal
+	store.streamView = view
 	store.afterID = afterID
 	if store.cancel != nil {
 		store.cancel()

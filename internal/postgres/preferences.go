@@ -52,6 +52,12 @@ func (store *Store) ReadPreferences(ctx context.Context, principal auth.Principa
 		// it did then, rather than silently matching nothing.
 		value.Notifications = preferences.Default().Notifications
 	}
+	if value.View == nil {
+		// Same reasoning as the notifications above: a row from before views
+		// existed has no key, and the defaults are the opposite of the zero value.
+		view := preferences.DefaultView()
+		value.View = &view
+	}
 	return value, nil
 }
 
@@ -62,6 +68,16 @@ func (store *Store) WritePreferences(ctx context.Context, principal auth.Princip
 	}
 	if err := preferences.Validate(value); err != nil {
 		return err
+	}
+	if value.View == nil {
+		// A client that does not know about views must not erase the choice a
+		// newer one stored. Reading falls back to the defaults for a user who
+		// has never made one, so persisting what it returns is equivalent.
+		current, err := store.ReadPreferences(ctx, principal)
+		if err != nil {
+			return err
+		}
+		value.View = current.View
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil {

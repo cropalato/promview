@@ -66,7 +66,10 @@ type Alert struct {
 	// SilencedBy names the silences currently matching. Suppressed with no ids
 	// means inhibited, which the console renders differently: an inhibition
 	// lifts itself, a silence was somebody's decision and has an expiry.
-	SilencedBy     []string
+	SilencedBy []string
+	// ViewMatch is set only when the caller has a view, and says why the alert
+	// is in front of them.
+	ViewMatch      ViewMatch
 	AcknowledgedAt *time.Time
 	AcknowledgedBy string
 	// AssignedTo is who owns the alert, as free text: an alert is routinely
@@ -121,6 +124,10 @@ type Query struct {
 	Matches []LabelMatcher
 	Sort    string
 	Order   string
+	// View narrows the result to what the caller normally means to look at,
+	// inside their scope. Nil applies no view, which is what every caller that
+	// is not rendering a console list wants.
+	View *ViewOptions
 	// GroupBy collapses the result into one row per distinct combination of
 	// these label keys, plus the special source key. Empty lists alerts individually.
 	GroupBy     []string
@@ -200,6 +207,8 @@ type GroupResult struct {
 	TotalAlerts    int64
 	SeverityCounts map[string]int64
 	StreamCursor   int64
+	// View is nil when the caller asked for no view.
+	View *ViewSummary
 }
 
 const (
@@ -219,7 +228,10 @@ func (query Query) CursorIdentity() string {
 		GroupBy    []string       `json:"groupBy"`
 		Sort       string         `json:"sort"`
 		Order      string         `json:"order"`
-	}{query.Source, query.Status, query.Severity, query.Team, query.Suppressed, query.Matches, query.GroupBy, query.Sort, query.Order})
+		// Omitted when empty, so the cursors of queries without a view hash
+		// exactly as they did before views existed.
+		View string `json:"view,omitempty"`
+	}{query.Source, query.Status, query.Severity, query.Team, query.Suppressed, query.Matches, query.GroupBy, query.Sort, query.Order, query.View.Signature()})
 	if err != nil {
 		panic(fmt.Sprintf("marshal cursor identity: %v", err))
 	}
@@ -232,6 +244,8 @@ type ListResult struct {
 	SeverityCounts map[string]int64
 	Total          int64
 	StreamCursor   int64
+	// View is nil when the caller asked for no view.
+	View *ViewSummary
 }
 
 type StreamEvent struct {
@@ -247,6 +261,8 @@ type StreamEvent struct {
 	Labels         map[string]string `json:"-"`
 	PreviousLabels map[string]string `json:"-"`
 	Redacted       bool              `json:"-"`
+	// ViewMatch is empty when the caller has no view.
+	ViewMatch ViewMatch `json:"-"`
 }
 
 type StreamBatch struct {

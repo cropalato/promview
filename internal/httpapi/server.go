@@ -50,7 +50,7 @@ type Store interface {
 	SilenceRemovalScope(context.Context, auth.Principal, int64, string) (alerts.SilenceTarget, error)
 	RecordSilence(context.Context, alerts.SilenceRecord) error
 	ExpireSilenceRecord(context.Context, string, string, time.Time) error
-	StreamEvents(context.Context, auth.Principal, int64, int) (alerts.StreamBatch, error)
+	StreamEvents(context.Context, auth.Principal, *alerts.ViewOptions, int64, int) (alerts.StreamBatch, error)
 	ReadPreferences(context.Context, auth.Principal) (preferences.Preferences, error)
 	WritePreferences(context.Context, auth.Principal, preferences.Preferences) error
 	Ping(context.Context) error
@@ -506,14 +506,27 @@ func (api *API) loadAlertDetail(w http.ResponseWriter, r *http.Request) (alerts.
 }
 
 func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
-	query, err := parseAlertQuery(r)
+	principal, ok := requestPrincipal(r)
+	if !ok {
+		writeServerError(w, r, "principal is unavailable", nil)
+		return
+	}
+	mode, err := parseViewMode(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	principal, ok := requestPrincipal(r)
-	if !ok {
-		writeServerError(w, r, "principal is unavailable", nil)
+	// Resolved before the query is parsed because the view is part of what a
+	// page cursor is bound to: parsing validates the cursor against the query,
+	// so the query has to carry the view first.
+	view, err := api.viewOptions(r.Context(), principal, mode)
+	if err != nil {
+		writeServerError(w, r, "failed to read view preferences", err)
+		return
+	}
+	query, err := parseAlertQuery(r, view)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(query.GroupBy) > 0 {
@@ -538,13 +551,17 @@ func (api *API) listAlerts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"alerts":         items,
 		"nextCursor":     nextCursor,
 		"severityCounts": result.SeverityCounts,
 		"streamCursor":   result.StreamCursor,
 		"total":          result.Total,
-	})
+	}
+	if result.View != nil {
+		payload["view"] = result.View
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // listAlertGroups answers the grouped shape of GET /api/v1/alerts. Expanding a
@@ -579,14 +596,53 @@ func (api *API) listAlertGroups(w http.ResponseWriter, r *http.Request, principa
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"groups":         groups,
 		"nextCursor":     nextCursor,
 		"severityCounts": result.SeverityCounts,
 		"streamCursor":   result.StreamCursor,
 		"total":          result.TotalAlerts,
 		"totalGroups":    result.TotalGroups,
-	})
+	}
+	if result.View != nil {
+		payload["view"] = result.View
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// parseViewMode reads the `view` parameter: absent follows the caller's saved
+// preference, `mine` applies the view, `all` shows everything in scope.
+func parseViewMode(r *http.Request) (string, error) {
+	switch mode := r.URL.Query().Get("view"); mode {
+	case "", "mine", "all":
+		return mode, nil
+	default:
+		return "", errors.New("view must be mine or all")
+	}
+}
+
+// viewOptions turns a request and the caller's saved preferences into the view
+// to apply. It returns nil, meaning no view, where there is no user to hold
+// preferences: open mode shows everything and has nothing to filter by.
+//
+// An explicit `view` parameter wins over the saved switch so a client can offer
+// "show everything" for the moment without rewriting what the user chose. It
+// can only ever narrow or classify: scope is enforced separately and is not
+// reachable from here.
+func (api *API) viewOptions(ctx context.Context, principal auth.Principal, mode string) (*alerts.ViewOptions, error) {
+	if principal.Anonymous || principal.UserID == 0 {
+		return nil, nil
+	}
+	stored, err := api.store.ReadPreferences(ctx, principal)
+	if errors.Is(err, preferences.ErrNoSubject) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	saved := stored.EffectiveView()
+	showAll := mode == "all" || (mode == "" && !saved.Enabled)
+	return &alerts.ViewOptions{ShowAll: showAll, FilterCritical: !saved.CriticalBypass}, nil
 }
 
 // getPreferences returns the caller's console layout. In open mode there is no
@@ -645,6 +701,11 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	mode, err := parseViewMode(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeServerError(w, r, "streaming is unsupported", nil)
@@ -671,6 +732,14 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Resolved once, when the stream opens. A change of view is a new snapshot
+	// and a new connection, never a filter swapped under a stream that has
+	// already delivered events: the cursor the client holds was issued for the
+	// view it asked for.
+	view, err := api.viewOptions(r.Context(), principal, mode)
+	if err != nil {
+		return
+	}
 	for {
 		if err := r.Context().Err(); err != nil {
 			return
@@ -682,7 +751,7 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 			}
 			lastAuthentication = time.Now()
 		}
-		batch, err := api.store.StreamEvents(r.Context(), principal, afterID, 100)
+		batch, err := api.store.StreamEvents(r.Context(), principal, view, afterID, 100)
 		if err != nil {
 			return
 		}
@@ -727,6 +796,9 @@ func (api *API) streamAlerts(w http.ResponseWriter, r *http.Request) {
 				payload["summary"] = event.Summary
 				payload["source"] = event.SourceSlug
 				payload["team"] = event.Team
+				if event.ViewMatch != "" {
+					payload["viewMatch"] = string(event.ViewMatch)
+				}
 			}
 			data, err := json.Marshal(payload)
 			if err != nil {
@@ -869,6 +941,10 @@ type alertResponse struct {
 	// Notes is a count, not the notes. The list says there is something to
 	// read; opening the alert is what reads it.
 	Notes int `json:"notes"`
+	// ViewMatch is present only when the caller has a view: "view", "critical"
+	// (shown only because critical alerts ignore the view) or "outside" (shown
+	// only because everything in scope was requested).
+	ViewMatch string `json:"viewMatch,omitempty"`
 }
 
 type alertDetailResponse struct {
@@ -948,6 +1024,7 @@ func newAlertResponse(alert alerts.Alert) alertResponse {
 		SilencedBy:   silencedBy,
 		Assignee:     alert.AssignedTo,
 		Notes:        alert.NoteCount,
+		ViewMatch:    string(alert.ViewMatch),
 	}
 }
 
@@ -968,7 +1045,7 @@ func newAlertDetailResponse(alert alerts.Alert, canOperate bool, canSilence bool
 	}
 }
 
-func parseAlertQuery(r *http.Request) (alerts.Query, error) {
+func parseAlertQuery(r *http.Request, view *alerts.ViewOptions) (alerts.Query, error) {
 	values := r.URL.Query()
 	limit := 100
 	if raw := values.Get("limit"); raw != "" {
@@ -1021,6 +1098,7 @@ func parseAlertQuery(r *http.Request) (alerts.Query, error) {
 		Closed:     closed,
 		Sort:       values.Get("sort"),
 		Order:      values.Get("order"),
+		View:       view,
 	}
 	if query.Sort != "" && !isAlertSort(query.Sort) {
 		return alerts.Query{}, errors.New("sort is invalid")

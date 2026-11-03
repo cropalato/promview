@@ -6,6 +6,11 @@ The project uses [Conventional Commits](https://www.conventionalcommits.org/) an
 
 ## [Unreleased]
 
+### Added
+
+- **alerts:** an automatic view narrows the console to the team a caller normally looks at. A caller with an unrestricted binding who also belongs to a team through a scoped one gets that team's selectors as a view, applied inside scope in SQL for the list, the grouped list, the counts and the stream, so they cannot disagree. It never widens scope: critical alerts ignore the view by default, and that bypass is itself bounded by scope, which a test checks for every view option. A caller whose every binding is scoped gets no view, because it would equal their scope and cost a hidden count on every request for nothing. `view=mine|all` on the list and stream overrides the saved switch for one request; responses report what the view hid and each alert and event says why it is shown (`viewMatch`). Console support and internal view groups are not part of this change; see `docs/view-groups-plan.md`.
+- **preferences:** `view.enabled` and `view.criticalBypass`, both defaulting to true. A stored row or a client that predates them means the defaults rather than Go's zero value, and a write that omits `view` keeps the stored choice, so an older console saving its layout cannot erase it.
+
 ## [0.1.0-beta.5] - 2026-10-23
 
 A feature release for the desktop client: on Linux it now offers the firing

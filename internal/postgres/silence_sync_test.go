@@ -201,7 +201,7 @@ func TestStoreReconcileSourceReleasesWhenTheSilenceIsGone(t *testing.T) {
 
 	// Setting the suppression above already streamed updates; what matters below
 	// is only what the release itself emits.
-	beforeRelease, err := store.StreamEvents(ctx, principal, 0, 100)
+	beforeRelease, err := store.StreamEvents(ctx, principal, nil, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestStoreReconcileSourceReleasesWhenTheSilenceIsGone(t *testing.T) {
 	}
 
 	// The console only reacts to stream events; the release must emit one.
-	batch, err := store.StreamEvents(ctx, principal, cursor, 100)
+	batch, err := store.StreamEvents(ctx, principal, nil, cursor, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

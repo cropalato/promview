@@ -140,7 +140,7 @@ func TestStoreReconcileSource(t *testing.T) {
 	}
 
 	// The console only reacts to stream events, so both kinds of change emit one.
-	batch, err := store.StreamEvents(ctx, principal, 0, 100)
+	batch, err := store.StreamEvents(ctx, principal, nil, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestStoreReviveExpiredAlerts(t *testing.T) {
 	// alert.created would make the console announce a revived critical as a new
 	// one, so a deployment correcting thirty wrong expiries would fire thirty
 	// desktop notifications.
-	batch, err := store.StreamEvents(ctx, principal, 0, 100)
+	batch, err := store.StreamEvents(ctx, principal, nil, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

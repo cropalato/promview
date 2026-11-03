@@ -124,6 +124,38 @@ type Preferences struct {
 	SilencedVisibility string `json:"silencedVisibility"`
 
 	Notifications Notifications `json:"notifications"`
+
+	// View is a pointer so "absent" is distinguishable from "false". A row
+	// written before views existed has no such key, and a console that predates
+	// them sends none; either must mean the defaults, which are both true, not
+	// Go's zero value, which would silently switch the view off. Absent on a
+	// write also means "leave what is stored alone", so an older client saving
+	// its layout cannot erase a choice it does not know about.
+	View *ViewPreferences `json:"view,omitempty"`
+}
+
+// ViewPreferences controls the automatic view: the filter a user's own scoped
+// groups put on their console. It narrows what scope allows and never widens it.
+type ViewPreferences struct {
+	// Enabled is the global switch. False means the console shows everything
+	// the caller's scope allows, while still saying what the view would hide.
+	Enabled bool `json:"enabled"`
+	// CriticalBypass lets critical alerts through the view. On by default: a
+	// filter that can hide a critical alert is something a user opts into.
+	CriticalBypass bool `json:"criticalBypass"`
+}
+
+// DefaultView is what a user who never chose gets.
+func DefaultView() ViewPreferences {
+	return ViewPreferences{Enabled: true, CriticalBypass: true}
+}
+
+// EffectiveView resolves an absent choice to the defaults.
+func (value Preferences) EffectiveView() ViewPreferences {
+	if value.View == nil {
+		return DefaultView()
+	}
+	return *value.View
 }
 
 // Default is what a user who has never saved anything gets, and what the
@@ -158,6 +190,7 @@ func Default() Preferences {
 			Enabled:  false,
 			Matchers: []NotificationMatcher{{Name: "severity", Op: "=", Value: "critical"}},
 		},
+		View: &ViewPreferences{Enabled: true, CriticalBypass: true},
 	}
 }
 

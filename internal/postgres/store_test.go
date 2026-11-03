@@ -99,7 +99,7 @@ func TestStoreIngestAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 	streamEvents := func(afterID int64) ([]alerts.StreamEvent, error) {
-		batch, err := store.StreamEvents(ctx, principal, afterID, 100)
+		batch, err := store.StreamEvents(ctx, principal, nil, afterID, 100)
 		return batch.Events, err
 	}
 	const sourceToken = "0123456789abcdef"
@@ -343,7 +343,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if _, err := store.GetAlertDetail(ctx, oidcPrincipal, 2); !errors.Is(err, alerts.ErrNotFound) {
 		t.Fatalf("out-of-scope detail error = %v, want not found", err)
 	}
-	scopedBatch, err := store.StreamEvents(ctx, oidcPrincipal, 0, 100)
+	scopedBatch, err := store.StreamEvents(ctx, oidcPrincipal, nil, 0, 100)
 	if err != nil || len(scopedBatch.Events) != 2 {
 		t.Fatalf("scoped stream = %#v, error = %v, want two platform events", scopedBatch, err)
 	}
@@ -351,7 +351,7 @@ func TestStoreIngestAndList(t *testing.T) {
 	if err := store.Ingest(ctx, []alertmanager.IncomingAlert{transition}); err != nil {
 		t.Fatal(err)
 	}
-	transitionBatch, err := store.StreamEvents(ctx, oidcPrincipal, 6, 100)
+	transitionBatch, err := store.StreamEvents(ctx, oidcPrincipal, nil, 6, 100)
 	if err != nil || len(transitionBatch.Events) != 1 || transitionBatch.Events[0].Type != "alert.removed" || !transitionBatch.Events[0].Redacted {
 		t.Fatalf("scope transition stream = %#v, error = %v", transitionBatch, err)
 	}

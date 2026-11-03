@@ -442,6 +442,19 @@ Notification policy is an opt-in plus a label selector, edited in the view menu 
 
 Permission is requested only after the user selects the notification control. Page-open notifications require HTTPS or localhost and an open Promview tab; closed-browser delivery would require a future Web Push service worker.
 
+### Automatic view
+
+A caller who holds an unrestricted binding (an unscoped one, or the administrator role) and also belongs to a team through a scoped binding sees that team by default: the scoped bindings' selectors are the *view*. A view only narrows what scope already allows and never grants access. A caller whose every binding is scoped has no view, since it would equal their scope, and neither does open mode.
+
+Two preferences control it, stored under `view` in `GET`/`PUT /api/v1/preferences`:
+
+- `enabled` (default `true`): `false` shows everything in scope while still saying what the view would hide.
+- `criticalBypass` (default `true`): critical alerts ignore the view. Set it to `false` to filter them like any other.
+
+A preference document without a `view` key means the defaults, and a `PUT` that omits it leaves the stored choice alone, so a client that predates views cannot erase it.
+
+The alert list (flat and grouped) and `/api/v1/stream` accept `view=mine` or `view=all`, which overrides the saved switch for that request without changing it. A response that has a view carries `view: {active, showingAll, hidden, criticalBypass}`, where `hidden` is the number of alerts in scope that the view excludes under the same other filters, and each alert and stream event carries `viewMatch`: `view`, `critical` (shown only because critical alerts ignore the view) or `outside` (present only with `view=all`). A page cursor is bound to the view it was issued under, and changing the view means a new snapshot and a new stream connection.
+
 This requires a user to key against, which means `PROMVIEW_AUTH_MODE=oidc`. In `open` mode every reader is the same anonymous principal, the endpoint answers `404`, and the console keeps its preferences in the browser instead — the choices still work, they just do not travel.
 
 The palette defaults to `system`, which follows the operating system's light/dark setting as the console always has. The alternatives are `dark`, `light`, `nord`, `gruvbox`, `solarized-light`, `high-contrast`, and `colorblind-safe`, picked from the status bar at the bottom of the console.

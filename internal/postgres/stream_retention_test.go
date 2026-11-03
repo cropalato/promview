@@ -88,7 +88,7 @@ func TestStorePruneStreamEvents(t *testing.T) {
 
 	// A client that had already seen everything pruned has lost nothing, and
 	// must not be told to throw away a snapshot that is still correct.
-	caughtUp, err := store.StreamEvents(ctx, principal, 2, 100)
+	caughtUp, err := store.StreamEvents(ctx, principal, nil, 2, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestStorePruneStreamEvents(t *testing.T) {
 	// A client resuming from before the watermark has missed events that no
 	// longer exist. The batch still reports the watermark so the caller can say
 	// so; what it must never do is hand back the remainder as if complete.
-	behind, err := store.StreamEvents(ctx, principal, 1, 100)
+	behind, err := store.StreamEvents(ctx, principal, nil, 1, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestStorePruneStreamEvents(t *testing.T) {
 	if remaining != 0 {
 		t.Fatalf("remaining events = %d, want the table emptied", remaining)
 	}
-	emptied, err := store.StreamEvents(ctx, principal, 1, 100)
+	emptied, err := store.StreamEvents(ctx, principal, nil, 1, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

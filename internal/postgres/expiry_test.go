@@ -58,7 +58,7 @@ func TestStoreExpireStaleAlerts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	before, err := store.StreamEvents(ctx, principal, 0, 100)
+	before, err := store.StreamEvents(ctx, principal, nil, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestStoreExpireStaleAlerts(t *testing.T) {
 
 	// The console only reacts to stream events, so expiry has to emit one per
 	// alert or the table keeps showing rows that are no longer firing.
-	after, err := store.StreamEvents(ctx, principal, 0, 100)
+	after, err := store.StreamEvents(ctx, principal, nil, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

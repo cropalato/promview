@@ -60,8 +60,13 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 	if err != nil {
 		return alerts.GroupResult{}, err
 	}
-	where, args := alertFilters(principal, query, "alert")
+	view := resolveView(principal, query.View)
+	where, args := alertFiltersWithView(principal, query, "alert", view, viewApply)
 	counts, totalAlerts, err := store.readSeverityCounts(ctx, where, args)
+	if err != nil {
+		return alerts.GroupResult{}, err
+	}
+	viewSummary, err := store.summarizeView(ctx, principal, query, view)
 	if err != nil {
 		return alerts.GroupResult{}, err
 	}
@@ -234,6 +239,7 @@ func (store *Store) GroupAlerts(ctx context.Context, principal auth.Principal, q
 		TotalAlerts:    totalAlerts,
 		SeverityCounts: counts,
 		StreamCursor:   streamCursor,
+		View:           viewSummary,
 	}, nil
 }
 
