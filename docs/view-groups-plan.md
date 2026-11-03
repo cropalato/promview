@@ -3,8 +3,9 @@
 Status: phase 1 is implemented, on the server (preferences, `view` parameter,
 SQL predicate, stream parity, `viewMatch`, hidden count) and in the console
 (banner, view menu controls, outside-view chip, stream reopened per view).
-Phase 2 is implemented on the server (migration `000025`, store, REST, CLI,
-membership, pins); the console screens for it are not. Notification alignment
+Phase 2 is implemented, on the server (migration `000025`, store, REST, CLI,
+membership, pins) and in the console (join/leave list in the view menu, locked
+pinned groups, administration under the role bindings). Notification alignment
 is still planned.
 
 ## Problem
@@ -193,12 +194,12 @@ UI must satisfy:
 ## Phases
 
 1. **Derived filter.** `view` preference, `view` parameter, SQL predicate,
-   stream parity, `viewMatch`, hidden count. No new tables. The server side is
-   implemented; the console work is not. It is useful on its own only for
+   stream parity, `viewMatch`, hidden count. No new tables. Implemented on the
+   server and in the console. It is useful on its own only for
    callers with an unrestricted grant plus a scoped one (see Semantics).
 2. **View groups.** Migration, store, REST, CLI, membership, pins. The server
-   side is implemented; the console screens (join/leave list, locked pinned
-   groups, administrator screen) are not.
+   side and the console screens (join/leave list, locked pinned groups,
+   administrator screen) are implemented.
 3. **Notifications and desktop parity.** `followView`, desktop tray counts and
    notifications from `viewMatch`.
 
