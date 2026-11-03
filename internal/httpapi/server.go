@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -1339,7 +1339,11 @@ func validMutationOrigin(r *http.Request) bool {
 // a silent 500 leaves. Both halves matter, and only one of them belongs in the
 // response.
 func writeServerError(w http.ResponseWriter, r *http.Request, message string, err error) {
-	attributes := []any{"method", r.Method, "path", r.URL.Path}
+	// The route pattern, never the raw path: the path is whatever the client
+	// sent, and a log line should not carry client-chosen text into an
+	// operator's terminal. The pattern is fixed by the router and also keeps
+	// the field low-cardinality.
+	attributes := []any{"method", r.Method, "route", r.Pattern}
 	if err != nil {
 		attributes = append(attributes, "error", err)
 	}
@@ -1358,12 +1362,19 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func spaHandler(directory string) http.Handler {
-	files := http.FileServer(http.Dir(directory))
+	root := http.Dir(directory)
+	files := http.FileServer(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := filepath.Join(directory, filepath.Clean(r.URL.Path))
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			files.ServeHTTP(w, r)
-			return
+		// Opened through http.Dir rather than joined onto the directory by
+		// hand: it refuses a name that would leave the root, so the request
+		// path never reaches the filesystem as a path of its own making.
+		if file, err := root.Open(path.Clean("/" + r.URL.Path)); err == nil {
+			info, statErr := file.Stat()
+			_ = file.Close()
+			if statErr == nil && !info.IsDir() {
+				files.ServeHTTP(w, r)
+				return
+			}
 		}
 		http.ServeFile(w, r, filepath.Join(directory, "index.html"))
 	})
