@@ -1,6 +1,8 @@
 # View Groups And Automatic Alert Filter Plan
 
-Status: planned. Nothing in this document is implemented.
+Status: phase 1 is implemented on the server (preferences, `view` parameter,
+SQL predicate, stream parity, `viewMatch`, hidden count). The console, view
+groups, and notification alignment are still planned.
 
 ## Problem
 
@@ -47,17 +49,24 @@ View sources, all unioned:
 
 | Source | Defined by | Membership | Can the user leave? |
 | --- | --- | --- | --- |
-| Derived | matchers of the caller's scoped grants | automatic | only via the global switch |
+| Derived | matchers of the caller's scoped grants, when they also hold an unrestricted one | automatic | only via the global switch |
 | Internal view group | administrator: name, description, selector | self-service join/leave | yes |
 | Pinned internal group | administrator pins it to a user or to a directory group | forced | no |
 
 Rules that need to be explicit:
 
-- **Derived filter.** Built from the matchers of the caller's scoped grants. If
-  any grant is unrestricted (no matchers), there is no derived filter. Grants
-  are read from the database on every request, so a binding change applies at
-  once; only the directory group membership lags until the next login, as it
-  does for authorization today.
+- **Derived filter.** Built from the matchers of the caller's scoped viewer and
+  operator grants, ORed. It only exists for a caller who also has an
+  unrestricted grant (an unscoped binding or the administrator role): scope is
+  then everything, and the scoped groups say what they normally look at. For a
+  caller whose every grant is scoped, a view derived from those grants would
+  equal scope and restrict nothing, so there is no derived filter and no hidden
+  count to compute. A first version of this plan said the opposite (no filter
+  when any grant is unrestricted), which would have made the derived filter a
+  no-op for everyone; the real value for scoped-only users arrives with
+  internal view groups in phase 2. Grants are read from the database on every
+  request, so a binding change applies at once; only the directory group
+  membership lags until the next login, as it does for authorization today.
 - **Pinned is a default, not a restriction.** A pinned group cannot be left,
   and is always part of the union, but the global switch
   (`view.enabled = false`, "show everything in my scope") stays available.
@@ -102,15 +111,17 @@ group deletes only the self row; leaving a pinned group answers 409.
 ```
 
 A row written before this field exists has no key at all, and a missing
-boolean must resolve to **true**, not Go's zero value. Follow the existing
-per-field fallback in `ReadPreferences` and use presence detection (pointers or
-an explicit decode step), with a test that reads a legacy row.
+boolean must resolve to **true**, not Go's zero value, so `view` is a pointer
+and reads fall back to the defaults. A write that omits `view` (an older
+console saving its layout) keeps the stored choice rather than erasing it.
+Both are covered by `TestStoreViewPreferences`.
 
 ## API
 
 Additive only; older clients keep working.
 
-- `view` query parameter on the alert snapshot, group, and stream endpoints:
+- `view` query parameter on the alert list (flat and grouped) and stream
+  endpoints:
   `view=mine` or `view=all`. Absent means the stored preference. `all` is a
   per-request override so a client can offer a "show everything" toggle without
   persisting it. It still returns only what scope allows.
@@ -177,8 +188,9 @@ UI must satisfy:
 ## Phases
 
 1. **Derived filter.** `view` preference, `view` parameter, SQL predicate,
-   stream parity, `viewMatch`, hidden count. No new tables. Delivers the opt-out
-   and most of the value on its own.
+   stream parity, `viewMatch`, hidden count. No new tables. The server side is
+   implemented; the console work is not. It is useful on its own only for
+   callers with an unrestricted grant plus a scoped one (see Semantics).
 2. **View groups.** Migration, store, REST, CLI, membership, pins.
 3. **Notifications and desktop parity.** `followView`, desktop tray counts and
    notifications from `viewMatch`.
@@ -193,8 +205,9 @@ change is expected. If one is added, update `.github/workflows/ci.yml` with it.
 - Predicate composition: table tests over scope, view, bypass on and off.
 - **The bypass cannot leave scope**: a critical alert outside the caller's
   scope is never returned, counted or streamed. This is the test that matters.
-- Unrestricted grant means no derived filter; no sources means no filter, not
-  an empty result.
+- Scoped-only caller means no derived filter; unrestricted plus scoped grants
+  means the scoped ones are the view; no sources means no filter, not an empty
+  result.
 - Pinned group cannot be left (409); leaving a self group removes only the
   self row; a user cannot learn selectors they are not an administrator for.
 - A legacy preferences row resolves `enabled` and `criticalBypass` to true.
