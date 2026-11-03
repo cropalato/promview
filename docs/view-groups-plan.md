@@ -2,8 +2,10 @@
 
 Status: phase 1 is implemented, on the server (preferences, `view` parameter,
 SQL predicate, stream parity, `viewMatch`, hidden count) and in the console
-(banner, view menu controls, outside-view chip, stream reopened per view). View
-groups and notification alignment are still planned.
+(banner, view menu controls, outside-view chip, stream reopened per view).
+Phase 2 is implemented on the server (migration `000025`, store, REST, CLI,
+membership, pins); the console screens for it are not. Notification alignment
+is still planned.
 
 ## Problem
 
@@ -137,9 +139,11 @@ Additive only; older clients keep working.
   without recomputing the view in each client.
 - `GET /api/v1/view-groups`: groups visible to the caller, with their
   membership state.
-- `POST|PUT|DELETE /api/v1/view-groups[/{id}]`: administrator.
-- `PUT|DELETE /api/v1/view-groups/{id}/membership`: the caller, self-service.
-- `POST|DELETE /api/v1/view-groups/{id}/pins`: administrator.
+- `PUT|DELETE /api/v1/view-groups/{name}`: administrator. Groups are addressed
+  by name, as role bindings are, not by id.
+- `PUT|DELETE /api/v1/view-groups/{name}/membership`: the caller, self-service.
+- `POST|DELETE /api/v1/view-groups/{name}/pins`: administrator; the body names
+  the subject like a binding does, and DELETE identifies the pin by it.
 - `GET|PUT /api/v1/preferences`: extended with `view`.
 - CLI mirroring `promview source set`: `promview view-group
   create|list|set|delete|pin|unpin`.
@@ -192,7 +196,9 @@ UI must satisfy:
    stream parity, `viewMatch`, hidden count. No new tables. The server side is
    implemented; the console work is not. It is useful on its own only for
    callers with an unrestricted grant plus a scoped one (see Semantics).
-2. **View groups.** Migration, store, REST, CLI, membership, pins.
+2. **View groups.** Migration, store, REST, CLI, membership, pins. The server
+   side is implemented; the console screens (join/leave list, locked pinned
+   groups, administrator screen) are not.
 3. **Notifications and desktop parity.** `followView`, desktop tray counts and
    notifications from `viewMatch`.
 

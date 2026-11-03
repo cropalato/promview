@@ -10,8 +10,13 @@ package auth
 // caller who has an unrestricted grant and also belongs to a team: scope is
 // everything, and the team is what they normally mean to look at.
 //
-// Anonymous callers and callers with no scoped grant get nil, which the
-// caller must read as "no filter", never as "nothing matches".
+// Internal view groups the caller belongs to are always part of the view,
+// whatever their grants are: they are what a user, or an administrator on the
+// user's behalf, chose to look at. A group whose selectors fall outside scope
+// simply matches nothing there.
+//
+// Anonymous callers and callers with no source get nil, which the caller must
+// read as "no filter", never as "nothing matches".
 func ViewMatchers(principal Principal) [][]LabelMatcher {
 	if principal.Anonymous {
 		return nil
@@ -31,7 +36,12 @@ func ViewMatchers(principal Principal) [][]LabelMatcher {
 		}
 	}
 	if !unrestricted {
-		return nil
+		groups = nil
+	}
+	for _, group := range principal.ViewGroups {
+		if len(group) > 0 {
+			groups = append(groups, append([]LabelMatcher(nil), group...))
+		}
 	}
 	return groups
 }

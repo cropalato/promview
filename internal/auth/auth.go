@@ -23,6 +23,10 @@ type Principal struct {
 	Roles       []string `json:"roles"`
 	Anonymous   bool     `json:"anonymous"`
 	Grants      []Grant  `json:"grants,omitempty"`
+	// ViewGroups are the selectors of the internal view groups the caller
+	// belongs to, joined or pinned. They narrow the automatic view and never
+	// widen scope, so they are kept apart from Grants and are not serialized.
+	ViewGroups [][]LabelMatcher `json:"-"`
 }
 
 func (principal Principal) HasRole(role string) bool {

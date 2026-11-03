@@ -20,6 +20,17 @@ func TestViewMatchers(t *testing.T) {
 			{Role: RoleOperator, Matchers: team},
 			{Role: RoleViewer, Matchers: db},
 		}}, 2},
+		{"a joined group is a view even for a scoped-only caller", Principal{
+			Grants: []Grant{{Role: RoleViewer, Matchers: team}}, ViewGroups: [][]LabelMatcher{db},
+		}, 1},
+		{"a joined group is a view for a caller with no grants to derive from", Principal{
+			Grants: []Grant{{Role: RoleViewer}}, ViewGroups: [][]LabelMatcher{db},
+		}, 1},
+		{"derived and joined groups union", Principal{
+			Grants:     []Grant{{Role: RoleViewer}, {Role: RoleViewer, Matchers: team}},
+			ViewGroups: [][]LabelMatcher{db},
+		}, 2},
+		{"anonymous ignores groups", Principal{Anonymous: true, ViewGroups: [][]LabelMatcher{db}}, 0},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

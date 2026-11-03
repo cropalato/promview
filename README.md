@@ -444,7 +444,7 @@ Permission is requested only after the user selects the notification control. Pa
 
 ### Automatic view
 
-A caller who holds an unrestricted binding (an unscoped one, or the administrator role) and also belongs to a team through a scoped binding sees that team by default: the scoped bindings' selectors are the *view*. A view only narrows what scope already allows and never grants access. A caller whose every binding is scoped has no view, since it would equal their scope, and neither does open mode.
+A caller who holds an unrestricted binding (an unscoped one, or the administrator role) and also belongs to a team through a scoped binding sees that team by default: the scoped bindings' selectors are the *view*. A view only narrows what scope already allows and never grants access. A caller whose every binding is scoped has no view of their own, since it would equal their scope, until they join a [view group](#view-groups); open mode never has one.
 
 Two preferences control it, stored under `view` in `GET`/`PUT /api/v1/preferences`:
 
@@ -456,6 +456,22 @@ A preference document without a `view` key means the defaults, and a `PUT` that 
 The alert list (flat and grouped) and `/api/v1/stream` accept `view=mine` or `view=all`, which overrides the saved switch for that request without changing it. A response that has a view carries `view: {active, showingAll, hidden, criticalBypass}`, where `hidden` is the number of alerts in scope that the view excludes under the same other filters, and each alert and stream event carries `viewMatch`: `view`, `critical` (shown only because critical alerts ignore the view) or `outside` (present only with `view=all`). A page cursor is bound to the view it was issued under, and changing the view means a new snapshot and a new stream connection.
 
 In the console, a banner above the list says whether you are looking at your view or at everything in your scope, how many alerts the view hides, and offers a one-click switch. Flipping it is for the moment: it is sent as an explicit `view` parameter and is never saved, while the two preferences live in the view menu under *Automatic view*. Critical alerts that appear only because they ignore the view carry an *outside view* chip; with everything showing, rows outside the view are dimmed. The banner and the menu controls appear only for a caller who has a view. The console only sends `view` for that override, so every other request is the one it always sent and the server applies the saved preference. A change made in the view menu is applied to the list once its save has landed, since the server reads the saved copy.
+
+#### View groups
+
+An administrator can define *view groups*: a name, a description and a selector in the same syntax bindings use. A user joins and leaves them freely, and the selectors of every group they belong to are ORed into their view, together with the one derived from their scoped bindings. A group is a convenience and never a permission: it is always intersected with scope, so joining one whose selector falls outside a user's scope is allowed and shows nothing of it.
+
+An administrator can also *pin* a group on a user, or on every member of a directory group (OIDC or LDAP). A pinned group cannot be left, and leaving it answers `409`. It is a default and not a restriction: the `view.enabled` switch still shows everything in scope, because anything that must be unavailable to a user is a binding scope and not a view.
+
+```bash
+promview view-group set --name platform --description "Platform team" --selector team=platform
+promview view-group pin --name platform --issuer https://idp.example --group platform
+promview view-group unpin --name platform --user-id 42
+promview view-group list
+promview view-group delete --name platform
+```
+
+The same is available over HTTP. Any signed-in user may call `GET /api/v1/view-groups` (names, descriptions and their own state; selectors, pins and member counts are shown to administrators only, since a selector can name labels the reader cannot see) and `PUT`/`DELETE /api/v1/view-groups/{name}/membership` to join or leave. Administrators define groups with `PUT`/`DELETE /api/v1/view-groups/{name}` and pin with `POST`/`DELETE /api/v1/view-groups/{name}/pins`, whose body names the subject like a binding does (`{"subjectKind":"oidc_group","subjectIssuer":"…","subjectGroup":"…"}` or `{"subjectKind":"user","userID":42}`). Open mode has no user to belong to a group, so these endpoints answer `404` there. The console does not manage view groups yet.
 
 This requires a user to key against, which means `PROMVIEW_AUTH_MODE=oidc`. In `open` mode every reader is the same anonymous principal, the endpoint answers `404`, and the console keeps its preferences in the browser instead — the choices still work, they just do not travel.
 

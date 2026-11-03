@@ -498,6 +498,10 @@ func resolvePrincipal(ctx context.Context, database principalQuerier, userID int
 	if !principal.CanRead() {
 		return auth.Principal{}, auth.ErrAccessDenied
 	}
+	rows.Close()
+	if principal.ViewGroups, err = viewGroupMatchers(ctx, database, userID); err != nil {
+		return auth.Principal{}, err
+	}
 	return principal, nil
 }
 
