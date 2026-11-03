@@ -1556,3 +1556,12 @@ func TestRoleBindingEndpointsRequireAnAdministrator(t *testing.T) {
 		}
 	}
 }
+
+func TestLogSafeDropsControlCharacters(t *testing.T) {
+	if got := logSafe("GET\r\nlevel=ERROR forged"); got != "GETlevel=ERROR forged" {
+		t.Fatalf("logSafe() = %q", got)
+	}
+	if got := logSafe("/api/v1/alerts/{id}"); got != "/api/v1/alerts/{id}" {
+		t.Fatalf("logSafe() changed a clean value: %q", got)
+	}
+}

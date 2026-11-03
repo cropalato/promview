@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/cropalato/promview/internal/alertmanager"
 	"github.com/cropalato/promview/internal/alerts"
@@ -1343,12 +1344,25 @@ func writeServerError(w http.ResponseWriter, r *http.Request, message string, er
 	// sent, and a log line should not carry client-chosen text into an
 	// operator's terminal. The pattern is fixed by the router and also keeps
 	// the field low-cardinality.
-	attributes := []any{"method", r.Method, "route", r.Pattern}
+	attributes := []any{"method", logSafe(r.Method), "route", logSafe(r.Pattern)}
 	if err != nil {
-		attributes = append(attributes, "error", err)
+		// As text, and cleaned: an error can wrap a value the client sent.
+		attributes = append(attributes, "error", logSafe(err.Error()))
 	}
 	slog.Error(message, attributes...)
 	writeError(w, http.StatusInternalServerError, message)
+}
+
+// logSafe drops line breaks and other control characters, so a value a client
+// chose cannot start a line of its own in the log. The method is the case that
+// matters: HTTP lets a client send any token there.
+func logSafe(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, value)
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
