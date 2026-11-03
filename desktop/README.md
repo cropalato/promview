@@ -12,7 +12,13 @@ This is the walking skeleton from `docs/desktop-client-plan.md`, not the MVP.
 - A tray icon with a menu: open the console, toggle a compact always-on-top
   window, quit. Closing a window hides it; the tray owns the process lifetime.
 - The tray tooltip shows firing counts by severity, refreshed whenever the stream
-  reports a change and on a slow timer as a fallback.
+  reports a change and on a slow timer as a fallback. Like the console, it reads
+  under the user's saved automatic view (see the server README), so the counts
+  can be narrower than the deployment; when they are, the tooltip adds
+  `· N hidden by your view` rather than letting a filtered count pass for the
+  whole. Notifications come from the console's stream and follow the same view.
+  `GetAlerts` on D-Bus is the server's own answer to the same request, so it too
+  follows the saved view.
 - `PROMVIEW_SERVER_URL` selects the server, validated on the way in, or an
   optional config file does — including a per-machine alert filter and variables
   to export before the webview starts.

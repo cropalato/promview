@@ -5,8 +5,9 @@ SQL predicate, stream parity, `viewMatch`, hidden count) and in the console
 (banner, view menu controls, outside-view chip, stream reopened per view).
 Phase 2 is implemented, on the server (migration `000025`, store, REST, CLI,
 membership, pins) and in the console (join/leave list in the view menu, locked
-pinned groups, administration under the role bindings). Notification alignment
-is still planned.
+pinned groups, administration under the role bindings). Phase 3 is implemented:
+`notifications.followView`, notifications deciding from `viewMatch`, and the
+desktop tray reporting what the view hides.
 
 ## Problem
 
@@ -201,7 +202,9 @@ UI must satisfy:
    side and the console screens (join/leave list, locked pinned groups,
    administrator screen) are implemented.
 3. **Notifications and desktop parity.** `followView`, desktop tray counts and
-   notifications from `viewMatch`.
+   notifications from `viewMatch`. Implemented. The desktop client needed no
+   notification change of its own: it runs the same console, and its tray already
+   read under the saved view, so what it gained is the hidden count.
 
 Each phase gets its own UI plan and ships behind a complete verification run.
 
