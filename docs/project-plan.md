@@ -297,6 +297,8 @@ A role binding combines subject, role, and label selector. Initial selector oper
 
 Authorization constraints must be part of database queries. Post-query filtering can leak counts, stream events, pagination information, and timing. Mutation endpoints must independently confirm the target is in scope.
 
+A per-user view on top of scope, with automatic filters, self-service view groups, and pinned groups, is planned in [`view-groups-plan.md`](view-groups-plan.md). A view only narrows what scope allows and never grants access.
+
 ## API
 
 Initial endpoints:
