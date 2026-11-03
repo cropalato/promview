@@ -214,4 +214,24 @@ describe('the view preference', () => {
     });
     expect(parsePreferences({ view: { enabled: 'no' } }).view.enabled).toBe(true);
   });
+
+  describe('notifications following the view', () => {
+    const base = { enabled: true, matchers: [{ name: 'severity', op: '=', value: 'critical' }] };
+
+    it('defaults on, including for a payload from before the switch existed', () => {
+      expect(defaultPreferences().notifications.followView).toBe(true);
+      const parsed = parsePreferences({ notifications: base });
+      expect(parsed.notifications.followView).toBe(true);
+    });
+
+    it('reads an explicit off, and treats anything else as on', () => {
+      expect(
+        parsePreferences({ notifications: { ...base, followView: false } }).notifications
+          .followView,
+      ).toBe(false);
+      expect(
+        parsePreferences({ notifications: { ...base, followView: 'no' } }).notifications.followView,
+      ).toBe(true);
+    });
+  });
 });

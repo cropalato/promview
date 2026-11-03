@@ -258,4 +258,44 @@ describe('eventMatchesSelector', () => {
       false,
     );
   });
+
+  describe('following the view', () => {
+    it('does not notify about an alert the console would not show', () => {
+      const { options } = harness();
+      createAlertNotifier(options).handleEvent(createdCritical({ viewMatch: 'outside' }));
+      expect(FakeNotification.instances).toHaveLength(0);
+    });
+
+    it('still notifies about a critical alert shown only because critical ignores the view', () => {
+      const { options } = harness();
+      createAlertNotifier(options).handleEvent(createdCritical({ viewMatch: 'critical' }));
+      expect(FakeNotification.instances).toHaveLength(1);
+    });
+
+    it('notifies about an alert in the view, and about one from a caller with no view', () => {
+      const { options } = harness();
+      const notifier = createAlertNotifier(options);
+      notifier.handleEvent(createdCritical({ id: 20, viewMatch: 'view' }));
+      notifier.handleEvent(createdCritical({ id: 21 }));
+      expect(FakeNotification.instances).toHaveLength(2);
+    });
+
+    it('notifies about everything in scope when the user turned following off', () => {
+      const { options } = harness();
+      createAlertNotifier({ ...options, followView: () => false }).handleEvent(
+        createdCritical({ viewMatch: 'outside' }),
+      );
+      expect(FakeNotification.instances).toHaveLength(1);
+    });
+
+    it('does not remember an event it turned away, so a later change of mind can use it', () => {
+      const { options } = harness();
+      let follow = true;
+      const notifier = createAlertNotifier({ ...options, followView: () => follow });
+      notifier.handleEvent(createdCritical({ viewMatch: 'outside' }));
+      follow = false;
+      notifier.handleEvent(createdCritical({ viewMatch: 'outside' }));
+      expect(FakeNotification.instances).toHaveLength(1);
+    });
+  });
 });

@@ -438,6 +438,24 @@ export function ViewMenu({
                 {notificationError}
               </p>
             ) : null}
+            {viewActive ? (
+              <label className="view-menu-check">
+                <input
+                  type="checkbox"
+                  checked={preferences.notifications.followView}
+                  onChange={(event) =>
+                    onChange({
+                      ...preferences,
+                      notifications: {
+                        ...preferences.notifications,
+                        followView: event.target.checked,
+                      },
+                    })
+                  }
+                />
+                <span>Only alerts in my view</span>
+              </label>
+            ) : null}
             <p className="view-menu-note">
               Matches on {NOTIFICATION_FIELDS.join(', ')}. An empty selector notifies about nothing.
             </p>

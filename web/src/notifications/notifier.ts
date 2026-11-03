@@ -125,6 +125,13 @@ export interface AlertNotifierOptions {
    * before selectors existed.
    */
   matchers?: () => readonly NotificationMatcher[];
+  /**
+   * Whether notifications follow the automatic view, read per event. Absent
+   * means they do, which is the default. When they do, an alert the console
+   * would not show (`viewMatch: outside`) does not notify; one shown only
+   * because critical alerts ignore the view still does.
+   */
+  followView?: () => boolean;
 }
 
 export interface AlertNotifier {
@@ -218,6 +225,11 @@ export function createAlertNotifier(options: AlertNotifierOptions): AlertNotifie
   return {
     handleEvent(event) {
       if (event.type !== 'alert.created') {
+        return;
+      }
+      // Before the ledger, like the selector: an event turned away here has not
+      // been judged, and must not be remembered as if it had.
+      if (event.viewMatch === 'outside' && (options.followView?.() ?? true)) {
         return;
       }
       const matchers = options.matchers?.() ?? DEFAULT_SELECTOR;

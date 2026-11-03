@@ -25,6 +25,8 @@ export interface UseAlertNotificationsOptions {
    */
   enabled: boolean;
   matchers: readonly NotificationMatcher[];
+  /** Notify only about what the automatic view shows. Defaults to on. */
+  followView?: boolean;
   /**
    * Persists a change to the opt-in. Permission is the browser's business and
    * stays here; whether the operator wants notifications is not.
@@ -63,6 +65,7 @@ export function useAlertNotifications({
   isDocumentHidden,
   enabled,
   matchers,
+  followView = true,
   onEnabledChange,
 }: UseAlertNotificationsOptions): AlertNotifications {
   // Resolved once per mount: an injected factory wins, otherwise the
@@ -133,6 +136,11 @@ export function useAlertNotifications({
     matchersRef.current = matchers;
   }, [matchers]);
 
+  const followViewRef = useRef(followView);
+  useEffect(() => {
+    followViewRef.current = followView;
+  }, [followView]);
+
   // The seen ledger is the notifier's only state, so it is what stays stable.
   // The notifier itself is stateless and is built at event time, where its
   // ref-backed accessors are read.
@@ -143,6 +151,7 @@ export function useAlertNotifications({
       createAlertNotifier({
         isEnabled: () => enabledRef.current,
         matchers: () => matchersRef.current,
+        followView: () => followViewRef.current,
         isDocumentHidden: () =>
           isDocumentHidden !== undefined ? isDocumentHidden() : document.hidden,
         createNotification: (title, options) => {

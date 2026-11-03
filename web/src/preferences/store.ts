@@ -55,6 +55,12 @@ export interface NotificationPreference {
   enabled: boolean;
   /** ANDed. Empty matches nothing, never everything. */
   matchers: NotificationMatcher[];
+  /**
+   * Notify only about what the console would show, critical bypass included.
+   * On by default; the selector above applies on top. Off notifies about
+   * everything in the user's scope that the selector matches.
+   */
+  followView: boolean;
 }
 
 /**
@@ -153,7 +159,11 @@ export function defaultPreferences(): Preferences {
     closedVisibility: 'open',
     // Off, carrying the selector the console hardcoded before this was
     // configurable, so opting in does what it always did.
-    notifications: { enabled: false, matchers: [{ name: 'severity', op: '=', value: 'critical' }] },
+    notifications: {
+      enabled: false,
+      matchers: [{ name: 'severity', op: '=', value: 'critical' }],
+      followView: true,
+    },
     view: { enabled: true, criticalBypass: true },
   };
 }
@@ -270,8 +280,12 @@ function parseNotifications(
     return fallback;
   }
   const raw = value as Record<string, unknown>;
+  // Absent or malformed means on, which is what the server does: a payload from
+  // before the switch existed must not quietly start notifying about alerts the
+  // user's view hides.
+  const followView = raw.followView !== false;
   if (!Array.isArray(raw.matchers)) {
-    return { enabled: raw.enabled === true, matchers: fallback.matchers };
+    return { enabled: raw.enabled === true, matchers: fallback.matchers, followView };
   }
   const matchers: NotificationMatcher[] = [];
   for (const entry of raw.matchers) {
@@ -290,7 +304,7 @@ function parseNotifications(
     }
     matchers.push({ name: matcher.name, op: matcher.op, value: matcher.value });
   }
-  return { enabled: raw.enabled === true, matchers };
+  return { enabled: raw.enabled === true, matchers, followView };
 }
 
 export function readLocalPreferences(storage?: StorageLike): Preferences {

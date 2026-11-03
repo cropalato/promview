@@ -404,6 +404,7 @@ export default function App({ navigate }: AppProps = {}) {
     navigateToAlert: openAlert,
     enabled: preferences.notifications.enabled,
     matchers: preferences.notifications.matchers,
+    followView: preferences.notifications.followView,
     onEnabledChange: (enabled) =>
       updatePreferences({
         ...preferences,
@@ -460,7 +461,14 @@ export default function App({ navigate }: AppProps = {}) {
       consoleUnlocked && alertsState.status === 'ready' && snapshotMatchesView
         ? alertsState.data.streamCursor
         : null,
-    view: viewRequest.override ?? undefined,
+    // A user who asked notifications not to follow the view still has to be told
+    // about alerts the list is narrowed away from, and only a stream that is not
+    // narrowed carries them. The list reads its own snapshot, so extra events
+    // only cost it a refresh.
+    view:
+      !preferences.notifications.followView && preferences.notifications.enabled
+        ? 'all'
+        : (viewRequest.override ?? undefined),
     onAlertEvent: handleAlertEvent,
     onStreamGap: handleStreamGap,
   });

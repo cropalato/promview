@@ -2219,3 +2219,45 @@ describe('App view groups', () => {
     expect(screen.getByRole('checkbox', { name: /platform/ })).toBeChecked();
   });
 });
+
+describe('App notifications and the view', () => {
+  function seed(followView: boolean, enabled: boolean): void {
+    const preferences = defaultPreferences();
+    window.localStorage.setItem(
+      PREFERENCES_KEY,
+      JSON.stringify({
+        ...preferences,
+        grouping: { ...preferences.grouping, enabled: false },
+        notifications: { ...preferences.notifications, enabled, followView },
+      }),
+    );
+  }
+
+  it('opens the stream under the list’s own view while notifications follow the view', async () => {
+    seed(true, true);
+    mockApi(alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 }));
+    render(<App />);
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7');
+  });
+
+  it('opens an unnarrowed stream when notifications are on and do not follow the view', async () => {
+    seed(false, true);
+    mockApi(alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 }));
+    render(<App />);
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    // Only a stream that is not narrowed carries the alerts the list is narrowed away from.
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7&view=all');
+  });
+
+  it('leaves the stream alone when notifications are off, whatever they would follow', async () => {
+    seed(false, false);
+    mockApi(alertsPage({ alerts: [apiAlert()], severityCounts: { critical: 1 }, total: 1 }));
+    render(<App />);
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7');
+  });
+});

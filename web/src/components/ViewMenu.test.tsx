@@ -277,4 +277,27 @@ describe('ViewMenu', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Unable to reach the Promview API');
     });
   });
+
+  describe('notifications following the view', () => {
+    it('offers the switch only to a caller who has a view', () => {
+      const { rerender } = render(
+        <ViewMenu preferences={defaultPreferences()} onChange={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'View' }));
+      expect(
+        screen.queryByRole('checkbox', { name: 'Only alerts in my view' }),
+      ).not.toBeInTheDocument();
+
+      rerender(<ViewMenu preferences={defaultPreferences()} onChange={vi.fn()} viewActive />);
+      expect(screen.getByRole('checkbox', { name: 'Only alerts in my view' })).toBeChecked();
+    });
+
+    it('saves the choice', () => {
+      const onChange = vi.fn();
+      render(<ViewMenu preferences={defaultPreferences()} onChange={onChange} viewActive />);
+      fireEvent.click(screen.getByRole('button', { name: 'View' }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Only alerts in my view' }));
+      expect(onChange.mock.calls[0]?.[0].notifications.followView).toBe(false);
+    });
+  });
 });
