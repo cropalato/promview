@@ -1,8 +1,9 @@
 # View Groups And Automatic Alert Filter Plan
 
-Status: phase 1 is implemented on the server (preferences, `view` parameter,
-SQL predicate, stream parity, `viewMatch`, hidden count). The console, view
-groups, and notification alignment are still planned.
+Status: phase 1 is implemented, on the server (preferences, `view` parameter,
+SQL predicate, stream parity, `viewMatch`, hidden count) and in the console
+(banner, view menu controls, outside-view chip, stream reopened per view). View
+groups and notification alignment are still planned.
 
 ## Problem
 
