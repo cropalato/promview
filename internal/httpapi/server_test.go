@@ -993,6 +993,29 @@ func TestPutPreferences(t *testing.T) {
 	}
 }
 
+// The console has always sent closedVisibility. A server that did not know the
+// field rejected every save as an unknown field, so the layout silently stayed in
+// one browser. This is the payload the console really sends.
+func TestPutPreferencesAcceptsWhatTheConsoleSends(t *testing.T) {
+	store := &fakeStore{}
+	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}}, nil)
+	payload := `{"columns":[{"id":"severity"}],"density":"normal","grouping":{"enabled":true,"keys":["alertname"]},` +
+		`"theme":"system","silencedVisibility":"show","closedVisibility":"closed",` +
+		`"notifications":{"enabled":false,"matchers":[{"name":"severity","op":"=","value":"critical"}]},` +
+		`"view":{"enabled":false,"criticalBypass":true}}`
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/v1/preferences", strings.NewReader(payload)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if store.written == nil || store.written.ClosedVisibility != "closed" {
+		t.Fatalf("stored closed visibility = %#v, want closed", store.written)
+	}
+	if store.written.View == nil || store.written.View.Enabled || !store.written.View.CriticalBypass {
+		t.Fatalf("stored view = %#v, want the submitted choice", store.written.View)
+	}
+}
+
 func TestPutPreferencesRejectsUnusableLayouts(t *testing.T) {
 	store := &fakeStore{}
 	handler := New(config.Config{AuthMode: "oidc"}, store, fakeAuthenticator{principal: auth.Principal{UserID: 7, Subject: "ada", Roles: []string{"viewer"}}}, nil)
@@ -1004,6 +1027,7 @@ func TestPutPreferencesRejectsUnusableLayouts(t *testing.T) {
 		{name: "unknown density", payload: `{"columns":[{"id":"severity"}],"density":"tiny"}`},
 		{name: "grouping by a malformed label", payload: `{"columns":[{"id":"severity"}],"density":"normal","grouping":{"enabled":true,"keys":["not-a-label"]}}`},
 		{name: "empty layout", payload: `{"columns":[],"density":"normal"}`},
+		{name: "unknown closed visibility", payload: `{"columns":[{"id":"severity"}],"density":"normal","closedVisibility":"everything"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			response := httptest.NewRecorder()

@@ -330,3 +330,36 @@ func TestStoreViewPreferences(t *testing.T) {
 		t.Fatalf("view = %+v, want the stored choice preserved", read.View)
 	}
 }
+
+func TestStoreViewClosedVisibilityPersistsAndSurvivesOlderClients(t *testing.T) {
+	ctx, store, pool := viewTestStore(t)
+	user := viewTestUser(t, ctx, store, pool, "ada@example.com", auth.Grant{Role: auth.RoleViewer})
+
+	initial, err := store.ReadPreferences(ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initial.ClosedVisibility != "open" {
+		t.Fatalf("closed visibility = %q, want open by default", initial.ClosedVisibility)
+	}
+
+	chosen := preferences.Default()
+	chosen.ClosedVisibility = "closed"
+	if err := store.WritePreferences(ctx, user, chosen); err != nil {
+		t.Fatal(err)
+	}
+	// A client that predates the field saves its layout without it.
+	older := preferences.Default()
+	older.ClosedVisibility = ""
+	older.Density = "compact"
+	if err := store.WritePreferences(ctx, user, older); err != nil {
+		t.Fatal(err)
+	}
+	read, err := store.ReadPreferences(ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.ClosedVisibility != "closed" || read.Density != "compact" {
+		t.Fatalf("preferences = closed %q density %q, want the stored choice kept and the layout saved", read.ClosedVisibility, read.Density)
+	}
+}

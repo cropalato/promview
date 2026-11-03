@@ -115,6 +115,12 @@ type Grouping struct {
 // silencing is supposed to replace, not cause.
 var SilencedVisibilities = []string{"show", "hide", "only"}
 
+// ClosedVisibilities are the two things the list can do about alerts an
+// operator has closed. There are two rather than three because the alerts
+// endpoint offers two: `closed` is absent for open alerts and true for closed
+// ones, with no way to ask for both.
+var ClosedVisibilities = []string{"open", "closed"}
+
 type Preferences struct {
 	Columns  []Column `json:"columns"`
 	Density  string   `json:"density"`
@@ -122,6 +128,13 @@ type Preferences struct {
 	Theme    string   `json:"theme"`
 	// SilencedVisibility decides whether suppressed alerts appear in the list.
 	SilencedVisibility string `json:"silencedVisibility"`
+
+	// ClosedVisibility decides whether the list shows open or closed alerts. The
+	// console has always sent it; a server that did not know the field rejected
+	// every save as an unknown field, so the console quietly kept its layout in
+	// one browser. Empty on a write means the client predates it, and the
+	// stored choice is kept.
+	ClosedVisibility string `json:"closedVisibility"`
 
 	Notifications Notifications `json:"notifications"`
 
@@ -183,6 +196,9 @@ func Default() Preferences {
 		// has to be able to see that an alert is firing and being held back;
 		// those are different facts from it not being there.
 		SilencedVisibility: "show",
+		// Open, which is what the server does unasked: closing an alert that
+		// stayed in the list would be an action with no visible effect.
+		ClosedVisibility: "open",
 		// Off, with the selector the console hardcoded before this was
 		// configurable. Opting in should do what it always did; widening it is
 		// then the operator's explicit choice.
@@ -224,6 +240,9 @@ func Validate(value Preferences) error {
 	}
 	if !isSilencedVisibility(value.SilencedVisibility) {
 		return fmt.Errorf("silencedVisibility must be one of %s", strings.Join(SilencedVisibilities, ", "))
+	}
+	if value.ClosedVisibility != "" && !isClosedVisibility(value.ClosedVisibility) {
+		return fmt.Errorf("closedVisibility must be one of %s", strings.Join(ClosedVisibilities, ", "))
 	}
 	if err := validateNotifications(value.Notifications); err != nil {
 		return err
@@ -292,6 +311,15 @@ func validateNotifications(value Notifications) error {
 func isNotificationField(name string) bool {
 	for _, field := range NotificationFields {
 		if field == name {
+			return true
+		}
+	}
+	return false
+}
+
+func isClosedVisibility(value string) bool {
+	for _, allowed := range ClosedVisibilities {
+		if value == allowed {
 			return true
 		}
 	}
