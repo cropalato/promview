@@ -13,13 +13,14 @@ describe('resolveViewRequest', () => {
       mode: 'mine',
       criticalBypass: true,
       override: null,
+      revision: 0,
     });
     expect(resolveViewRequest({ enabled: false, criticalBypass: true }, null).mode).toBe('all');
   });
 
   it('lets the moment override the saved switch without changing what is saved', () => {
     const request = resolveViewRequest({ enabled: true, criticalBypass: false }, 'all');
-    expect(request).toEqual({ mode: 'all', criticalBypass: false, override: 'all' });
+    expect(request).toEqual({ mode: 'all', criticalBypass: false, override: 'all', revision: 0 });
   });
 });
 
@@ -41,13 +42,15 @@ describe('toggledOverride', () => {
 describe('viewKeyOf', () => {
   it('is empty without a view and differs for every change a request can make', () => {
     expect(viewKeyOf(undefined)).toBe('');
-    const base = { mode: 'mine' as const, criticalBypass: true, override: null };
+    const base = { mode: 'mine' as const, criticalBypass: true, override: null, revision: 0 };
     const keys = new Set([
       viewKeyOf(base),
       viewKeyOf({ ...base, mode: 'all' }),
       viewKeyOf({ ...base, criticalBypass: false }),
+      // A join or leave changes what the server derives, with nothing else in the request changing.
+      viewKeyOf({ ...base, revision: 1 }),
     ]);
-    expect(keys.size).toBe(3);
+    expect(keys.size).toBe(4);
   });
 });
 

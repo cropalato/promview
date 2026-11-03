@@ -28,6 +28,13 @@ export interface ViewRequest {
   criticalBypass: boolean;
   /** The moment's choice from the banner, or null to leave it to the saved preference. */
   override: ViewMode | null;
+  /**
+   * Counts the changes to the caller's view groups made from this console. The
+   * server derives the view from membership, which the request does not carry,
+   * so a join or leave has to read as a different request to refetch and to
+   * reopen the stream from a new snapshot.
+   */
+  revision: number;
 }
 
 /**
@@ -60,7 +67,9 @@ export function isViewMatch(value: unknown): value is ViewMatch {
  * and what a stream connection is opened under, so a change reconnects.
  */
 export function viewKeyOf(view: ViewRequest | undefined): string {
-  return view === undefined ? '' : `${view.mode}:${view.criticalBypass ? 'bypass' : 'filtered'}`;
+  return view === undefined
+    ? ''
+    : `${view.mode}:${view.criticalBypass ? 'bypass' : 'filtered'}:${view.revision}`;
 }
 
 /**
@@ -72,9 +81,10 @@ export function viewKeyOf(view: ViewRequest | undefined): string {
 export function resolveViewRequest(
   saved: { enabled: boolean; criticalBypass: boolean },
   override: ViewMode | null,
+  revision = 0,
 ): ViewRequest {
   const savedMode: ViewMode = saved.enabled ? 'mine' : 'all';
-  return { mode: override ?? savedMode, criticalBypass: saved.criticalBypass, override };
+  return { mode: override ?? savedMode, criticalBypass: saved.criticalBypass, override, revision };
 }
 
 /** The override that flips the current mode, collapsing to null when it is the saved one. */

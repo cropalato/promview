@@ -7,6 +7,7 @@ import {
   saveRoleBinding,
 } from '../access/bindings';
 import type { BindingRole, RoleBinding, SubjectKind } from '../access/bindings';
+import { ViewGroupsAdmin } from './ViewGroupsAdmin';
 
 /**
  * Administering who can do what, for administrators.
@@ -141,6 +142,8 @@ export function AccessPanel({ onClose }: { onClose: () => void }) {
           onError={setError}
         />
       )}
+
+      <ViewGroupsAdmin />
     </section>
   );
 }

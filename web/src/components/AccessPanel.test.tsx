@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccessPanel } from './AccessPanel';
 import * as bindings from '../access/bindings';
+import * as viewGroups from '../access/viewGroups';
 import type { RoleBinding } from '../access/bindings';
 
 const scoped: RoleBinding = {
@@ -37,6 +38,12 @@ async function openForm(): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: 'Add a binding' }));
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'new-binding' } });
 }
+
+beforeEach(() => {
+  // The panel also hosts the view group administration, which has its own
+  // tests; here it only has to not reach for a network.
+  vi.spyOn(viewGroups, 'fetchViewGroups').mockResolvedValue([]);
+});
 
 afterEach(() => {
   vi.restoreAllMocks();

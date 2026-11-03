@@ -97,7 +97,7 @@ function parseBinding(value: unknown): RoleBinding | null {
   };
 }
 
-async function send(
+export async function send(
   url: string,
   init: RequestInit,
   what: string,

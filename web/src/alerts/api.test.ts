@@ -315,7 +315,7 @@ describe('closed filter', () => {
 });
 
 describe('the automatic view', () => {
-  const request = { mode: 'mine' as const, criticalBypass: true, override: null };
+  const request = { mode: 'mine' as const, criticalBypass: true, override: null, revision: 0 };
 
   it('sends nothing unless the operator has overridden the saved view', () => {
     // Every ordinary request stays exactly as it was: the server applies the

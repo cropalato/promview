@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { defaultPreferences } from '../preferences/store';
 import type { ColumnPreference, Preferences } from '../preferences/store';
+import type { ViewGroupsState } from '../hooks/useViewGroups';
 import { ViewMenu } from './ViewMenu';
 
 function withColumns(columns: ColumnPreference[]): Preferences {
@@ -202,6 +203,78 @@ describe('ViewMenu', () => {
       expect(onChange).toHaveBeenLastCalledWith(
         expect.objectContaining({ view: { enabled: true, criticalBypass: false } }),
       );
+    });
+  });
+
+  describe('view groups', () => {
+    const state = (
+      groups: ViewGroupsState['groups'],
+      overrides: Partial<ViewGroupsState> = {},
+    ) => ({
+      groups,
+      pending: false,
+      error: null,
+      join: vi.fn(),
+      leave: vi.fn(),
+      ...overrides,
+    });
+    const entry = (overrides: Partial<ViewGroupsState['groups'][number]>) => ({
+      name: 'platform',
+      description: 'Platform team',
+      joined: false,
+      pinned: false,
+      matchers: [],
+      pins: [],
+      members: 0,
+      ...overrides,
+    });
+
+    it('joins and leaves a group from the menu, before the caller has any view', () => {
+      const viewGroups = state([entry({}), entry({ name: 'db', joined: true })]);
+      render(
+        <ViewMenu preferences={defaultPreferences()} onChange={vi.fn()} viewGroups={viewGroups} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'View' }));
+
+      fireEvent.click(screen.getByRole('checkbox', { name: /platform/ }));
+      fireEvent.click(screen.getByRole('checkbox', { name: /db/ }));
+
+      expect(viewGroups.join).toHaveBeenCalledWith('platform');
+      expect(viewGroups.leave).toHaveBeenCalledWith('db');
+    });
+
+    it('shows a pinned group as on and locked, with the way past it', () => {
+      const viewGroups = state([entry({ pinned: true })]);
+      render(
+        <ViewMenu preferences={defaultPreferences()} onChange={vi.fn()} viewGroups={viewGroups} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'View' }));
+
+      const box = screen.getByRole('checkbox', { name: /platform/ });
+      expect(box).toBeChecked();
+      expect(box).toBeDisabled();
+      expect(screen.getByText(/pinned by an administrator/i)).toBeInTheDocument();
+      expect(screen.getByText(/turn off .*limit the list/i)).toBeInTheDocument();
+    });
+
+    it('is absent when there are no groups to join', () => {
+      render(
+        <ViewMenu preferences={defaultPreferences()} onChange={vi.fn()} viewGroups={state([])} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'View' }));
+      expect(screen.queryByText('My view groups')).not.toBeInTheDocument();
+    });
+
+    it('reports why a join failed', () => {
+      render(
+        <ViewMenu
+          preferences={defaultPreferences()}
+          onChange={vi.fn()}
+          viewGroups={state([entry({})], { error: 'Unable to reach the Promview API' })}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'View' }));
+      expect(screen.getByRole('alert')).toHaveTextContent('Unable to reach the Promview API');
     });
   });
 });

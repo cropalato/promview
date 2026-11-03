@@ -537,14 +537,14 @@ describe('App', () => {
 
     // The session check ran before the first alert page, which then opened the stream.
     const requested = fetchMock().mock.calls.map(([url]) => String(url));
-    expect(requested.filter((url) => url !== '/api/v1/preferences')).toEqual([
-      '/api/v1/config',
-      '/api/v1/me',
-      '/api/v1/alerts?limit=100&status=firing',
-    ]);
+    expect(
+      requested.filter((url) => url !== '/api/v1/preferences' && url !== '/api/v1/view-groups'),
+    ).toEqual(['/api/v1/config', '/api/v1/me', '/api/v1/alerts?limit=100&status=firing']);
     // Layout preferences key on the user, so they are fetched once the console
     // unlocks — and only in deployments that have a user to key against.
     expect(requested).toContain('/api/v1/preferences');
+    // Likewise the view groups a user can join, which belong to the same user.
+    expect(requested).toContain('/api/v1/view-groups');
     expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7');
   });
 
@@ -2161,5 +2161,61 @@ describe('App browser notifications', () => {
     });
     expect(FakeNotification.instances).toHaveLength(1);
     expect(FakeNotification.latest().tag).toBe('promview-alert-3');
+  });
+});
+
+describe('App view groups', () => {
+  it('refetches the list and reopens the stream from the new snapshot after joining a group', async () => {
+    let joined = false;
+    const alertRequests: string[] = [];
+    fetchMock().mockImplementation((url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target === '/api/v1/me') {
+        return Promise.resolve(jsonResponse(OIDC_PRINCIPAL));
+      }
+      if (target === '/api/v1/preferences') {
+        return Promise.resolve(new Response('{}', { status: 404 }));
+      }
+      if (target === '/api/v1/view-groups') {
+        return Promise.resolve(
+          jsonResponse({
+            groups: [{ name: 'platform', description: 'Platform team', joined, pinned: false }],
+          }),
+        );
+      }
+      if (target === '/api/v1/view-groups/platform/membership') {
+        expect(init?.method).toBe('PUT');
+        joined = true;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (target.startsWith('/api/v1/alerts')) {
+        alertRequests.push(target);
+        return Promise.resolve(
+          jsonResponse(
+            alertsPage({
+              alerts: [apiAlert()],
+              severityCounts: { critical: 1 },
+              total: 1,
+              streamCursor: joined ? 15 : 7,
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(jsonResponse(OIDC_CONFIG));
+    });
+    render(<App />);
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7');
+
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /platform/ }));
+
+    // The server derives the view from membership, which no request carries,
+    // so the list is read again and the stream resumes from the new snapshot.
+    await waitFor(() => expect(alertRequests).toHaveLength(2));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=15');
+    expect(screen.getByRole('checkbox', { name: /platform/ })).toBeChecked();
   });
 });

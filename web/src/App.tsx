@@ -28,6 +28,7 @@ import {
 } from './alerts/silence';
 import type { SilencePreview, SilenceResponse } from './alerts/silence';
 import { ViewMenu } from './components/ViewMenu';
+import { useViewGroups } from './hooks/useViewGroups';
 import { ViewBanner } from './components/ViewBanner';
 import { resolveViewRequest, toggledOverride, viewKeyOf } from './alerts/view';
 import type { ViewMode } from './alerts/view';
@@ -284,9 +285,18 @@ export default function App({ navigate }: AppProps = {}) {
   if (!savingPreferences && settledView !== preferences.view) {
     setSettledView(preferences.view);
   }
+  // Joining or leaving a view group changes what the server derives the view
+  // from, with nothing in the request changing. Counting those changes makes
+  // them a different request, which refetches the list and reopens the stream
+  // from the new snapshot.
+  const [viewRevision, setViewRevision] = useState(0);
   const viewRequest = useMemo(
-    () => resolveViewRequest(settledView, viewOverride),
-    [settledView, viewOverride],
+    () => resolveViewRequest(settledView, viewOverride, viewRevision),
+    [settledView, viewOverride, viewRevision],
+  );
+  const viewGroups = useViewGroups(
+    consoleUnlocked && revocableSession,
+    useCallback(() => setViewRevision((value) => value + 1), []),
   );
 
   const alertsQuery = useMemo(
@@ -767,6 +777,7 @@ export default function App({ navigate }: AppProps = {}) {
                     labelSuggestions={labelSuggestions}
                     resolvedDensity={density}
                     viewActive={alertsState.data.view?.active === true}
+                    viewGroups={viewGroups}
                   />
                 </div>
                 <ViewBanner

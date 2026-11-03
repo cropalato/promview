@@ -4,6 +4,7 @@ import { DENSITIES, NOTIFICATION_FIELDS } from '../preferences/store';
 import { formatFilter, parseFilter } from '../alerts/filter';
 import type { ColumnPreference, Density, Preferences } from '../preferences/store';
 import { GroupingEditor } from './GroupingEditor';
+import type { ViewGroupsState } from '../hooks/useViewGroups';
 
 /**
  * The controls for how the console shows alerts: grouped or flat and by which
@@ -48,6 +49,12 @@ export interface ViewMenuProps {
    * when it is not.
    */
   viewActive?: boolean;
+  /**
+   * The view groups a user can join and leave. Offered whenever any exist, even
+   * to a caller with no view yet: joining one is how a caller who only has
+   * scoped bindings gets a view at all.
+   */
+  viewGroups?: ViewGroupsState;
 }
 
 export function ViewMenu({
@@ -56,6 +63,7 @@ export function ViewMenu({
   labelSuggestions = [],
   resolvedDensity,
   viewActive = false,
+  viewGroups,
 }: ViewMenuProps) {
   const [open, setOpen] = useState(false);
   const [labelDraft, setLabelDraft] = useState('');
@@ -224,6 +232,56 @@ export function ViewMenu({
                 Narrows the list to your own groups. It never shows anything your access does not
                 allow. With the second box off, a critical alert outside your teams is hidden like
                 any other.
+              </p>
+            </fieldset>
+          ) : null}
+
+          {viewGroups !== undefined &&
+          (viewGroups.groups.length > 0 || viewGroups.error !== null) ? (
+            <fieldset className="view-menu-group" disabled={viewGroups.pending}>
+              <legend>My view groups</legend>
+              <ul className="view-menu-columns" aria-label="View groups">
+                {viewGroups.groups.map((group) => (
+                  <li key={group.name} className="view-menu-column">
+                    <label className="view-menu-check">
+                      <input
+                        type="checkbox"
+                        checked={group.joined || group.pinned}
+                        // A pinned group is on whatever the box says: an
+                        // administrator forced it, so there is nothing to
+                        // toggle. Disabled rather than hidden, so the user
+                        // can see it is in effect and why.
+                        disabled={group.pinned}
+                        onChange={(event) =>
+                          event.target.checked
+                            ? viewGroups.join(group.name)
+                            : viewGroups.leave(group.name)
+                        }
+                      />
+                      <span>
+                        {group.name}
+                        {group.description !== '' ? (
+                          <span className="view-menu-note"> · {group.description}</span>
+                        ) : null}
+                        {group.pinned ? (
+                          <span className="view-menu-note"> · pinned by an administrator</span>
+                        ) : null}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              {viewGroups.error !== null ? (
+                <p className="view-menu-error" role="alert">
+                  {viewGroups.error}
+                </p>
+              ) : null}
+              <p className="view-menu-note">
+                The list starts from the groups you belong to. A group never shows anything your
+                access does not allow.
+                {viewGroups.groups.some((group) => group.pinned)
+                  ? ' A pinned group cannot be left; turn off “Limit the list to my teams” to see past it.'
+                  : ''}
               </p>
             </fieldset>
           ) : null}
