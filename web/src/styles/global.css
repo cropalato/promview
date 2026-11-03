@@ -2895,3 +2895,54 @@ kbd {
     scroll-behavior: auto !important;
   }
 }
+
+/* The automatic view: what it is doing to the list, and the way out of it.
+   It stays on screen while a view exists, because a filter that hides alerts
+   without saying so is how an alert is missed. */
+.view-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  font-size: 12.5px;
+}
+
+.view-banner-mode {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.view-banner-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.view-banner-action {
+  flex: none;
+}
+
+/* Shown only through the critical bypass: outside the teams the operator
+   normally looks at, in the accent rather than a severity colour, since it
+   describes where the alert sits and not how bad it is. */
+.state-outside-view {
+  margin-left: 6px;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+}
+
+/* In the show-everything mode, rows outside the view recede a little so the
+   ones inside it still read as the working set. Weaker than a silenced row:
+   this is where an alert sits, not a decision somebody made about it. */
+.alert-table tbody tr.row-outside-view {
+  opacity: 0.82;
+}
+
+.alert-table tbody tr.row-outside-view:hover {
+  opacity: 1;
+}

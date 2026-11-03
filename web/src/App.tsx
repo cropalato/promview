@@ -28,6 +28,9 @@ import {
 } from './alerts/silence';
 import type { SilencePreview, SilenceResponse } from './alerts/silence';
 import { ViewMenu } from './components/ViewMenu';
+import { ViewBanner } from './components/ViewBanner';
+import { resolveViewRequest, toggledOverride, viewKeyOf } from './alerts/view';
+import type { ViewMode } from './alerts/view';
 import { resolveColumns } from './alerts/columns';
 import { FilterBar } from './components/FilterBar';
 import { SeverityStrip } from './components/SeverityStrip';
@@ -258,11 +261,32 @@ export default function App({ navigate }: AppProps = {}) {
 
   // Layout preferences follow the operator; they are only fetched once the
   // console is unlocked, since an unauthenticated request would just 401.
-  const { preferences, update: updatePreferences } = usePreferences(
+  const {
+    preferences,
+    update: updatePreferences,
+    saving: savingPreferences,
+  } = usePreferences(
     consoleUnlocked,
     // Server-backed wherever there is a signed-in operator to key a layout
     // against, which is every mode that asks for a sign-in — not OIDC alone.
     requiresSignIn === true,
+  );
+
+  // The moment's choice from the banner. Never saved: the saved switch lives
+  // in the view menu, and flipping it here is for as long as the operator wants
+  // to look at everything, not a change of what their console is.
+  const [viewOverride, setViewOverride] = useState<ViewMode | null>(null);
+  // The server applies the saved view preference itself, so a request made
+  // while the save that changed it is still in flight would read the old one.
+  // The view the query is built from therefore only follows the preference once
+  // nothing is being saved.
+  const [settledView, setSettledView] = useState(preferences.view);
+  if (!savingPreferences && settledView !== preferences.view) {
+    setSettledView(preferences.view);
+  }
+  const viewRequest = useMemo(
+    () => resolveViewRequest(settledView, viewOverride),
+    [settledView, viewOverride],
   );
 
   const alertsQuery = useMemo(
@@ -275,8 +299,17 @@ export default function App({ navigate }: AppProps = {}) {
       // with what is on screen, and only the server can make them.
       suppressed: suppressedFilter(preferences.silencedVisibility),
       closed: closedFilter(preferences.closedVisibility),
+      // Read through the view like everything else on screen, so the counts,
+      // the groups and the list cannot disagree about what is in it.
+      view: viewRequest,
     }),
-    [appliedMatchers, sort, preferences.silencedVisibility, preferences.closedVisibility],
+    [
+      appliedMatchers,
+      sort,
+      preferences.silencedVisibility,
+      preferences.closedVisibility,
+      viewRequest,
+    ],
   );
 
   const {
@@ -406,9 +439,18 @@ export default function App({ navigate }: AppProps = {}) {
       refreshGroupChildren();
     }
   }, [retryAlerts, grouped, refreshGroups, refreshGroupChildren]);
+  // A stream resumes from a snapshot's cursor, and must be opened under the
+  // view that snapshot was read through. While a new snapshot is on its way after
+  // a change of view, the cursor held is for the old one: withholding it closes
+  // the stream, and it reopens against the new snapshot's cursor.
+  const snapshotMatchesView =
+    alertsState.status === 'ready' && alertsState.data.viewKey === viewKeyOf(viewRequest);
   const streamStatus = useAlertStream({
     cursor:
-      consoleUnlocked && alertsState.status === 'ready' ? alertsState.data.streamCursor : null,
+      consoleUnlocked && alertsState.status === 'ready' && snapshotMatchesView
+        ? alertsState.data.streamCursor
+        : null,
+    view: viewRequest.override ?? undefined,
     onAlertEvent: handleAlertEvent,
     onStreamGap: handleStreamGap,
   });
@@ -724,8 +766,21 @@ export default function App({ navigate }: AppProps = {}) {
                     onChange={updatePreferences}
                     labelSuggestions={labelSuggestions}
                     resolvedDensity={density}
+                    viewActive={alertsState.data.view?.active === true}
                   />
                 </div>
+                <ViewBanner
+                  summary={alertsState.data.view}
+                  mode={alertsState.data.view?.showingAll === true ? 'all' : 'mine'}
+                  onToggle={() =>
+                    setViewOverride(
+                      toggledOverride(
+                        preferences.view,
+                        alertsState.data.view?.showingAll === true ? 'all' : 'mine',
+                      ),
+                    )
+                  }
+                />
                 <SeverityStrip
                   counts={alertsState.data.severityCounts}
                   total={alertsState.data.total}

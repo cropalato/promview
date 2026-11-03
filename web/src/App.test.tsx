@@ -1867,6 +1867,90 @@ describe('App', () => {
   });
 });
 
+describe('App automatic view', () => {
+  const VIEW = { active: true, showingAll: false, hidden: 4, criticalBypass: true };
+
+  /** Serves a view summary that follows the `view` parameter the way the server does. */
+  function mockViewApi(): string[] {
+    const requested: string[] = [];
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.startsWith('/api/v1/alerts')) {
+        requested.push(target);
+        const showingAll = new URL(target, 'http://x').searchParams.get('view') === 'all';
+        return Promise.resolve(
+          jsonResponse(
+            alertsPage({
+              alerts: [apiAlert({ viewMatch: showingAll ? 'outside' : 'view' })],
+              severityCounts: { critical: 1 },
+              total: 1,
+              streamCursor: showingAll ? 12 : 7,
+              view: { ...VIEW, showingAll },
+            }),
+          ),
+        );
+      }
+      if (target.startsWith('/api/v1/me')) {
+        return Promise.resolve(jsonResponse(ANONYMOUS_PRINCIPAL));
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    return requested;
+  }
+
+  it('says what the view hides, and leaves the saved preference alone when flipped', async () => {
+    const requested = mockViewApi();
+    render(<App />);
+
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    expect(screen.getByText('4 hidden by your view')).toBeInTheDocument();
+    // An ordinary request carries no view parameter: the server applies the saved one.
+    expect(requested[0]).not.toContain('view=');
+    const before = window.localStorage.getItem(PREFERENCES_KEY);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show everything in my scope' }));
+
+    expect(await screen.findByText('Your view would hide 4')).toBeInTheDocument();
+    expect(requested.at(-1)).toContain('view=all');
+    // The moment's choice is not saved anywhere.
+    expect(window.localStorage.getItem(PREFERENCES_KEY)).toBe(before);
+    expect(screen.getByRole('button', { name: 'Back to my view' })).toBeInTheDocument();
+  });
+
+  it('reopens the stream under the new view, from the new snapshot’s cursor', async () => {
+    mockViewApi();
+    render(<App />);
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=7');
+    const first = FakeEventSource.latest();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show everything in my scope' }));
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+    expect(first.closed).toBe(true);
+    // Never opened with the new view and the old snapshot's cursor.
+    expect(FakeEventSource.instances.map((source) => source.url)).toEqual([
+      '/api/v1/stream?cursor=7',
+      '/api/v1/stream?cursor=12&view=all',
+    ]);
+  });
+
+  it('shows no indicator where the caller has no view', async () => {
+    fetchMock().mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.startsWith('/api/v1/alerts')) {
+        return Promise.resolve(jsonResponse(alertsPage({ alerts: [apiAlert()], total: 1 })));
+      }
+      return Promise.resolve(jsonResponse(OPEN_CONFIG));
+    });
+    render(<App />);
+    expect(await screen.findByText('HighErrorRate')).toBeInTheDocument();
+    expect(screen.queryByText(/hidden by your view/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /show everything in my scope/i })).toBeNull();
+  });
+});
+
 describe('App browser notifications', () => {
   it('shows an inert opt-in control when the browser has no Notification API', async () => {
     mockApi();

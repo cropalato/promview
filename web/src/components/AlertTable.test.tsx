@@ -377,3 +377,33 @@ describe('closed state', () => {
     expect(screen.queryByText('closed')).toBeNull();
   });
 });
+
+describe('AlertTable and the automatic view', () => {
+  function renderWith(viewMatch: AlertSummary['viewMatch']) {
+    const { container } = render(
+      <AlertTable alerts={[{ ...firingAlert, viewMatch }]} pagination={pagination()} />,
+    );
+    return container.querySelector('tbody tr');
+  }
+
+  it('marks an alert shown only because critical alerts ignore the view', () => {
+    renderWith('critical');
+    expect(screen.getByText('outside view')).toHaveAttribute(
+      'title',
+      expect.stringContaining('critical alerts ignore it'),
+    );
+  });
+
+  it('marks nothing for an alert in the view', () => {
+    renderWith('view');
+    expect(screen.queryByText('outside view')).not.toBeInTheDocument();
+  });
+
+  it('dims, and says so to a screen reader, an alert outside the view that is shown on request', () => {
+    const row = renderWith('outside');
+    expect(row).toHaveClass('row-outside-view');
+    expect(screen.getByText('Outside your view')).toBeInTheDocument();
+    // Dimmed rows would otherwise each carry the chip; the banner says what the mode is.
+    expect(screen.queryByText('outside view')).not.toBeInTheDocument();
+  });
+});

@@ -313,3 +313,42 @@ describe('closed filter', () => {
     );
   });
 });
+
+describe('the automatic view', () => {
+  const request = { mode: 'mine' as const, criticalBypass: true, override: null };
+
+  it('sends nothing unless the operator has overridden the saved view', () => {
+    // Every ordinary request stays exactly as it was: the server applies the
+    // saved preference itself, and the console must not impose its own guess.
+    expect(buildAlertsUrl({ limit: 10, view: request })).toBe(`${ALERTS_URL}?limit=10`);
+    expect(buildAlertsUrl({ limit: 10, view: { ...request, mode: 'all', override: 'all' } })).toBe(
+      `${ALERTS_URL}?limit=10&view=all`,
+    );
+  });
+
+  it('reads the view summary and each alert’s viewMatch', () => {
+    const page = parseAlertsResponse({
+      alerts: [apiAlert({ viewMatch: 'critical' }), apiAlert({ id: '43', viewMatch: 'bogus' })],
+      nextCursor: '',
+      severityCounts: {},
+      total: 2,
+      streamCursor: 5,
+      view: { active: true, showingAll: false, hidden: 3, criticalBypass: true },
+    });
+    expect(page.view).toEqual({ active: true, showingAll: false, hidden: 3, criticalBypass: true });
+    expect(page.alerts[0]?.viewMatch).toBe('critical');
+    expect(page.alerts[1]?.viewMatch).toBeUndefined();
+  });
+
+  it('has no view where the server reports none', () => {
+    const page = parseAlertsResponse({
+      alerts: [apiAlert()],
+      nextCursor: '',
+      severityCounts: {},
+      total: 1,
+      streamCursor: 5,
+    });
+    expect(page.view).toBeUndefined();
+    expect(page.alerts[0]?.viewMatch).toBeUndefined();
+  });
+});

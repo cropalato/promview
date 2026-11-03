@@ -98,6 +98,39 @@ describe('buildAlertStreamUrl', () => {
     expect(buildAlertStreamUrl(7)).toBe('/api/v1/stream?cursor=7');
     expect(buildAlertStreamUrl(0)).toBe('/api/v1/stream?cursor=0');
   });
+
+  it('carries the view only when one was chosen', () => {
+    expect(buildAlertStreamUrl(7, 'all')).toBe('/api/v1/stream?cursor=7&view=all');
+    expect(buildAlertStreamUrl(7, 'mine')).toBe('/api/v1/stream?cursor=7&view=mine');
+  });
+});
+
+describe('the stream and the automatic view', () => {
+  it('opens under the view it was created with and keeps it across reconnects', () => {
+    vi.useFakeTimers();
+    createAlertStreamClient({
+      cursor: 4,
+      view: 'all',
+      factory: (url) => new FakeEventSource(url),
+      onEvent: () => {},
+      onStatus: () => {},
+    });
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=4&view=all');
+    FakeEventSource.latest().emitError();
+    vi.advanceTimersByTime(STREAM_RETRY_DELAY_MS);
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=4&view=all');
+    vi.useRealTimers();
+  });
+
+  it('reads why an event is shown, and ignores anything it does not know', () => {
+    const known = parseAlertStreamEvent(
+      JSON.stringify(streamEventPayload({ viewMatch: 'critical' })),
+    );
+    expect(known).toMatchObject({ viewMatch: 'critical' });
+    const unknown = parseAlertStreamEvent(JSON.stringify(streamEventPayload({ viewMatch: 'x' })));
+    expect(unknown).not.toBeNull();
+    expect((unknown as AlertStreamNotificationEvent).viewMatch).toBeUndefined();
+  });
 });
 
 describe('parseAlertStreamEvent', () => {

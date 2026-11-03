@@ -87,6 +87,53 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('useAlertStream and the automatic view', () => {
+  it('reconnects under the new view, from the cursor of a snapshot taken under it', () => {
+    // A view is part of what a cursor means. Changing it closes the stream and
+    // opens another from the new snapshot; it never repoints the old one.
+    const { rerender } = renderHook(
+      ({ cursor, view }: { cursor: number | null; view: 'all' | undefined }) =>
+        useAlertStream({
+          cursor,
+          view,
+          onAlertEvent: () => {},
+          factory: (url) => new FakeEventSource(url),
+          retryDelayMs: 1000,
+        }),
+      { initialProps: { cursor: 5 as number | null, view: undefined as 'all' | undefined } },
+    );
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=5');
+    const first = FakeEventSource.latest();
+
+    // The new snapshot is still on its way: the cursor is withdrawn.
+    rerender({ cursor: null, view: 'all' });
+    expect(first.closed).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    rerender({ cursor: 9, view: 'all' });
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=9&view=all');
+  });
+
+  it('does not reuse a live connection for a different view even if the cursor stays', () => {
+    const { rerender } = renderHook(
+      ({ view }: { view: 'all' | undefined }) =>
+        useAlertStream({
+          cursor: 5,
+          view,
+          onAlertEvent: () => {},
+          factory: (url) => new FakeEventSource(url),
+          retryDelayMs: 1000,
+        }),
+      { initialProps: { view: undefined as 'all' | undefined } },
+    );
+    const first = FakeEventSource.latest();
+    rerender({ view: 'all' });
+    expect(first.closed).toBe(true);
+    expect(FakeEventSource.latest().url).toBe('/api/v1/stream?cursor=5&view=all');
+  });
+});
+
 describe('useAlertStream', () => {
   it('waits for the first snapshot cursor, then connects with it in the URL', () => {
     const { result, rerender } = renderStream(null, () => {});

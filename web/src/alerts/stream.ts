@@ -8,6 +8,8 @@
  * Tauri transport can swap in without touching the hooks or components.
  */
 import { apiUrl } from '../config/apiBase';
+import { isViewMatch } from './view';
+import type { ViewMatch, ViewMode } from './view';
 export const ALERT_STREAM_URL = '/api/v1/stream';
 
 /** Delay before reconnecting after the stream drops. */
@@ -58,6 +60,8 @@ export interface AlertStreamNotificationEvent extends AlertStreamEventEnvelope {
   summary: string;
   source: string;
   team: string;
+  /** Why the event's alert is shown, when the caller has a view. */
+  viewMatch?: ViewMatch;
 }
 
 /**
@@ -157,8 +161,14 @@ export function setEventSourceFactory(next?: EventSourceFactory): void {
   currentFactory = next ?? browserEventSourceFactory;
 }
 
-export function buildAlertStreamUrl(cursor: number): string {
-  return apiUrl(`${ALERT_STREAM_URL}?cursor=${String(cursor)}`);
+export function buildAlertStreamUrl(cursor: number, view?: ViewMode): string {
+  const params = new URLSearchParams({ cursor: String(cursor) });
+  if (view !== undefined) {
+    // The stream applies the same view the snapshot did, so a resumed stream
+    // and the snapshot it resumes from agree about what is in the list.
+    params.set('view', view);
+  }
+  return apiUrl(`${ALERT_STREAM_URL}?${params.toString()}`);
 }
 
 /**
@@ -238,6 +248,7 @@ export function parseAlertStreamEvent(
     summary,
     source,
     team,
+    viewMatch: isViewMatch(record.viewMatch) ? record.viewMatch : undefined,
   };
 }
 
@@ -255,6 +266,12 @@ export interface AlertStreamClientOptions {
   onGap?: (event: StreamGapEvent) => void;
   factory?: EventSourceFactory;
   retryDelayMs?: number;
+  /**
+   * The view the snapshot was read through. Fixed for the life of the client:
+   * a change of view is a new snapshot and a new connection, never a filter
+   * swapped under a stream that has already delivered events.
+   */
+  view?: ViewMode;
 }
 
 export interface AlertStreamClient {
@@ -339,7 +356,7 @@ export function createAlertStreamClient(options: AlertStreamClientOptions): Aler
     emitStatus(attempts === 0 ? 'connecting' : 'reconnecting');
     attempts += 1;
 
-    const next = factory(buildAlertStreamUrl(cursor));
+    const next = factory(buildAlertStreamUrl(cursor, options.view));
     source = next;
     next.onopen = () => {
       if (!closed && source === next) {

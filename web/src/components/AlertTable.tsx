@@ -271,6 +271,7 @@ function AlertRow({
     selectable ? 'row-selectable' : '',
     selected ? 'row-selected' : '',
     alert.suppressed ? 'row-suppressed' : '',
+    alert.viewMatch === 'outside' ? 'row-outside-view' : '',
   ]
     .filter((part) => part !== '')
     .join(' ');
@@ -353,6 +354,22 @@ function AlertCell({ alert, column }: { alert: AlertSummary; column: ColumnDefin
           >
             {alert.silencedBy.length === 0 ? 'inhibited' : 'silenced'}
           </span>
+        ) : null}
+        {/* Shown only through the critical bypass. The alert is the operator's to
+            see, but not in the teams they normally look at, and the list should
+            not pretend otherwise. Rows outside the view in the show-everything
+            mode are dimmed instead: every one of them would otherwise carry this
+            chip, and the banner already says what that mode is. */}
+        {alert.viewMatch === 'critical' ? (
+          <span
+            className="state-chip state-outside-view"
+            title="Outside your view. Shown because critical alerts ignore it."
+          >
+            outside view
+          </span>
+        ) : null}
+        {alert.viewMatch === 'outside' ? (
+          <span className="visually-hidden">Outside your view</span>
         ) : null}
         {/* Closed sits beside the state for the same reason silenced does: it
             is an operator's judgement, not the source's. An alert reached by

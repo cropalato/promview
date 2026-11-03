@@ -174,4 +174,34 @@ describe('ViewMenu', () => {
 
     expect(onChange.mock.calls[0]?.[0].columns).toEqual([{ id: 'alert' }, { id: 'team' }]);
   });
+
+  describe('the automatic view', () => {
+    it('offers its controls only when the caller has a view', () => {
+      const { rerender } = render(
+        <ViewMenu preferences={defaultPreferences()} onChange={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'View' }));
+      expect(screen.queryByText('Automatic view')).not.toBeInTheDocument();
+
+      rerender(<ViewMenu preferences={defaultPreferences()} onChange={vi.fn()} viewActive />);
+      expect(screen.getByText('Automatic view')).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /limit the list to my teams/i })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /critical alerts ignore this/i })).toBeChecked();
+    });
+
+    it('saves each switch on its own, leaving the other alone', () => {
+      const onChange = vi.fn();
+      render(<ViewMenu preferences={defaultPreferences()} onChange={onChange} viewActive />);
+      fireEvent.click(screen.getByRole('button', { name: 'View' }));
+
+      fireEvent.click(screen.getByRole('checkbox', { name: /limit the list to my teams/i }));
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ view: { enabled: false, criticalBypass: true } }),
+      );
+      fireEvent.click(screen.getByRole('checkbox', { name: /critical alerts ignore this/i }));
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ view: { enabled: true, criticalBypass: false } }),
+      );
+    });
+  });
 });

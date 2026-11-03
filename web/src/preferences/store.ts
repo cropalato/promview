@@ -114,6 +114,19 @@ export function suppressedFilter(value: SilencedVisibility): boolean | undefined
   }
 }
 
+/**
+ * The automatic view: the filter a caller's own scoped groups put on the
+ * console. Both default to on. Absent from a stored payload means the defaults,
+ * never off: a layout saved before views existed, or by a console that predates
+ * them, must not switch the view off for someone who never chose.
+ */
+export interface ViewPreference {
+  /** Off shows everything in scope; the console still says what the view would hide. */
+  enabled: boolean;
+  /** Critical alerts ignore the view. A filter that can hide one is an explicit choice. */
+  criticalBypass: boolean;
+}
+
 export interface Preferences {
   columns: ColumnPreference[];
   density: Density;
@@ -122,6 +135,7 @@ export interface Preferences {
   silencedVisibility: SilencedVisibility;
   closedVisibility: ClosedVisibility;
   notifications: NotificationPreference;
+  view: ViewPreference;
 }
 
 export function defaultPreferences(): Preferences {
@@ -140,6 +154,7 @@ export function defaultPreferences(): Preferences {
     // Off, carrying the selector the console hardcoded before this was
     // configurable, so opting in does what it always did.
     notifications: { enabled: false, matchers: [{ name: 'severity', op: '=', value: 'critical' }] },
+    view: { enabled: true, criticalBypass: true },
   };
 }
 
@@ -224,6 +239,20 @@ export function parsePreferences(value: unknown): Preferences {
       ? raw.closedVisibility
       : defaults.closedVisibility,
     notifications: parseNotifications(raw.notifications, defaults.notifications),
+    view: parseView(raw.view, defaults.view),
+  };
+}
+
+/** Falls back per field, to on: absent must never read as off. */
+function parseView(value: unknown, fallback: ViewPreference): ViewPreference {
+  if (typeof value !== 'object' || value === null) {
+    return fallback;
+  }
+  const raw = value as Record<string, unknown>;
+  return {
+    enabled: typeof raw.enabled === 'boolean' ? raw.enabled : fallback.enabled,
+    criticalBypass:
+      typeof raw.criticalBypass === 'boolean' ? raw.criticalBypass : fallback.criticalBypass,
   };
 }
 

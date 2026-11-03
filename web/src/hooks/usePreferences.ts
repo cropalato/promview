@@ -17,6 +17,12 @@ export function usePreferences(
   preferences: Preferences;
   origin: PreferencesOrigin;
   update: (next: Preferences) => void;
+  /**
+   * True while a save is in flight. Anything the server derives from the saved
+   * copy has to wait for this to clear, or it reads the copy from before the
+   * change that was just made.
+   */
+  saving: boolean;
 } {
   // Read synchronously so the table draws in the operator's own layout on the
   // first paint. It is gated on nothing: the console may still be locked, and
@@ -24,6 +30,7 @@ export function usePreferences(
   const [preferences, setPreferences] = useState<Preferences>(() => readLocalPreferences());
   const [origin, setOrigin] = useState<PreferencesOrigin>('local');
   const originRef = useRef<PreferencesOrigin>('local');
+  const [saving, setSaving] = useState(0);
 
   useEffect(() => {
     // An open-mode deployment has no user to key a layout against, so the
@@ -50,11 +57,14 @@ export function usePreferences(
     // Applied immediately: a layout change that waits for a round trip feels
     // broken, and the save cannot fail in a way the operator needs to act on.
     setPreferences(next);
-    void savePreferences(next, originRef.current).then((saved) => {
-      originRef.current = saved;
-      setOrigin(saved);
-    });
+    setSaving((count) => count + 1);
+    void savePreferences(next, originRef.current)
+      .then((saved) => {
+        originRef.current = saved;
+        setOrigin(saved);
+      })
+      .finally(() => setSaving((count) => count - 1));
   }, []);
 
-  return { preferences, origin, update };
+  return { preferences, origin, update, saving: saving > 0 };
 }

@@ -1,6 +1,8 @@
 import { normalizeSeverity, severityLabelFor } from './severity';
 import type { Severity } from './severity';
 import type { AlertState, AlertSummary } from './types';
+import { isViewMatch, parseViewSummary } from './view';
+import type { ViewRequest, ViewSummary } from './view';
 import { apiUrl } from '../config/apiBase';
 import { apiFetch } from '../config/transport';
 
@@ -110,6 +112,11 @@ export interface AlertsQuery {
    * members with the ordinary query plus a matcher on the group's key.
    */
   groupBy?: readonly string[];
+  /**
+   * Which view to read the list through. Absent leaves it to the server, which
+   * uses the saved preference, so a client that says nothing keeps working.
+   */
+  view?: ViewRequest;
 }
 
 /** One validated page from the alerts API, mapped into UI rows. */
@@ -126,6 +133,8 @@ export interface AlertsPage {
    * snapshot carries the position the stream should resume from.
    */
   streamCursor: number;
+  /** What the view did to this result; absent where the caller has none. */
+  view?: ViewSummary;
 }
 
 /** One collapsed row: the alerts sharing a key combination, summarised. */
@@ -157,6 +166,7 @@ export interface AlertGroupsPage {
   /** Matching groups, which is what the page count refers to. */
   totalGroups: number;
   streamCursor: number;
+  view?: ViewSummary;
 }
 
 type FetchLike = (url: string) => Promise<Response>;
@@ -202,6 +212,11 @@ export function buildAlertsUrl(query: AlertsQuery = {}): string {
   }
   if (query.groupBy !== undefined && query.groupBy.length > 0) {
     params.set('groupBy', query.groupBy.join(','));
+  }
+  if (query.view?.override !== undefined && query.view.override !== null) {
+    // Only an explicit override is sent. Otherwise the server applies the saved
+    // preference, the critical bypass included, which it reads itself.
+    params.set('view', query.view.override);
   }
   const suffix = params.toString();
   return suffix === '' ? ALERTS_URL : `${ALERTS_URL}?${suffix}`;
@@ -279,6 +294,7 @@ export function parseAlertGroupsResponse(body: unknown): AlertGroupsPage {
     total: requiredNumber(record.total, 'total'),
     totalGroups: requiredNumber(record.totalGroups, 'totalGroups'),
     streamCursor: requiredNumber(record.streamCursor, 'streamCursor'),
+    view: parseViewSummary(record.view),
   };
 }
 
@@ -313,6 +329,7 @@ export function parseAlertsResponse(body: unknown): AlertsPage {
     severityCounts: numberRecord(record.severityCounts, 'severityCounts'),
     total: requiredNumber(record.total, 'total'),
     streamCursor: requiredNumber(record.streamCursor, 'streamCursor'),
+    view: parseViewSummary(record.view),
   };
 }
 
@@ -346,6 +363,7 @@ function parseAlert(value: unknown, index: number): AlertSummary {
       ? raw.silencedBy.filter((entry): entry is string => typeof entry === 'string')
       : [],
     lastSeen: typeof raw.lastSeen === 'string' ? raw.lastSeen : '',
+    viewMatch: isViewMatch(raw.viewMatch) ? raw.viewMatch : undefined,
   };
 }
 

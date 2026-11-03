@@ -42,6 +42,12 @@ export interface ViewMenuProps {
    * the operator guessing which row height they are about to get.
    */
   resolvedDensity?: string;
+  /**
+   * The caller has an automatic view. The controls for it are shown only then:
+   * offering a switch that does nothing would suggest the console is filtering
+   * when it is not.
+   */
+  viewActive?: boolean;
 }
 
 export function ViewMenu({
@@ -49,6 +55,7 @@ export function ViewMenu({
   onChange,
   labelSuggestions = [],
   resolvedDensity,
+  viewActive = false,
 }: ViewMenuProps) {
   const [open, setOpen] = useState(false);
   const [labelDraft, setLabelDraft] = useState('');
@@ -184,6 +191,43 @@ export function ViewMenu({
       </button>
       {open ? (
         <div className="view-menu-panel" id={menuId}>
+          {viewActive ? (
+            <fieldset className="view-menu-group">
+              <legend>Automatic view</legend>
+              <label className="view-menu-check">
+                <input
+                  type="checkbox"
+                  checked={preferences.view.enabled}
+                  onChange={(event) =>
+                    onChange({
+                      ...preferences,
+                      view: { ...preferences.view, enabled: event.target.checked },
+                    })
+                  }
+                />
+                <span>Limit the list to my teams</span>
+              </label>
+              <label className="view-menu-check">
+                <input
+                  type="checkbox"
+                  checked={preferences.view.criticalBypass}
+                  onChange={(event) =>
+                    onChange({
+                      ...preferences,
+                      view: { ...preferences.view, criticalBypass: event.target.checked },
+                    })
+                  }
+                />
+                <span>Critical alerts ignore this</span>
+              </label>
+              <p className="view-menu-note">
+                Narrows the list to your own groups. It never shows anything your access does not
+                allow. With the second box off, a critical alert outside your teams is hidden like
+                any other.
+              </p>
+            </fieldset>
+          ) : null}
+
           <fieldset className="view-menu-group">
             <legend>Grouping</legend>
             <label className="view-menu-check">

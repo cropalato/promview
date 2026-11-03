@@ -187,3 +187,31 @@ describe('closed visibility', () => {
     expect(parsePreferences({}).closedVisibility).toBe('open');
   });
 });
+
+describe('the view preference', () => {
+  it('defaults to on', () => {
+    expect(defaultPreferences().view).toEqual({ enabled: true, criticalBypass: true });
+  });
+
+  it('is on when a stored layout predates it', () => {
+    // A layout saved before views existed has no such key. Absent must never
+    // read as off: that would switch the view off for someone who never chose.
+    expect(parsePreferences({ density: 'compact' }).view).toEqual({
+      enabled: true,
+      criticalBypass: true,
+    });
+    expect(parsePreferences({ view: {} }).view).toEqual({ enabled: true, criticalBypass: true });
+  });
+
+  it('keeps an explicit choice, field by field', () => {
+    expect(parsePreferences({ view: { enabled: false } }).view).toEqual({
+      enabled: false,
+      criticalBypass: true,
+    });
+    expect(parsePreferences({ view: { enabled: true, criticalBypass: false } }).view).toEqual({
+      enabled: true,
+      criticalBypass: false,
+    });
+    expect(parsePreferences({ view: { enabled: 'no' } }).view.enabled).toBe(true);
+  });
+});

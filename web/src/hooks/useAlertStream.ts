@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createAlertStreamClient } from '../alerts/stream';
+import type { ViewMode } from '../alerts/view';
 import type {
   AlertStreamClient,
   AlertStreamEvent,
@@ -26,6 +27,13 @@ export interface UseAlertStreamOptions {
    * caller that does not hold a snapshot has nothing to implement.
    */
   onStreamGap?: (gap: StreamGapEvent) => void;
+  /**
+   * The view the cursor's snapshot was read through. A stream opened under one
+   * view cannot be repointed at another: a different view is a different
+   * connection, resumed from a snapshot taken under it. Changing this closes
+   * the stream, and it reopens when a cursor for the new view arrives.
+   */
+  view?: ViewMode;
   /** Transport override for tests and the future Tauri client. */
   factory?: EventSourceFactory;
   retryDelayMs?: number;
@@ -41,11 +49,13 @@ export function useAlertStream({
   cursor,
   onAlertEvent,
   onStreamGap,
+  view,
   factory,
   retryDelayMs,
 }: UseAlertStreamOptions): AlertStreamStatus {
   const [status, setStatus] = useState<AlertStreamStatus>('connecting');
   const clientRef = useRef<AlertStreamClient | null>(null);
+  const clientViewRef = useRef<ViewMode | undefined>(undefined);
   const handlerRef = useRef(onAlertEvent);
   const gapHandlerRef = useRef(onStreamGap);
 
@@ -72,9 +82,16 @@ export function useAlertStream({
       clientRef.current = null;
       return;
     }
+    if (clientRef.current !== null && clientViewRef.current !== view) {
+      // Opened under another view; its connection cannot be repointed.
+      clientRef.current.close();
+      clientRef.current = null;
+    }
     if (clientRef.current === null) {
+      clientViewRef.current = view;
       clientRef.current = createAlertStreamClient({
         cursor,
+        view,
         factory,
         retryDelayMs,
         onEvent: (event) => {
@@ -88,7 +105,7 @@ export function useAlertStream({
       return;
     }
     clientRef.current.updateCursor(cursor);
-  }, [cursor, factory, retryDelayMs]);
+  }, [cursor, view, factory, retryDelayMs]);
 
   useEffect(
     () => () => {

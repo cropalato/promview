@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ALERTS_PAGE_SIZE, fetchAlerts, isAlertsUnauthorized } from '../alerts/api';
 import type { AlertsPage, AlertsQuery } from '../alerts/api';
 import type { AlertSummary } from '../alerts/types';
+import { viewKeyOf } from '../alerts/view';
+import type { ViewSummary } from '../alerts/view';
 
 /**
  * Server-side query applied to every alerts request: serialized label
@@ -11,7 +13,7 @@ import type { AlertSummary } from '../alerts/types';
  */
 export type AlertsQueryInput = Pick<
   AlertsQuery,
-  'match' | 'sort' | 'order' | 'suppressed' | 'closed'
+  'match' | 'sort' | 'order' | 'suppressed' | 'closed' | 'view'
 >;
 
 /**
@@ -26,6 +28,8 @@ function queryKeyOf(query: AlertsQueryInput): string {
     query.order ?? null,
     query.suppressed ?? null,
     query.closed ?? null,
+    // Part of the key so a change of view refetches; it is a different list.
+    viewKeyOf(query.view),
   ]);
 }
 
@@ -38,6 +42,14 @@ export interface AlertsData {
   nextCursor: string;
   /** Resume position for the live event stream, from the latest page. */
   streamCursor: number;
+  /**
+   * The view this snapshot was read through. A stream must be opened under the
+   * same view as the snapshot it resumes from, so the cursor is only good for a
+   * request whose view key matches.
+   */
+  viewKey: string;
+  /** What the view did to this result; absent where the caller has none. */
+  view?: ViewSummary;
 }
 
 export type AlertsState =
@@ -55,13 +67,15 @@ function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
 
-function toData(page: AlertsPage): AlertsData {
+function toData(page: AlertsPage, viewKey: string): AlertsData {
   return {
     alerts: page.alerts,
     total: page.total,
     severityCounts: page.severityCounts,
     nextCursor: page.nextCursor,
     streamCursor: page.streamCursor,
+    viewKey,
+    view: page.view,
   };
 }
 
@@ -196,13 +210,19 @@ export function useAlerts(
     nextCursorRef.current = '';
     pageInFlightRef.current = false;
 
-    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing', ...queryRef.current.query })
+    const requested = queryRef.current.query;
+    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing', ...requested })
       .then((page) => {
         if (cancelled) {
           return;
         }
         nextCursorRef.current = page.nextCursor;
-        setState({ status: 'ready', data: toData(page), loadingMore: false, moreError: null });
+        setState({
+          status: 'ready',
+          data: toData(page, viewKeyOf(requested.view)),
+          loadingMore: false,
+          moreError: null,
+        });
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -222,11 +242,12 @@ export function useAlerts(
       return;
     }
     let cancelled = false;
+    const requested = queryRef.current.query;
 
     fetchAlerts({
       limit: ALERTS_PAGE_SIZE,
       status: 'firing',
-      ...queryRef.current.query,
+      ...requested,
       cursor: pendingPage.cursor,
     })
       .then((page) => {
@@ -247,6 +268,8 @@ export function useAlerts(
               severityCounts: page.severityCounts,
               nextCursor: page.nextCursor,
               streamCursor: page.streamCursor,
+              viewKey: viewKeyOf(requested.view),
+              view: page.view,
             },
           };
         });
@@ -303,14 +326,17 @@ export function useAlerts(
       return;
     }
     liveInFlightRef.current = true;
-    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing', ...queryRef.current.query })
+    const requested = queryRef.current.query;
+    fetchAlerts({ limit: ALERTS_PAGE_SIZE, status: 'firing', ...requested })
       .then((page) => {
         if (disposedRef.current) {
           return;
         }
         nextCursorRef.current = page.nextCursor;
         setState((current) =>
-          current.status === 'ready' ? { ...current, data: toData(page) } : current,
+          current.status === 'ready'
+            ? { ...current, data: toData(page, viewKeyOf(requested.view)) }
+            : current,
         );
       })
       .catch((error: unknown) => {

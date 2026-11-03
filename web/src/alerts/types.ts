@@ -1,4 +1,5 @@
 import type { Severity } from './severity';
+import type { ViewMatch } from './view';
 
 /**
  * Shape of a row in the alert table, mapped from `GET /api/v1/alerts`
@@ -52,4 +53,11 @@ export interface AlertSummary {
   silencedBy: string[];
   /** When the source last reported the alert, which is what expiry measures. */
   lastSeen: string;
+  /**
+   * Why the alert is in front of the caller, relative to their view. Absent
+   * where the caller has no view. `critical` means it is shown only because
+   * critical alerts ignore the view; `outside` means it is outside the view and
+   * present only because everything in scope was asked for.
+   */
+  viewMatch?: ViewMatch;
 }
