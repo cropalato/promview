@@ -45,6 +45,13 @@ type Store interface {
 	RoleBindings(context.Context) ([]auth.RoleBinding, error)
 	SetRoleBinding(context.Context, auth.RoleBinding) error
 	DeleteRoleBinding(context.Context, string) error
+	ViewGroups(context.Context, auth.Principal) ([]auth.ViewGroupStatus, error)
+	SetViewGroup(context.Context, auth.ViewGroup) error
+	DeleteViewGroup(context.Context, string) error
+	JoinViewGroup(context.Context, int64, string) error
+	LeaveViewGroup(context.Context, int64, string) error
+	PinViewGroup(context.Context, string, auth.ViewGroupPin) error
+	UnpinViewGroup(context.Context, string, auth.ViewGroupPin) error
 	SilenceScopeForAlert(context.Context, auth.Principal, int64) (alerts.SilenceScope, error)
 	SilenceScopeForGroup(context.Context, auth.Principal, []string, map[string]string) (alerts.SilenceScope, error)
 	SilenceRemovalScope(context.Context, auth.Principal, int64, string) (alerts.SilenceTarget, error)
@@ -135,6 +142,13 @@ func NewObserved(
 	mux.Handle("GET /api/v1/access/bindings", api.requireAuthentication(http.HandlerFunc(api.listRoleBindings)))
 	mux.Handle("PUT /api/v1/access/bindings/{name}", api.requireAuthentication(http.HandlerFunc(api.setRoleBinding)))
 	mux.Handle("DELETE /api/v1/access/bindings/{name}", api.requireAuthentication(http.HandlerFunc(api.deleteRoleBinding)))
+	mux.Handle("GET /api/v1/view-groups", api.requireAuthentication(http.HandlerFunc(api.listViewGroups)))
+	mux.Handle("PUT /api/v1/view-groups/{name}", api.requireAuthentication(http.HandlerFunc(api.setViewGroup)))
+	mux.Handle("DELETE /api/v1/view-groups/{name}", api.requireAuthentication(http.HandlerFunc(api.deleteViewGroup)))
+	mux.Handle("PUT /api/v1/view-groups/{name}/membership", api.requireAuthentication(http.HandlerFunc(api.joinViewGroup)))
+	mux.Handle("DELETE /api/v1/view-groups/{name}/membership", api.requireAuthentication(http.HandlerFunc(api.leaveViewGroup)))
+	mux.Handle("POST /api/v1/view-groups/{name}/pins", api.requireAuthentication(http.HandlerFunc(api.pinViewGroup)))
+	mux.Handle("DELETE /api/v1/view-groups/{name}/pins", api.requireAuthentication(http.HandlerFunc(api.unpinViewGroup)))
 	mux.Handle("GET /api/v1/stream", api.requireAuthentication(http.HandlerFunc(api.streamAlerts)))
 	mux.Handle("GET /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.getPreferences)))
 	mux.Handle("PUT /api/v1/preferences", api.requireAuthentication(http.HandlerFunc(api.putPreferences)))

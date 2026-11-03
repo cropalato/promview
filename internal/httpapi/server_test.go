@@ -45,6 +45,11 @@ type fakeStore struct {
 	bindings       []auth.RoleBinding
 	binding        auth.RoleBinding
 	deletedBinding string
+	viewGroups     []auth.ViewGroupStatus
+	viewGroup      auth.ViewGroup
+	viewGroupPin   auth.ViewGroupPin
+	viewGroupCalls []string
+	viewGroupErr   error
 	bindingErr     error
 	cancel         context.CancelFunc
 	pingErr        error
@@ -155,6 +160,44 @@ func (store *fakeStore) SetRoleBinding(_ context.Context, binding auth.RoleBindi
 func (store *fakeStore) DeleteRoleBinding(_ context.Context, name string) error {
 	store.deletedBinding = name
 	return store.bindingErr
+}
+
+func (store *fakeStore) ViewGroups(_ context.Context, principal auth.Principal) ([]auth.ViewGroupStatus, error) {
+	store.viewGroupCalls = append(store.viewGroupCalls, "list")
+	return store.viewGroups, store.viewGroupErr
+}
+
+func (store *fakeStore) SetViewGroup(_ context.Context, group auth.ViewGroup) error {
+	store.viewGroup = group
+	store.viewGroupCalls = append(store.viewGroupCalls, "set "+group.Name)
+	return store.viewGroupErr
+}
+
+func (store *fakeStore) DeleteViewGroup(_ context.Context, name string) error {
+	store.viewGroupCalls = append(store.viewGroupCalls, "delete "+name)
+	return store.viewGroupErr
+}
+
+func (store *fakeStore) JoinViewGroup(_ context.Context, userID int64, name string) error {
+	store.viewGroupCalls = append(store.viewGroupCalls, fmt.Sprintf("join %s %d", name, userID))
+	return store.viewGroupErr
+}
+
+func (store *fakeStore) LeaveViewGroup(_ context.Context, userID int64, name string) error {
+	store.viewGroupCalls = append(store.viewGroupCalls, fmt.Sprintf("leave %s %d", name, userID))
+	return store.viewGroupErr
+}
+
+func (store *fakeStore) PinViewGroup(_ context.Context, name string, pin auth.ViewGroupPin) error {
+	store.viewGroupPin = pin
+	store.viewGroupCalls = append(store.viewGroupCalls, "pin "+name)
+	return store.viewGroupErr
+}
+
+func (store *fakeStore) UnpinViewGroup(_ context.Context, name string, pin auth.ViewGroupPin) error {
+	store.viewGroupPin = pin
+	store.viewGroupCalls = append(store.viewGroupCalls, "unpin "+name)
+	return store.viewGroupErr
 }
 
 func (store *fakeStore) BulkAcknowledge(_ context.Context, principal auth.Principal, ids []int64, _ bool) ([]alerts.BulkOutcome, error) {
