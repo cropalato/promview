@@ -20,14 +20,29 @@ pub struct AlertCounts {
     pub critical: i64,
     pub warning: i64,
     pub info: i64,
+    /// Firing alerts in the user's scope that their automatic view leaves out of
+    /// the counts above. The tray reads under the saved view preference, like
+    /// the console, so without this a narrowed count would look like a quiet
+    /// deployment.
+    pub hidden: i64,
 }
 
 impl AlertCounts {
     /// What the tray says at a glance. Severity leads because that is the
-    /// question someone glancing at a tray is asking.
+    /// question someone glancing at a tray is asking; what the view hides
+    /// follows, so a filtered count is never mistaken for the whole.
     pub fn tray_label(&self) -> String {
+        let hidden = if self.hidden > 0 {
+            format!(" · {} hidden by your view", self.hidden)
+        } else {
+            String::new()
+        };
         if self.total == 0 {
-            return "No firing alerts".to_string();
+            return if self.hidden > 0 {
+                format!("No firing alerts in your view{hidden}")
+            } else {
+                "No firing alerts".to_string()
+            };
         }
         let mut parts = Vec::new();
         for (count, name) in [
@@ -42,9 +57,9 @@ impl AlertCounts {
         if parts.is_empty() {
             // Firing, but under a severity this build does not name; report the
             // total rather than claiming nothing is wrong.
-            return format!("{} firing", self.total);
+            return format!("{} firing{hidden}", self.total);
         }
-        parts.join(" · ")
+        format!("{}{hidden}", parts.join(" · "))
     }
 }
 
@@ -73,6 +88,32 @@ struct AlertsPage {
     total: i64,
     #[serde(default, rename = "severityCounts")]
     severity_counts: BTreeMap<String, i64>,
+    /// Absent where the caller has no view to report (open mode, or a server
+    /// that predates views).
+    #[serde(default)]
+    view: Option<ViewSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ViewSummary {
+    #[serde(default)]
+    active: bool,
+    #[serde(default, rename = "showingAll")]
+    showing_all: bool,
+    #[serde(default)]
+    hidden: i64,
+}
+
+impl ViewSummary {
+    /// Only what the view actually left out. When it is not narrowing the
+    /// result, `hidden` is what it would hide, which is nothing to report.
+    fn left_out(&self) -> i64 {
+        if self.active && !self.showing_all {
+            self.hidden.max(0)
+        } else {
+            0
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -113,6 +154,7 @@ impl Client {
             critical: *page.severity_counts.get("critical").unwrap_or(&0),
             warning: *page.severity_counts.get("warning").unwrap_or(&0),
             info: *page.severity_counts.get("info").unwrap_or(&0),
+            hidden: page.view.as_ref().map_or(0, ViewSummary::left_out),
         })
     }
 
@@ -349,6 +391,7 @@ mod tests {
             critical: 3,
             warning: 2,
             info: 1,
+            hidden: 0,
         };
         assert_eq!(counts.tray_label(), "3 critical · 2 warning · 1 info");
     }
@@ -360,6 +403,7 @@ mod tests {
             critical: 3,
             warning: 0,
             info: 0,
+            hidden: 0,
         };
         assert_eq!(counts.tray_label(), "3 critical");
     }
@@ -378,7 +422,64 @@ mod tests {
             critical: 0,
             warning: 0,
             info: 0,
+            hidden: 0,
         };
         assert_eq!(counts.tray_label(), "4 firing");
+    }
+
+    #[test]
+    fn tray_label_says_what_the_view_hides() {
+        let counts = AlertCounts {
+            total: 2,
+            critical: 2,
+            warning: 0,
+            info: 0,
+            hidden: 5,
+        };
+        assert_eq!(counts.tray_label(), "2 critical · 5 hidden by your view");
+        // A quiet view is not a quiet deployment, and the tray must not say it is.
+        let quiet = AlertCounts {
+            hidden: 3,
+            ..AlertCounts::default()
+        };
+        assert_eq!(
+            quiet.tray_label(),
+            "No firing alerts in your view · 3 hidden by your view"
+        );
+        let unnamed = AlertCounts {
+            total: 4,
+            hidden: 1,
+            ..AlertCounts::default()
+        };
+        assert_eq!(unnamed.tray_label(), "4 firing · 1 hidden by your view");
+    }
+
+    #[tokio::test]
+    async fn firing_counts_reports_only_what_the_view_actually_left_out() {
+        let credentials = Arc::new(Credentials::new("https://view-counts.example"));
+        for (view, want) in [
+            (
+                r#","view":{"active":true,"showingAll":false,"hidden":4}"#,
+                4,
+            ),
+            // Showing everything: `hidden` is what the view would hide, which
+            // nothing was left out of.
+            (r#","view":{"active":true,"showingAll":true,"hidden":4}"#, 0),
+            (
+                r#","view":{"active":false,"showingAll":false,"hidden":0}"#,
+                0,
+            ),
+            ("", 0),
+        ] {
+            let body = format!(r#"{{"total":2,"severityCounts":{{"critical":2}}{view}}}"#);
+            // The server helper wants a 'static body; leaking one in a test is fine.
+            let (base, _seen) = serve_once(200, Box::leak(body.into_boxed_str()));
+            let counts = client(base, Arc::clone(&credentials))
+                .firing_counts()
+                .await
+                .expect("counts");
+            assert_eq!(counts.hidden, want, "for {view:?}");
+            assert_eq!(counts.critical, 2);
+        }
     }
 }
