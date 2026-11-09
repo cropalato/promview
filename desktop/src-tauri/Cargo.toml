@@ -50,4 +50,4 @@ strip = true
 # interface other local programs read alerts from is the one place it is used
 # directly. D-Bus is Linux's, so nothing else builds it.
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = "5"
+zbus = "6"
